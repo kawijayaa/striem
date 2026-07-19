@@ -1,5 +1,7 @@
 # Striem
 
+![Striem web page](screenshot.png)
+
 Striem is a small, per-team CTF log search application. Challenge operators provision JSON or CSV logs at deployment time, and players use a deliberately limited Kusto Query Language (KQL) subset over one `Events` table.
 
 ## Run
