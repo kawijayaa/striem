@@ -1,0 +1,17 @@
+{
+  "datasets": [
+    {
+      "name": "Northstar Microsoft 365 audit logs",
+      "path": "events.csv",
+      "format": "csv",
+      "source": "microsoft365",
+      "timestampPath": "CreationDate",
+      "timestampFormat": "2/01/2006 3:04:05 PM",
+      "fieldPaths": {
+        "EventType": "Operations",
+        "User": "UserIds",
+        "Message": "RecordType"
+      }
+    }
+  ]
+}
