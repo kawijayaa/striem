@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,8 +45,21 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	if len(manifest.Datasets) == 0 {
 		return nil, fmt.Errorf("deployment manifest contains no datasets")
 	}
-
 	baseDirectory := filepath.Dir(manifestPath)
+	existingDatasets, err := store.ListDatasets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	existingByName := make(map[string]database.Dataset, len(existingDatasets))
+	for _, dataset := range existingDatasets {
+		existingByName[dataset.Name] = dataset
+	}
+	indexesDropped := false
+	defer func() {
+		if indexesDropped {
+			_ = store.CreateEventIndexes(context.Background())
+		}
+	}()
 	seen := make(map[string]struct{}, len(manifest.Datasets))
 	seenTables := make(map[string]struct{}, len(manifest.Datasets))
 	service := ingest.New(store)
@@ -79,6 +93,24 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		if err != nil {
 			return nil, fmt.Errorf("dataset %q: %w", configured.Name, err)
 		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat dataset %q: %w", configured.Name, err)
+		}
+		signature, err := datasetSignature(configured, path, info)
+		if err != nil {
+			return nil, fmt.Errorf("sign dataset %q: %w", configured.Name, err)
+		}
+		if existing, found := existingByName[configured.Name]; found && existing.Signature == signature {
+			loaded = append(loaded, existing)
+			continue
+		}
+		if !indexesDropped {
+			if err := store.DropEventIndexes(ctx); err != nil {
+				return nil, err
+			}
+			indexesDropped = true
+		}
 		input, err := os.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("open dataset %q: %w", configured.Name, err)
@@ -86,6 +118,7 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		result, importErr := service.Import(ctx, input, strings.EqualFold(filepath.Ext(path), ".gz"), ingest.Mapping{
 			Name:            configured.Name,
 			Table:           configured.Table,
+			Signature:       signature,
 			Format:          format,
 			Source:          configured.Source,
 			SourcePath:      configured.SourcePath,
@@ -106,7 +139,28 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	if err := store.DeleteDatasetsExcept(ctx, names); err != nil {
 		return nil, err
 	}
+	if indexesDropped {
+		if err := store.CreateEventIndexes(ctx); err != nil {
+			return nil, err
+		}
+		indexesDropped = false
+	}
 	return loaded, nil
+}
+
+func datasetSignature(configured Dataset, path string, info os.FileInfo) (string, error) {
+	payload := struct {
+		Dataset  Dataset `json:"dataset"`
+		Path     string  `json:"path"`
+		Size     int64   `json:"size"`
+		Modified int64   `json:"modified"`
+	}{configured, path, info.Size(), info.ModTime().UnixNano()}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	signature := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", signature), nil
 }
 
 func datasetFormat(path, configured string) (string, error) {

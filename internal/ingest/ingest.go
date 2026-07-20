@@ -20,7 +20,7 @@ import (
 )
 
 const maxEventSize = 2 << 20
-const maxExpandedSize = 128 << 20
+const maxExpandedSize = 1 << 30
 const eventInsertBatchSize = 250
 
 const (
@@ -31,6 +31,7 @@ const (
 type Mapping struct {
 	Name            string            `json:"name"`
 	Table           string            `json:"table"`
+	Signature       string            `json:"-"`
 	Format          string            `json:"format"`
 	Source          string            `json:"source"`
 	SourcePath      string            `json:"sourcePath"`
@@ -96,8 +97,8 @@ func (s *Service) Import(ctx context.Context, input io.Reader, compressed bool, 
 
 	createdAt := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO datasets(name, table_name, source, timestamp_path, created_at)
-VALUES (?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Source, mapping.TimestampPath, createdAt.Format(time.RFC3339Nano))
+INSERT INTO datasets(name, table_name, input_signature, source, timestamp_path, created_at)
+VALUES (?, ?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Signature, mapping.Source, mapping.TimestampPath, createdAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return Result{}, fmt.Errorf("create dataset: %w", err)
 	}
@@ -137,15 +138,13 @@ VALUES (?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Source, mapping.Ti
 		if !parsed.IsObject() {
 			return fmt.Errorf("record %d must be a JSON object", index)
 		}
-		if containsEmbeddedJSON(parsed, 0) {
+		if collectResultFields(parsed, "RawData", discoveredFields, 0) {
 			normalized, value, err := normalizeRecord(raw)
 			if err != nil {
 				return fmt.Errorf("normalize record %d: %w", index, err)
 			}
 			raw = normalized
 			collectFields(value, "RawData", discoveredFields)
-		} else {
-			collectResultFields(parsed, "RawData", discoveredFields)
 		}
 
 		timestampValue := gjson.GetBytes(raw, mapping.TimestampPath)
@@ -215,6 +214,7 @@ INSERT OR IGNORE INTO dataset_fields(dataset_id, path, type) VALUES (?, ?, ?)`)
 		ID:            datasetID,
 		Name:          mapping.Name,
 		Table:         mapping.Table,
+		Signature:     mapping.Signature,
 		Source:        mapping.Source,
 		TimestampPath: mapping.TimestampPath,
 		EventCount:    int64(count),
@@ -316,15 +316,24 @@ func containsEmbeddedJSON(value gjson.Result, depth int) bool {
 	return found
 }
 
-func collectResultFields(value gjson.Result, path string, fields map[string]string) {
+func collectResultFields(value gjson.Result, path string, fields map[string]string, depth int) bool {
+	if depth >= 32 {
+		return false
+	}
+	embedded := false
 	value.ForEach(func(key, child gjson.Result) bool {
 		childPath := appendFieldPath(path, key.String())
 		fields[childPath] = resultFieldType(child)
 		if child.IsObject() {
-			collectResultFields(child, childPath, fields)
+			embedded = collectResultFields(child, childPath, fields, depth+1) || embedded
+		} else if child.IsArray() {
+			embedded = containsEmbeddedJSON(child, depth+1) || embedded
+		} else if child.Type == gjson.String {
+			embedded = containsEmbeddedJSON(child, depth+1) || embedded
 		}
 		return true
 	})
+	return embedded
 }
 
 func resultFieldType(value gjson.Result) string {

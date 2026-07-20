@@ -45,4 +45,7 @@ VALUES ('legacy', 'legacy', 'ts', '2024-01-01T00:00:00Z');`); err != nil {
 	if _, err := store.DB().Exec("UPDATE datasets SET table_name = 'Legacy' WHERE name = 'legacy'"); err != nil {
 		t.Fatalf("update migrated table name: %v", err)
 	}
+	if _, err := store.DB().Exec("UPDATE datasets SET input_signature = 'signature' WHERE name = 'legacy'"); err != nil {
+		t.Fatalf("update migrated input signature: %v", err)
+	}
 }

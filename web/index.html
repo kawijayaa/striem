@@ -16,11 +16,15 @@
     <section class="panel query-panel">
       <div class="panel-toolbar">
         <div class="toolbar-title"><h2>Query</h2></div>
-        <button id="run-query" class="primary">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 7 5-7 5V3Z"/></svg>
-          Run query
-          <kbd>Ctrl + Enter</kbd>
-        </button>
+        <div class="toolbar-actions">
+          <button id="save-query" class="secondary">Save</button>
+          <button id="share-query" class="secondary">Share</button>
+          <button id="run-query" class="primary">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 7 5-7 5V3Z"/></svg>
+            Run query
+            <kbd>Ctrl + Enter</kbd>
+          </button>
+        </div>
       </div>
       <div id="query" class="editor-shell" aria-label="KQL query editor"></div>
       <div id="query-error" class="error hidden" role="alert"></div>
@@ -29,14 +33,35 @@
 
     <section class="panel results-panel">
       <div class="panel-toolbar results-toolbar">
-        <div class="toolbar-title"><h2>Results</h2></div>
+        <div class="results-view-tabs" role="tablist" aria-label="Results view">
+          <button id="results-view" class="results-view-tab selected" role="tab" aria-selected="true">Results</button>
+          <button id="queries-view" class="results-view-tab" role="tab" aria-selected="false">Queries</button>
+        </div>
       </div>
-      <div id="empty-results" class="empty">
-        <span class="empty-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM4 9.5h16M8 13h3M8 16h6"/></svg></span>
-        <strong>No results to display</strong>
-        <span>Run a query to inspect security events.</span>
+      <div id="results-content" class="results-content">
+        <div id="result-timeline" class="timeline hidden">
+          <div class="timeline-heading"><strong>Visible activity</strong><span id="timeline-summary"></span></div>
+          <div id="timeline-bars" class="timeline-bars" aria-label="Event timeline"></div>
+          <div class="timeline-range"><span id="timeline-start"></span><span id="timeline-end"></span></div>
+        </div>
+        <div id="empty-results" class="empty">
+          <span class="empty-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM4 9.5h16M8 13h3M8 16h6"/></svg></span>
+          <strong>No results to display</strong>
+          <span>Run a query to inspect security events.</span>
+        </div>
+        <div class="table-wrap hidden" id="table-wrap"><table><thead id="result-head"></thead><tbody id="result-body"></tbody></table></div>
       </div>
-      <div class="table-wrap hidden" id="table-wrap"><table><thead id="result-head"></thead><tbody id="result-body"></tbody></table></div>
+      <div id="queries-pane" class="queries-pane hidden">
+        <div class="queries-pane-head">
+          <div class="query-view-tabs" role="tablist" aria-label="Query view">
+            <button id="saved-view" class="query-view-tab selected" role="tab" aria-selected="true">Saved <span id="saved-count">0</span></button>
+            <button id="history-view" class="query-view-tab" role="tab" aria-selected="false">History <span id="history-count">0</span></button>
+          </div>
+          <button id="clear-history" class="text-action hidden">Clear history</button>
+        </div>
+        <div id="saved-query-list" class="compact-list"><span class="muted">No saved queries.</span></div>
+        <div id="query-history" class="compact-list hidden"><span class="muted">No query history.</span></div>
+      </div>
     </section>
 
     <aside class="side-panel">
@@ -49,6 +74,11 @@
           <input id="field-search" type="search" placeholder="Filter fields" autocomplete="off">
         </label>
         <div id="field-list" class="field-list"><span class="muted">Loading field catalog...</span></div>
+      </section>
+
+      <section class="side-section bookmark-section">
+        <div class="side-heading"><div><h2>Bookmarks</h2><span id="bookmark-count">0</span></div></div>
+        <div id="bookmark-list" class="compact-list"><span class="muted">No bookmarked events.</span></div>
       </section>
 
       <section class="side-section reference">

@@ -60,7 +60,7 @@ Each dataset requires a unique `table` name. Table names must be KQL identifiers
 
 CSV headers become top-level `RawData` fields and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) in mappings, such as `host\.name`.
 
-Mappings use GJSON paths for every format. JSON objects or arrays encoded inside string fields are parsed automatically, including JSON stored in CSV cells, so fields such as `RawData.AuditData.ClientIP` can be queried directly. Each configured dataset atomically replaces a previous dataset with the same name, and datasets absent from the manifest are removed. Timestamps are normalized to UTC but are not rebased. Expanded inputs are limited to 128 MiB and each event to 2 MiB.
+Mappings use GJSON paths for every format. JSON objects or arrays encoded inside string fields are parsed automatically, including JSON stored in CSV cells, so fields such as `RawData.AuditData.ClientIP` can be queried directly. Changed datasets atomically replace previous datasets with the same name, while unchanged files and mappings reuse their existing imported data. Datasets absent from the manifest are removed. Timestamps are normalized to UTC but are not rebased. Expanded inputs are limited to 1 GiB and each event to 2 MiB.
 
 ## Docker
 
@@ -116,6 +116,8 @@ Events
 | project Value = RawData["field.with.dots"]
 | order by TimeGenerated desc
 ```
+
+The browser keeps recent queries, named saved queries, bookmarked result rows, and bookmark notes in local storage. Share creates a URL containing the current query. Results that include `TimeGenerated` also display a histogram of the visible rows.
 
 Supported tabular operators:
 

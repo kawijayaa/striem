@@ -18,6 +18,7 @@ type Dataset struct {
 	ID            int64     `json:"id"`
 	Name          string    `json:"name"`
 	Table         string    `json:"table"`
+	Signature     string    `json:"signature"`
 	Source        string    `json:"source"`
 	TimestampPath string    `json:"timestampPath"`
 	EventCount    int64     `json:"eventCount"`
@@ -57,11 +58,14 @@ func (s *Store) initialize(ctx context.Context) error {
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -65536;
 
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     table_name TEXT NOT NULL DEFAULT '',
+    input_signature TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL,
     timestamp_path TEXT NOT NULL,
     event_count INTEGER NOT NULL DEFAULT 0,
@@ -77,7 +81,7 @@ CREATE TABLE IF NOT EXISTS events (
     host TEXT,
     username TEXT,
     message TEXT,
-    raw_data TEXT NOT NULL CHECK (json_valid(raw_data))
+    raw_data TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dataset_fields (
@@ -87,11 +91,6 @@ CREATE TABLE IF NOT EXISTS dataset_fields (
     PRIMARY KEY(dataset_id, path, type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_generated);
-CREATE INDEX IF NOT EXISTS idx_events_source_time ON events(source, time_generated);
-CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(event_type, time_generated);
-CREATE INDEX IF NOT EXISTS idx_events_host_time ON events(host, time_generated);
-CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generated);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("initialize database: %w", err)
@@ -99,11 +98,72 @@ CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generat
 	if err := s.ensureDatasetTableColumn(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureDatasetSignatureColumn(ctx); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_table_name
-ON datasets(table_name) WHERE table_name <> '';
+ON datasets(table_name) WHERE table_name <> '';`); err != nil {
+		return fmt.Errorf("initialize dataset indexes: %w", err)
+	}
+	if err := s.CreateEventIndexes(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureDatasetSignatureColumn(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(datasets)")
+	if err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect datasets column: %w", err)
+		}
+		if name == "input_signature" {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, "ALTER TABLE datasets ADD COLUMN input_signature TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add dataset input signature: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DropEventIndexes(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `
+DROP INDEX IF EXISTS idx_events_time;
+DROP INDEX IF EXISTS idx_events_source_time;
+DROP INDEX IF EXISTS idx_events_type_time;
+DROP INDEX IF EXISTS idx_events_host_time;
+DROP INDEX IF EXISTS idx_events_user_time;
+DROP INDEX IF EXISTS idx_events_dataset_time;`); err != nil {
+		return fmt.Errorf("drop event indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CreateEventIndexes(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_generated);
+CREATE INDEX IF NOT EXISTS idx_events_source_time ON events(source, time_generated);
+CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(event_type, time_generated) WHERE event_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_host_time ON events(host, time_generated) WHERE host IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generated) WHERE username IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_dataset_time ON events(dataset_id, time_generated);`); err != nil {
-		return fmt.Errorf("initialize table indexes: %w", err)
+		return fmt.Errorf("create event indexes: %w", err)
 	}
 	return nil
 }
@@ -148,7 +208,7 @@ func (s *Store) Close() error {
 
 func (s *Store) ListDatasets(ctx context.Context) ([]Dataset, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, table_name, source, timestamp_path, event_count, created_at
+SELECT id, name, table_name, input_signature, source, timestamp_path, event_count, created_at
 FROM datasets
 ORDER BY id DESC`)
 	if err != nil {
@@ -160,7 +220,7 @@ ORDER BY id DESC`)
 	for rows.Next() {
 		var dataset Dataset
 		var createdAt string
-		if err := rows.Scan(&dataset.ID, &dataset.Name, &dataset.Table, &dataset.Source, &dataset.TimestampPath, &dataset.EventCount, &createdAt); err != nil {
+		if err := rows.Scan(&dataset.ID, &dataset.Name, &dataset.Table, &dataset.Signature, &dataset.Source, &dataset.TimestampPath, &dataset.EventCount, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan dataset: %w", err)
 		}
 		dataset.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)

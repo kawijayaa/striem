@@ -28,20 +28,57 @@ func TestLoadUsesRelativePathsAndReplacesDataset(t *testing.T) {
 	}
 	defer store.Close()
 
-	if _, err := Load(t.Context(), store, manifestPath); err != nil {
+	first, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB().Exec(`INSERT INTO datasets(name,source,timestamp_path,event_count,created_at) VALUES('stale','old','ts',0,'2024-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(t.Context(), store, manifestPath); err != nil {
+	second, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if first[0].ID != second[0].ID {
+		t.Fatalf("unchanged dataset was reimported: first ID %d, second ID %d", first[0].ID, second[0].ID)
 	}
 	var datasets, events int
 	store.DB().QueryRow("SELECT COUNT(*) FROM datasets").Scan(&datasets)
 	store.DB().QueryRow("SELECT COUNT(*) FROM events").Scan(&events)
 	if datasets != 1 || events != 1 {
 		t.Fatalf("reload produced %d datasets and %d events, want one of each", datasets, events)
+	}
+}
+
+func TestLoadReimportsChangedDataset(t *testing.T) {
+	directory := t.TempDir()
+	eventsPath := filepath.Join(directory, "events.ndjson")
+	manifestPath := filepath.Join(directory, "datasets.json")
+	if err := os.WriteFile(eventsPath, []byte(`{"ts":"2024-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"datasets":[{"name":"challenge","table":"Challenge","path":"events.ndjson","source":"fixture","timestampPath":"ts"}]}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.Open(filepath.Join(directory, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(eventsPath, []byte("{\"ts\":\"2024-01-01T00:00:00Z\"}\n{\"ts\":\"2024-01-01T00:01:00Z\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].Signature == second[0].Signature || second[0].EventCount != 2 {
+		t.Fatalf("changed dataset was not replaced: first=%#v second=%#v", first[0], second[0])
 	}
 }
 
@@ -106,6 +143,13 @@ func TestLoadRejectsUnsupportedFormat(t *testing.T) {
 	defer store.Close()
 	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "unsupported format") {
 		t.Fatalf("Load() error = %v, want unsupported format", err)
+	}
+	var indexes int
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_events_time'`).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if indexes != 1 {
+		t.Fatal("event indexes were not restored after failed deployment")
 	}
 }
 

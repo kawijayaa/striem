@@ -139,6 +139,35 @@ let fieldCompletions = [];
 let tableCompletions = [{ label: 'Events', type: 'class', detail: 'All datasets' }];
 let availableTableMetadata = [];
 let selectedTable = 'Events';
+const storageKeys = {
+  history: 'striem.queryHistory',
+  saved: 'striem.savedQueries',
+  bookmarks: 'striem.bookmarks',
+};
+
+function readStored(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage may be unavailable in private browsing or restricted contexts.
+  }
+}
+
+let queryHistory = readStored(storageKeys.history);
+let savedQueries = readStored(storageKeys.saved);
+let bookmarks = readStored(storageKeys.bookmarks);
+let queryLibraryView = 'saved';
+let resultsPanelView = 'results';
+const sharedQuery = new URL(window.location.href).searchParams.get('q');
 
 function kqlCompletionSource(context) {
   const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.\[\]"]*/);
@@ -152,7 +181,7 @@ function kqlCompletionSource(context) {
 
 const editor = new EditorView({
   state: EditorState.create({
-    doc: 'Events\n| order by TimeGenerated desc\n| take 100',
+    doc: sharedQuery || 'Events\n| order by TimeGenerated desc\n| take 100',
     extensions: [
       lineNumbers(),
       history(),
@@ -205,14 +234,18 @@ function showDiagnostic(error) {
 async function runQuery() {
   const errorBox = $('#query-error');
   const runButton = $('#run-query');
+  const query = editor.state.doc.toString();
   errorBox.classList.add('hidden');
   clearDiagnostics();
   runButton.disabled = true;
+  resultsPanelView = 'results';
+  renderResultsPanelView();
+  recordQuery(query);
   try {
     const result = await request('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: editor.state.doc.toString() }),
+      body: JSON.stringify({ query }),
     });
     renderResults(result);
     $('#query-stats').textContent = `${result.rowCount} rows · ${result.durationMs} ms`;
@@ -232,6 +265,10 @@ function renderResults(result) {
   head.replaceChildren();
   body.replaceChildren();
   const headerRow = document.createElement('tr');
+  const actionHeader = document.createElement('th');
+  actionHeader.className = 'row-action';
+  actionHeader.setAttribute('aria-label', 'Bookmark');
+  headerRow.append(actionHeader);
   result.columns.forEach(column => {
     const th = document.createElement('th');
     th.textContent = column;
@@ -240,6 +277,18 @@ function renderResults(result) {
   head.append(headerRow);
   result.rows.forEach(row => {
     const tr = document.createElement('tr');
+    const action = document.createElement('td');
+    action.className = 'row-action';
+    const bookmark = document.createElement('button');
+    const rowKey = JSON.stringify(row);
+    const saved = bookmarks.some(item => item.rowKey === rowKey);
+    bookmark.className = 'bookmark-toggle';
+    bookmark.rowKey = rowKey;
+    bookmark.textContent = saved ? 'Saved' : 'Save';
+    bookmark.title = saved ? 'Remove bookmark' : 'Bookmark event';
+    bookmark.addEventListener('click', () => toggleBookmark(row, rowKey, bookmark));
+    action.append(bookmark);
+    tr.append(action);
     result.columns.forEach(column => {
       const td = document.createElement('td');
       const value = row[column];
@@ -259,6 +308,50 @@ function renderResults(result) {
   $('#empty-results').classList.toggle('hidden', result.rows.length > 0);
   $('#empty-results').lastElementChild.textContent = result.rows.length ? '' : 'Query returned no events.';
   $('#table-wrap').classList.toggle('hidden', result.rows.length === 0);
+  renderTimeline(result.rows);
+}
+
+function renderTimeline(rows) {
+  const timeline = $('#result-timeline');
+  const points = rows
+    .map(row => new Date(row.TimeGenerated))
+    .filter(value => !Number.isNaN(value.getTime()))
+    .map(value => value.getTime());
+  timeline.classList.toggle('hidden', points.length === 0);
+  if (!points.length) return;
+  const minimum = Math.min(...points);
+  const maximum = Math.max(...points);
+  const bucketCount = Math.min(24, Math.max(1, Math.ceil(Math.sqrt(points.length))));
+  const width = Math.max(1, maximum - minimum + 1);
+  const buckets = Array(bucketCount).fill(0);
+  points.forEach(value => {
+    const index = Math.min(bucketCount - 1, Math.floor(((value - minimum) / width) * bucketCount));
+    buckets[index]++;
+  });
+  const peak = Math.max(...buckets);
+  const bars = $('#timeline-bars');
+  bars.replaceChildren();
+  buckets.forEach((count, index) => {
+    const bar = document.createElement('span');
+    bar.className = 'timeline-bar';
+    bar.style.height = count ? `${Math.max(4, (count / peak) * 100)}%` : '0';
+    const start = new Date(minimum + (width * index) / bucketCount);
+    bar.title = `${count} event${count === 1 ? '' : 's'} from ${start.toLocaleString()}`;
+    bars.append(bar);
+  });
+  $('#timeline-summary').textContent = `${points.length.toLocaleString()} timestamped rows`;
+  $('#timeline-start').textContent = new Date(minimum).toLocaleString();
+  $('#timeline-end').textContent = new Date(maximum).toLocaleString();
+}
+
+function renderResultsPanelView() {
+  const showingQueries = resultsPanelView === 'queries';
+  $('#results-content').classList.toggle('hidden', showingQueries);
+  $('#queries-pane').classList.toggle('hidden', !showingQueries);
+  $('#results-view').classList.toggle('selected', !showingQueries);
+  $('#results-view').setAttribute('aria-selected', String(!showingQueries));
+  $('#queries-view').classList.toggle('selected', showingQueries);
+  $('#queries-view').setAttribute('aria-selected', String(showingQueries));
 }
 
 function showRaw(value) {
@@ -266,9 +359,195 @@ function showRaw(value) {
   $('#raw-dialog').showModal();
 }
 
+function queryLabel(query) {
+  const line = query.split('\n').map(value => value.trim()).find(Boolean) || 'Query';
+  return line.length > 42 ? `${line.slice(0, 39)}...` : line;
+}
+
+function querySource(query) {
+  return query.match(/^(?:\s*)([A-Za-z_][A-Za-z0-9_]*)(?=\s*(?:\||$))/m)?.[1];
+}
+
+function recordQuery(query) {
+  const normalized = query.trim();
+  if (!normalized) return;
+  queryHistory = [
+    { query: normalized, runAt: new Date().toISOString() },
+    ...queryHistory.filter(item => item.query !== normalized),
+  ].slice(0, 10);
+  writeStored(storageKeys.history, queryHistory);
+  renderQueryLibrary();
+}
+
+function saveCurrentQuery() {
+  const query = editor.state.doc.toString().trim();
+  if (!query) return;
+  const name = window.prompt('Name this query', queryLabel(query));
+  if (!name?.trim()) return;
+  savedQueries = [{
+    id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+    name: name.trim(),
+    query,
+    savedAt: new Date().toISOString(),
+  }, ...savedQueries];
+  writeStored(storageKeys.saved, savedQueries);
+  renderQueryLibrary();
+}
+
+async function shareCurrentQuery() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('q', editor.state.doc.toString());
+  window.history.replaceState(null, '', url);
+  try {
+    await navigator.clipboard.writeText(url.toString());
+    $('#query-stats').textContent = 'Share link copied';
+  } catch {
+    $('#query-stats').textContent = 'Share link added to address bar';
+  }
+}
+
+function createQueryListItem(item, saved) {
+  const container = document.createElement('div');
+  container.className = 'compact-row';
+  const open = document.createElement('button');
+  open.className = 'compact-main';
+  const title = document.createElement('strong');
+  title.textContent = saved ? item.name : new Date(item.runAt).toLocaleString();
+  const detail = document.createElement('code');
+  detail.className = 'query-preview';
+  detail.textContent = item.query;
+  open.append(title, detail);
+  open.addEventListener('click', () => replaceQuery(item.query));
+  container.append(open);
+  if (saved) {
+    const remove = document.createElement('button');
+    remove.className = 'compact-action';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      savedQueries = savedQueries.filter(query => query.id !== item.id);
+      writeStored(storageKeys.saved, savedQueries);
+      renderQueryLibrary();
+    });
+    container.append(remove);
+  } else {
+    container.classList.add('history-row');
+  }
+  return container;
+}
+
+function renderQueryLibrary() {
+  const savedList = $('#saved-query-list');
+  const historyList = $('#query-history');
+  savedList.replaceChildren();
+  historyList.replaceChildren();
+  $('#saved-count').textContent = savedQueries.length;
+  $('#history-count').textContent = queryHistory.length;
+  const showingHistory = queryLibraryView === 'history';
+  savedList.classList.toggle('hidden', showingHistory);
+  historyList.classList.toggle('hidden', !showingHistory);
+  $('#saved-view').classList.toggle('selected', !showingHistory);
+  $('#saved-view').setAttribute('aria-selected', String(!showingHistory));
+  $('#history-view').classList.toggle('selected', showingHistory);
+  $('#history-view').setAttribute('aria-selected', String(showingHistory));
+  $('#clear-history').classList.toggle('hidden', !showingHistory || queryHistory.length === 0);
+  if (!savedQueries.length) savedList.innerHTML = '<span class="muted">No saved queries.</span>';
+  if (!queryHistory.length) historyList.innerHTML = '<span class="muted">No query history.</span>';
+  savedQueries.forEach(item => savedList.append(createQueryListItem(item, true)));
+  queryHistory.forEach(item => historyList.append(createQueryListItem(item, false)));
+}
+
+function toggleBookmark(row, rowKey, button) {
+  const existing = bookmarks.find(item => item.rowKey === rowKey);
+  if (existing) {
+    bookmarks = bookmarks.filter(item => item.rowKey !== rowKey);
+    button.textContent = 'Save';
+    button.title = 'Bookmark event';
+  } else {
+    bookmarks = [{
+      id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+      rowKey,
+      row,
+      query: editor.state.doc.toString(),
+      table: selectedTable,
+      note: '',
+      createdAt: new Date().toISOString(),
+    }, ...bookmarks];
+    button.textContent = 'Saved';
+    button.title = 'Remove bookmark';
+  }
+  writeStored(storageKeys.bookmarks, bookmarks);
+  renderBookmarks();
+  refreshBookmarkButtons();
+}
+
+function refreshBookmarkButtons() {
+  document.querySelectorAll('.bookmark-toggle').forEach(button => {
+    const saved = bookmarks.some(item => item.rowKey === button.rowKey);
+    button.textContent = saved ? 'Saved' : 'Save';
+    button.title = saved ? 'Remove bookmark' : 'Bookmark event';
+  });
+}
+
+function bookmarkLabel(bookmark) {
+  const row = bookmark.row;
+  return String(row.EventType || row.Message || row.User || row.Host || 'Bookmarked event');
+}
+
+function renderBookmarks() {
+  const list = $('#bookmark-list');
+  list.replaceChildren();
+  $('#bookmark-count').textContent = bookmarks.length;
+  if (!bookmarks.length) {
+    list.innerHTML = '<span class="muted">No bookmarked events.</span>';
+    return;
+  }
+  bookmarks.forEach(bookmark => {
+    const container = document.createElement('div');
+    container.className = 'compact-row bookmark-row';
+    const open = document.createElement('button');
+    open.className = 'compact-main';
+    const title = document.createElement('strong');
+    title.textContent = bookmarkLabel(bookmark);
+    const detail = document.createElement('small');
+    detail.textContent = bookmark.note || bookmark.row.TimeGenerated || bookmark.table;
+    open.append(title, detail);
+    open.addEventListener('click', () => showRaw(bookmark.row));
+    const actions = document.createElement('span');
+    actions.className = 'bookmark-actions';
+    const note = document.createElement('button');
+    note.className = 'compact-action';
+    note.textContent = bookmark.note ? 'Edit note' : 'Add note';
+    note.addEventListener('click', () => {
+      const value = window.prompt('Bookmark note', bookmark.note || '');
+      if (value === null) return;
+      bookmark.note = value.trim();
+      writeStored(storageKeys.bookmarks, bookmarks);
+      renderBookmarks();
+    });
+    const remove = document.createElement('button');
+    remove.className = 'compact-action';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      bookmarks = bookmarks.filter(item => item.id !== bookmark.id);
+      writeStored(storageKeys.bookmarks, bookmarks);
+      renderBookmarks();
+      refreshBookmarkButtons();
+    });
+    actions.append(note, remove);
+    container.append(open, actions);
+    list.append(container);
+  });
+}
+
 function replaceQuery(query) {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: query } });
   clearDiagnostics();
+  const source = querySource(query);
+  if (source && availableTableMetadata.some(table => table.name === source)) {
+    selectedTable = source;
+    renderTables();
+    renderFields($('#field-search').value);
+  }
   editor.focus();
 }
 
@@ -370,6 +649,8 @@ async function loadFields() {
     commonFields = result.common;
     fieldGroups = result.tables;
     availableTableMetadata = schema.tables;
+    const source = querySource(editor.state.doc.toString());
+    if (availableTableMetadata.some(table => table.name === source)) selectedTable = source;
     fieldCompletions = [
       ...commonFields.map(field => ({ ...field, table: 'Common' })),
       ...fieldGroups.flatMap(group => group.fields.map(field => ({ ...field, table: group.table }))),
@@ -410,9 +691,35 @@ document.addEventListener('keydown', event => {
   runQuery();
 });
 $('#run-query').addEventListener('click', runQuery);
+$('#save-query').addEventListener('click', saveCurrentQuery);
+$('#share-query').addEventListener('click', shareCurrentQuery);
+$('#results-view').addEventListener('click', () => {
+  resultsPanelView = 'results';
+  renderResultsPanelView();
+});
+$('#queries-view').addEventListener('click', () => {
+  resultsPanelView = 'queries';
+  renderResultsPanelView();
+});
+$('#saved-view').addEventListener('click', () => {
+  queryLibraryView = 'saved';
+  renderQueryLibrary();
+});
+$('#history-view').addEventListener('click', () => {
+  queryLibraryView = 'history';
+  renderQueryLibrary();
+});
+$('#clear-history').addEventListener('click', () => {
+  queryHistory = [];
+  writeStored(storageKeys.history, queryHistory);
+  renderQueryLibrary();
+});
 $('#field-search').addEventListener('input', event => renderFields(event.target.value));
 document.querySelectorAll('.example').forEach(button => {
   button.addEventListener('click', () => replaceQuery(button.dataset.query));
 });
 
+renderQueryLibrary();
+renderBookmarks();
+renderResultsPanelView();
 loadFields();
