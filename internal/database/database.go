@@ -17,6 +17,7 @@ type Store struct {
 type Dataset struct {
 	ID            int64     `json:"id"`
 	Name          string    `json:"name"`
+	Table         string    `json:"table"`
 	Source        string    `json:"source"`
 	TimestampPath string    `json:"timestampPath"`
 	EventCount    int64     `json:"eventCount"`
@@ -26,6 +27,11 @@ type Dataset struct {
 type Field struct {
 	Path string `json:"path"`
 	Type string `json:"type"`
+}
+
+type FieldGroup struct {
+	Table  string  `json:"table"`
+	Fields []Field `json:"fields"`
 }
 
 func Open(path string) (*Store, error) {
@@ -55,6 +61,7 @@ PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
+    table_name TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL,
     timestamp_path TEXT NOT NULL,
     event_count INTEGER NOT NULL DEFAULT 0,
@@ -89,6 +96,45 @@ CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generat
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("initialize database: %w", err)
 	}
+	if err := s.ensureDatasetTableColumn(ctx); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_table_name
+ON datasets(table_name) WHERE table_name <> '';
+CREATE INDEX IF NOT EXISTS idx_events_dataset_time ON events(dataset_id, time_generated);`); err != nil {
+		return fmt.Errorf("initialize table indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ensureDatasetTableColumn(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(datasets)")
+	if err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect datasets column: %w", err)
+		}
+		if name == "table_name" {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, "ALTER TABLE datasets ADD COLUMN table_name TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add dataset table name: %w", err)
+	}
 	return nil
 }
 
@@ -102,7 +148,7 @@ func (s *Store) Close() error {
 
 func (s *Store) ListDatasets(ctx context.Context) ([]Dataset, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, source, timestamp_path, event_count, created_at
+SELECT id, name, table_name, source, timestamp_path, event_count, created_at
 FROM datasets
 ORDER BY id DESC`)
 	if err != nil {
@@ -114,7 +160,7 @@ ORDER BY id DESC`)
 	for rows.Next() {
 		var dataset Dataset
 		var createdAt string
-		if err := rows.Scan(&dataset.ID, &dataset.Name, &dataset.Source, &dataset.TimestampPath, &dataset.EventCount, &createdAt); err != nil {
+		if err := rows.Scan(&dataset.ID, &dataset.Name, &dataset.Table, &dataset.Source, &dataset.TimestampPath, &dataset.EventCount, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan dataset: %w", err)
 		}
 		dataset.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
@@ -169,4 +215,32 @@ ORDER BY path`)
 		fields = append(fields, field)
 	}
 	return fields, rows.Err()
+}
+
+func (s *Store) ListFieldGroups(ctx context.Context) ([]FieldGroup, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT d.table_name, f.path,
+       CASE WHEN COUNT(DISTINCT f.type) = 1 THEN MIN(f.type) ELSE 'mixed' END
+FROM dataset_fields AS f
+JOIN datasets AS d ON d.id = f.dataset_id
+WHERE d.table_name <> ''
+GROUP BY d.table_name, f.path
+ORDER BY d.table_name, f.path`)
+	if err != nil {
+		return nil, fmt.Errorf("list field groups: %w", err)
+	}
+	defer rows.Close()
+	groups := make([]FieldGroup, 0)
+	for rows.Next() {
+		var table string
+		var field Field
+		if err := rows.Scan(&table, &field.Path, &field.Type); err != nil {
+			return nil, fmt.Errorf("scan field group: %w", err)
+		}
+		if len(groups) == 0 || groups[len(groups)-1].Table != table {
+			groups = append(groups, FieldGroup{Table: table, Fields: make([]Field, 0)})
+		}
+		groups[len(groups)-1].Fields = append(groups[len(groups)-1].Fields, field)
+	}
+	return groups, rows.Err()
 }

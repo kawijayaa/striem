@@ -21,6 +21,7 @@ import (
 
 const maxEventSize = 2 << 20
 const maxExpandedSize = 128 << 20
+const eventInsertBatchSize = 250
 
 const (
 	FormatJSON = "json"
@@ -29,6 +30,7 @@ const (
 
 type Mapping struct {
 	Name            string            `json:"name"`
+	Table           string            `json:"table"`
 	Format          string            `json:"format"`
 	Source          string            `json:"source"`
 	SourcePath      string            `json:"sourcePath"`
@@ -53,6 +55,9 @@ func New(store *database.Store) *Service {
 func (s *Service) Import(ctx context.Context, input io.Reader, compressed bool, mapping Mapping) (Result, error) {
 	if strings.TrimSpace(mapping.Name) == "" {
 		return Result{}, errors.New("dataset name is required")
+	}
+	if !validTableName(mapping.Table) {
+		return Result{}, errors.New("table must be a KQL identifier and cannot be Events")
 	}
 	if strings.TrimSpace(mapping.TimestampPath) == "" {
 		return Result{}, errors.New("timestampPath is required")
@@ -91,8 +96,8 @@ func (s *Service) Import(ctx context.Context, input io.Reader, compressed bool, 
 
 	createdAt := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO datasets(name, source, timestamp_path, created_at)
-VALUES (?, ?, ?, ?)`, mapping.Name, mapping.Source, mapping.TimestampPath, createdAt.Format(time.RFC3339Nano))
+INSERT INTO datasets(name, table_name, source, timestamp_path, created_at)
+VALUES (?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Source, mapping.TimestampPath, createdAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return Result{}, fmt.Errorf("create dataset: %w", err)
 	}
@@ -101,28 +106,47 @@ VALUES (?, ?, ?, ?)`, mapping.Name, mapping.Source, mapping.TimestampPath, creat
 		return Result{}, fmt.Errorf("get dataset id: %w", err)
 	}
 
-	statement, err := tx.PrepareContext(ctx, `
-INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return Result{}, fmt.Errorf("prepare event insert: %w", err)
-	}
-	defer statement.Close()
 	discoveredFields := make(map[string]string)
+	pendingValues := make([]any, 0, eventInsertBatchSize*8)
+	pendingRecords := 0
+	flushEvents := func() error {
+		if pendingRecords == 0 {
+			return nil
+		}
+		rows := make([]string, pendingRecords)
+		for index := range rows {
+			rows[index] = "(?, ?, ?, ?, ?, ?, ?, ?)"
+		}
+		query := `INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data) VALUES ` + strings.Join(rows, ",")
+		if _, err := tx.ExecContext(ctx, query, pendingValues...); err != nil {
+			return err
+		}
+		pendingValues = pendingValues[:0]
+		pendingRecords = 0
+		return nil
+	}
 
 	count, err := decodeRecords(input, format, func(index int, raw json.RawMessage) error {
 		if len(raw) > maxEventSize {
 			return fmt.Errorf("record %d exceeds the 2 MiB limit", index)
 		}
-		if !gjson.ValidBytes(raw) || !gjson.ParseBytes(raw).IsObject() {
+		if !gjson.ValidBytes(raw) {
 			return fmt.Errorf("record %d must be a JSON object", index)
 		}
-		normalized, value, err := normalizeRecord(raw)
-		if err != nil {
-			return fmt.Errorf("normalize record %d: %w", index, err)
+		parsed := gjson.ParseBytes(raw)
+		if !parsed.IsObject() {
+			return fmt.Errorf("record %d must be a JSON object", index)
 		}
-		raw = normalized
-		collectFields(value, "RawData", discoveredFields)
+		if containsEmbeddedJSON(parsed, 0) {
+			normalized, value, err := normalizeRecord(raw)
+			if err != nil {
+				return fmt.Errorf("normalize record %d: %w", index, err)
+			}
+			raw = normalized
+			collectFields(value, "RawData", discoveredFields)
+		} else {
+			collectResultFields(parsed, "RawData", discoveredFields)
+		}
 
 		timestampValue := gjson.GetBytes(raw, mapping.TimestampPath)
 		if !timestampValue.Exists() {
@@ -141,7 +165,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 			return fmt.Errorf("record %d has an empty source", index)
 		}
 
-		_, err = statement.ExecContext(ctx,
+		pendingValues = append(pendingValues,
 			datasetID,
 			eventtime.Format(timestamp),
 			source,
@@ -151,8 +175,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 			mappedValue(raw, mapping.FieldPaths, "Message"),
 			string(raw),
 		)
-		if err != nil {
-			return fmt.Errorf("insert record %d: %w", index, err)
+		pendingRecords++
+		if pendingRecords == eventInsertBatchSize {
+			if err := flushEvents(); err != nil {
+				return fmt.Errorf("insert records through %d: %w", index, err)
+			}
 		}
 		return nil
 	})
@@ -161,6 +188,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	}
 	if count == 0 {
 		return Result{}, errors.New("input contains no events")
+	}
+	if err := flushEvents(); err != nil {
+		return Result{}, fmt.Errorf("insert records through %d: %w", count, err)
 	}
 	fieldStatement, err := tx.PrepareContext(ctx, `
 INSERT OR IGNORE INTO dataset_fields(dataset_id, path, type) VALUES (?, ?, ?)`)
@@ -184,11 +214,19 @@ INSERT OR IGNORE INTO dataset_fields(dataset_id, path, type) VALUES (?, ?, ?)`)
 	return Result{Dataset: database.Dataset{
 		ID:            datasetID,
 		Name:          mapping.Name,
+		Table:         mapping.Table,
 		Source:        mapping.Source,
 		TimestampPath: mapping.TimestampPath,
 		EventCount:    int64(count),
 		CreatedAt:     createdAt,
 	}}, nil
+}
+
+func validTableName(value string) bool {
+	if value == "" || value == "Events" || !isIdentifier(value) {
+		return false
+	}
+	return true
 }
 
 func normalizeRecord(raw []byte) ([]byte, any, error) {
@@ -198,40 +236,50 @@ func normalizeRecord(raw []byte) ([]byte, any, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, nil, err
 	}
-	value = normalizeEmbeddedJSON(value, 0)
+	value, changed := normalizeEmbeddedJSON(value, 0)
+	if !changed {
+		return raw, value, nil
+	}
 	normalized, err := json.Marshal(value)
 	return normalized, value, err
 }
 
-func normalizeEmbeddedJSON(value any, depth int) any {
+func normalizeEmbeddedJSON(value any, depth int) (any, bool) {
 	if depth >= 32 {
-		return value
+		return value, false
 	}
 	switch current := value.(type) {
 	case map[string]any:
+		changed := false
 		for key, child := range current {
-			current[key] = normalizeEmbeddedJSON(child, depth+1)
+			normalized, childChanged := normalizeEmbeddedJSON(child, depth+1)
+			current[key] = normalized
+			changed = changed || childChanged
 		}
-		return current
+		return current, changed
 	case []any:
+		changed := false
 		for index, child := range current {
-			current[index] = normalizeEmbeddedJSON(child, depth+1)
+			normalized, childChanged := normalizeEmbeddedJSON(child, depth+1)
+			current[index] = normalized
+			changed = changed || childChanged
 		}
-		return current
+		return current, changed
 	case string:
 		trimmed := strings.TrimSpace(current)
 		if len(trimmed) < 2 || (trimmed[0] != '{' && trimmed[0] != '[') || !json.Valid([]byte(trimmed)) {
-			return current
+			return current, false
 		}
 		decoder := json.NewDecoder(strings.NewReader(trimmed))
 		decoder.UseNumber()
 		var nested any
 		if err := decoder.Decode(&nested); err != nil {
-			return current
+			return current, false
 		}
-		return normalizeEmbeddedJSON(nested, depth+1)
+		normalized, _ := normalizeEmbeddedJSON(nested, depth+1)
+		return normalized, true
 	default:
-		return value
+		return value, false
 	}
 }
 
@@ -246,6 +294,56 @@ func collectFields(value any, path string, fields map[string]string) {
 		if _, nested := child.(map[string]any); nested {
 			collectFields(child, childPath, fields)
 		}
+	}
+}
+
+func containsEmbeddedJSON(value gjson.Result, depth int) bool {
+	if depth >= 32 {
+		return false
+	}
+	if value.Type == gjson.String {
+		trimmed := strings.TrimSpace(value.String())
+		return len(trimmed) >= 2 && (trimmed[0] == '{' || trimmed[0] == '[') && gjson.Valid(trimmed)
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	found := false
+	value.ForEach(func(_, child gjson.Result) bool {
+		found = containsEmbeddedJSON(child, depth+1)
+		return !found
+	})
+	return found
+}
+
+func collectResultFields(value gjson.Result, path string, fields map[string]string) {
+	value.ForEach(func(key, child gjson.Result) bool {
+		childPath := appendFieldPath(path, key.String())
+		fields[childPath] = resultFieldType(child)
+		if child.IsObject() {
+			collectResultFields(child, childPath, fields)
+		}
+		return true
+	})
+}
+
+func resultFieldType(value gjson.Result) string {
+	switch value.Type {
+	case gjson.Null:
+		return "null"
+	case gjson.False, gjson.True:
+		return "bool"
+	case gjson.Number:
+		if strings.ContainsAny(value.Raw, ".eE") {
+			return "real"
+		}
+		return "long"
+	case gjson.String:
+		return "string"
+	case gjson.JSON:
+		return "dynamic"
+	default:
+		return "unknown"
 	}
 }
 
@@ -401,19 +499,25 @@ func decodeJSONRecords(input io.Reader, consume func(int, json.RawMessage) error
 		}
 		return count, ensureEOF(decoder)
 	}
+	return decodeNDJSONRecords(reader, consume)
+}
 
+func decodeNDJSONRecords(reader *bufio.Reader, consume func(int, json.RawMessage) error) (int, error) {
+	count := 0
 	for {
-		var raw json.RawMessage
-		err := decoder.Decode(&raw)
+		line, err := reader.ReadBytes('\n')
+		raw := bytes.TrimSpace(line)
+		if len(raw) > 0 {
+			count++
+			if consumeErr := consume(count, raw); consumeErr != nil {
+				return 0, consumeErr
+			}
+		}
 		if errors.Is(err, io.EOF) {
 			return count, nil
 		}
 		if err != nil {
-			return 0, fmt.Errorf("decode record %d: %w", count+1, err)
-		}
-		count++
-		if err := consume(count, raw); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("read record %d: %w", count+1, err)
 		}
 	}
 }

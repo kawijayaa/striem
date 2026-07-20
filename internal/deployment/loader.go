@@ -18,6 +18,7 @@ type Manifest struct {
 
 type Dataset struct {
 	Name            string            `json:"name"`
+	Table           string            `json:"table"`
 	Path            string            `json:"path"`
 	Format          string            `json:"format"`
 	Source          string            `json:"source"`
@@ -46,6 +47,7 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 
 	baseDirectory := filepath.Dir(manifestPath)
 	seen := make(map[string]struct{}, len(manifest.Datasets))
+	seenTables := make(map[string]struct{}, len(manifest.Datasets))
 	service := ingest.New(store)
 	loaded := make([]database.Dataset, 0, len(manifest.Datasets))
 	names := make([]string, 0, len(manifest.Datasets))
@@ -57,6 +59,13 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 			return nil, fmt.Errorf("dataset name %q is configured more than once", configured.Name)
 		}
 		seen[configured.Name] = struct{}{}
+		if strings.TrimSpace(configured.Table) == "" {
+			return nil, fmt.Errorf("dataset %q has no table", configured.Name)
+		}
+		if _, duplicate := seenTables[configured.Table]; duplicate {
+			return nil, fmt.Errorf("table %q is configured more than once", configured.Table)
+		}
+		seenTables[configured.Table] = struct{}{}
 		names = append(names, configured.Name)
 		if strings.TrimSpace(configured.Path) == "" {
 			return nil, fmt.Errorf("dataset %q has no path", configured.Name)
@@ -76,6 +85,7 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		}
 		result, importErr := service.Import(ctx, input, strings.EqualFold(filepath.Ext(path), ".gz"), ingest.Mapping{
 			Name:            configured.Name,
+			Table:           configured.Table,
 			Format:          format,
 			Source:          configured.Source,
 			SourcePath:      configured.SourcePath,

@@ -15,24 +15,34 @@ type CompiledQuery struct {
 	Columns []string
 }
 
+type TableCatalog map[string]int64
+
 type compiler struct {
 	args      []any
 	columns   map[string]struct{}
 	variables map[string]string
 	constants map[string]any
+	tables    TableCatalog
 	now       time.Time
+}
+
+type relation struct {
+	SQL     string
+	Columns []string
 }
 
 var eventColumns = []string{"TimeGenerated", "Source", "EventType", "Host", "User", "Message", "RawData"}
 
-func Compile(query Query, now time.Time) (CompiledQuery, error) {
-	if query.Source != "Events" {
-		return CompiledQuery{}, errorAt(query.SourceAt, "unknown table %q; only Events is available", query.Source)
+func Compile(query Query, now time.Time, catalogs ...TableCatalog) (CompiledQuery, error) {
+	var tables TableCatalog
+	if len(catalogs) > 0 {
+		tables = catalogs[0]
 	}
 	c := &compiler{
 		columns:   make(map[string]struct{}),
 		variables: make(map[string]string),
 		constants: make(map[string]any),
+		tables:    tables,
 		now:       now.UTC(),
 	}
 	eventColumnSet := columnSet(eventColumns)
@@ -41,7 +51,7 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 			return CompiledQuery{}, errorAt(binding.At, "variable %q is declared more than once", binding.Name)
 		}
 		if _, exists := eventColumnSet[binding.Name]; exists {
-			return CompiledQuery{}, errorAt(binding.At, "variable %q conflicts with an Events column", binding.Name)
+			return CompiledQuery{}, errorAt(binding.At, "variable %q conflicts with a table column", binding.Name)
 		}
 		value, err := c.compileExpression(binding.Expression, false)
 		if err != nil {
@@ -52,8 +62,25 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 			c.constants[binding.Name] = constant
 		}
 	}
-	c.columns = eventColumnSet
+	compiled, err := c.compilePipeline(query)
+	if err != nil {
+		return CompiledQuery{}, err
+	}
+	limit := c.bind(int64(1000))
+	compiled.SQL = fmt.Sprintf("SELECT * FROM (%s) AS result LIMIT %s", compiled.SQL, limit)
+	return CompiledQuery{SQL: compiled.SQL, Args: c.args, Columns: compiled.Columns}, nil
+}
+
+func (c *compiler) compilePipeline(query Query) (relation, error) {
+	datasetID, tableFound := c.tables[query.Source]
+	if query.Source != "Events" && !tableFound {
+		return relation{}, errorAt(query.SourceAt, "unknown table %q", query.Source)
+	}
+	c.columns = columnSet(eventColumns)
 	sqlText := `SELECT time_generated AS "TimeGenerated", source AS "Source", event_type AS "EventType", host AS "Host", username AS "User", message AS "Message", raw_data AS "RawData" FROM events`
+	if query.Source != "Events" {
+		sqlText += " WHERE dataset_id = " + c.bind(datasetID)
+	}
 	columns := append([]string(nil), eventColumns...)
 
 	for _, rawOperator := range query.Operators {
@@ -61,20 +88,20 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 		case WhereOperator:
 			expr, err := c.compileExpression(operator.Expression, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q WHERE %s", sqlText, expr)
 		case ProjectOperator:
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
 			columns, c.columns = names, columnSet(names)
 		case ExtendOperator:
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			replaced := columnSet(names)
 			preserved := make([]string, 0, len(columns))
@@ -95,16 +122,16 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 		case SummarizeOperator:
 			for _, item := range operator.Aggregates {
 				if err := c.validateSummarizeExpression(item.Expression); err != nil {
-					return CompiledQuery{}, err
+					return relation{}, err
 				}
 			}
 			aggregates, aggregateNames, err := c.compileNamed(operator.Aggregates, true)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			groups, groupNames, err := c.compileNamed(operator.Groups, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			selects := append(groups, aggregates...)
 			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
@@ -120,7 +147,7 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 		case DistinctOperator:
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			sqlText = fmt.Sprintf("SELECT DISTINCT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
 			columns, c.columns = names, columnSet(names)
@@ -129,7 +156,7 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 			for _, term := range operator.Terms {
 				expr, err := c.compileExpression(term.Expression, false)
 				if err != nil {
-					return CompiledQuery{}, err
+					return relation{}, err
 				}
 				direction := "ASC"
 				if term.Descending {
@@ -141,14 +168,14 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 		case TakeOperator:
 			count, err := c.evaluateRowLimit(operator.Count)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			limit := c.bind(count)
 			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q LIMIT %s", sqlText, limit)
 		case TopOperator:
 			expr, err := c.compileExpression(operator.Term.Expression, false)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			direction := "DESC"
 			if !operator.Term.Descending {
@@ -156,18 +183,121 @@ func Compile(query Query, now time.Time) (CompiledQuery, error) {
 			}
 			count, err := c.evaluateRowLimit(operator.Count)
 			if err != nil {
-				return CompiledQuery{}, err
+				return relation{}, err
 			}
 			limit := c.bind(count)
 			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q ORDER BY %s %s LIMIT %s", sqlText, expr, direction, limit)
 		case CountOperator:
 			sqlText = fmt.Sprintf(`SELECT COUNT(*) AS "Count" FROM (%s) AS q`, sqlText)
 			columns, c.columns = []string{"Count"}, columnSet([]string{"Count"})
+		case UnionOperator:
+			combined, err := c.compileUnion(relation{SQL: sqlText, Columns: columns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns = combined.SQL, combined.Columns
+			c.columns = columnSet(columns)
+		case JoinOperator:
+			joined, err := c.compileJoin(relation{SQL: sqlText, Columns: columns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns = joined.SQL, joined.Columns
+			c.columns = columnSet(columns)
 		}
 	}
-	limit := c.bind(int64(1000))
-	sqlText = fmt.Sprintf("SELECT * FROM (%s) AS result LIMIT %s", sqlText, limit)
-	return CompiledQuery{SQL: sqlText, Args: c.args, Columns: columns}, nil
+	return relation{SQL: sqlText, Columns: columns}, nil
+}
+
+func (c *compiler) compileUnion(left relation, operator UnionOperator) (relation, error) {
+	arms := []string{projectRelation(left, left.Columns, "u0")}
+	leftSet := columnSet(left.Columns)
+	for index, query := range operator.Queries {
+		right, err := c.compilePipeline(query)
+		if err != nil {
+			return relation{}, err
+		}
+		rightSet := columnSet(right.Columns)
+		if len(right.Columns) != len(left.Columns) {
+			return relation{}, errorAt(query.SourceAt, "union query must have the same columns as its left side")
+		}
+		for _, name := range left.Columns {
+			if _, exists := rightSet[name]; !exists {
+				return relation{}, errorAt(query.SourceAt, "union query is missing column %q", name)
+			}
+		}
+		for _, name := range right.Columns {
+			if _, exists := leftSet[name]; !exists {
+				return relation{}, errorAt(query.SourceAt, "union query has unexpected column %q", name)
+			}
+		}
+		arms = append(arms, projectRelation(right, left.Columns, fmt.Sprintf("u%d", index+1)))
+	}
+	return relation{SQL: strings.Join(arms, " UNION ALL "), Columns: append([]string(nil), left.Columns...)}, nil
+}
+
+func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, error) {
+	right, err := c.compilePipeline(operator.Right)
+	if err != nil {
+		return relation{}, err
+	}
+	leftSet, rightSet := columnSet(left.Columns), columnSet(right.Columns)
+	keys := make(map[string]struct{}, len(operator.Keys))
+	conditions := make([]string, 0, len(operator.Keys))
+	for _, key := range operator.Keys {
+		if _, duplicate := keys[key.Name]; duplicate {
+			return relation{}, errorAt(key.At, "join column %q is specified more than once", key.Name)
+		}
+		keys[key.Name] = struct{}{}
+		if _, exists := leftSet[key.Name]; !exists {
+			return relation{}, errorAt(key.At, "join column %q does not exist on the left side", key.Name)
+		}
+		if _, exists := rightSet[key.Name]; !exists {
+			return relation{}, errorAt(key.At, "join column %q does not exist on the right side", key.Name)
+		}
+		conditions = append(conditions, "l."+quoteIdentifier(key.Name)+" = r."+quoteIdentifier(key.Name))
+	}
+	selects := make([]string, 0, len(left.Columns)+len(right.Columns))
+	columns := append([]string(nil), left.Columns...)
+	used := columnSet(columns)
+	for _, name := range left.Columns {
+		selects = append(selects, "l."+quoteIdentifier(name)+" AS "+quoteIdentifier(name))
+	}
+	for _, name := range right.Columns {
+		if _, isKey := keys[name]; isKey {
+			continue
+		}
+		output := availableColumnName(name, used)
+		used[output] = struct{}{}
+		columns = append(columns, output)
+		selects = append(selects, "r."+quoteIdentifier(name)+" AS "+quoteIdentifier(output))
+	}
+	joinSQL := "INNER JOIN"
+	if operator.Kind == JoinLeftOuter {
+		joinSQL = "LEFT OUTER JOIN"
+	}
+	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS l %s (%s) AS r ON %s", strings.Join(selects, ", "), left.SQL, joinSQL, right.SQL, strings.Join(conditions, " AND "))
+	return relation{SQL: sqlText, Columns: columns}, nil
+}
+
+func projectRelation(value relation, columns []string, alias string) string {
+	selects := make([]string, len(columns))
+	for index, name := range columns {
+		selects[index] = alias + "." + quoteIdentifier(name) + " AS " + quoteIdentifier(name)
+	}
+	return fmt.Sprintf("SELECT %s FROM (%s) AS %s", strings.Join(selects, ", "), value.SQL, alias)
+}
+
+func availableColumnName(name string, used map[string]struct{}) string {
+	if _, exists := used[name]; !exists {
+		return name
+	}
+	for suffix := 1; ; suffix++ {
+		candidate := fmt.Sprintf("%s%d", name, suffix)
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
 }
 
 func (c *compiler) compileNamed(items []NamedExpression, aggregate bool) ([]string, []string, error) {

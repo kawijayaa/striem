@@ -18,7 +18,7 @@ func TestLoadUsesRelativePathsAndReplacesDataset(t *testing.T) {
 	if err := os.WriteFile(eventsPath, []byte(`{"ts":"2024-01-01T00:00:00Z","host":"pc-1"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"datasets":[{"name":"challenge","path":"events.ndjson","source":"fixture","timestampPath":"ts","fieldPaths":{"Host":"host"}}]}`
+	manifest := `{"datasets":[{"name":"challenge","table":"Challenge","path":"events.ndjson","source":"fixture","timestampPath":"ts","fieldPaths":{"Host":"host"}}]}`
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestLoadDetectsCSVAndGzip(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(directory, fileName), content, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			manifest := `{"datasets":[{"name":"csv","path":"PLACEHOLDER","source":"fixture","timestampPath":"ts","fieldPaths":{"Host":"host"}}]}`
+			manifest := `{"datasets":[{"name":"csv","table":"CSV","path":"PLACEHOLDER","source":"fixture","timestampPath":"ts","fieldPaths":{"Host":"host"}}]}`
 			manifest = strings.Replace(manifest, "PLACEHOLDER", fileName, 1)
 			manifestPath := filepath.Join(directory, "datasets.json")
 			if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
@@ -95,7 +95,7 @@ func TestLoadDetectsCSVAndGzip(t *testing.T) {
 func TestLoadRejectsUnsupportedFormat(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "datasets.json")
-	manifest := `{"datasets":[{"name":"bad","path":"events.tsv","format":"tsv","source":"fixture","timestampPath":"ts"}]}`
+	manifest := `{"datasets":[{"name":"bad","table":"Bad","path":"events.tsv","format":"tsv","source":"fixture","timestampPath":"ts"}]}`
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -106,5 +106,25 @@ func TestLoadRejectsUnsupportedFormat(t *testing.T) {
 	defer store.Close()
 	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "unsupported format") {
 		t.Fatalf("Load() error = %v, want unsupported format", err)
+	}
+}
+
+func TestLoadRejectsDuplicateTables(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "datasets.json")
+	if err := os.WriteFile(filepath.Join(directory, "one.json"), []byte(`{"ts":"2024-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"datasets":[{"name":"one","table":"Shared","path":"one.json","source":"one","timestampPath":"ts"},{"name":"two","table":"Shared","path":"two.json","source":"two","timestampPath":"ts"}]}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.Open(filepath.Join(directory, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "configured more than once") {
+		t.Fatalf("Load() error = %v, want duplicate table error", err)
 	}
 }

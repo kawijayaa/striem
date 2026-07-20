@@ -22,7 +22,7 @@ func Parse(input string) (Query, error) {
 }
 
 func (p *parser) parseQuery() (Query, error) {
-	query := Query{}
+	bindings := make([]LetBinding, 0)
 	for p.matchIdentifier("let") {
 		name, err := p.expect(tokenIdentifier, "expected variable name after 'let'")
 		if err != nil {
@@ -41,14 +41,21 @@ func (p *parser) parseQuery() (Query, error) {
 		if _, err := p.expect(tokenSemicolon, "expected ';' after variable declaration"); err != nil {
 			return Query{}, err
 		}
-		query.Bindings = append(query.Bindings, LetBinding{Name: name.Text, At: name, Expression: expression})
+		bindings = append(bindings, LetBinding{Name: name.Text, At: name, Expression: expression})
 	}
+	query, err := p.parsePipeline(tokenEOF)
+	query.Bindings = bindings
+	return query, err
+}
+
+func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
+	query := Query{}
 	source, err := p.expect(tokenIdentifier, "expected table name")
 	if err != nil {
 		return Query{}, err
 	}
 	query.Source, query.SourceAt = source.Text, source
-	for !p.check(tokenEOF) {
+	for !p.check(tokenEOF) && !p.check(stop) {
 		if _, err := p.expect(tokenPipe, "expected '|' before query operator"); err != nil {
 			return Query{}, err
 		}
@@ -112,6 +119,74 @@ func (p *parser) parseQuery() (Query, error) {
 			operator = TopOperator{At: name, Count: value, Term: term}
 		case "count":
 			operator = CountOperator{At: name}
+		case "union":
+			var queries []Query
+			for {
+				var nested Query
+				if p.match(tokenLeftParen) {
+					nested, err = p.parsePipeline(tokenRightParen)
+					if err == nil {
+						_, err = p.expect(tokenRightParen, "expected ')' after union query")
+					}
+				} else {
+					var nestedSource token
+					nestedSource, err = p.expect(tokenIdentifier, "expected table name after 'union'")
+					nested = Query{Source: nestedSource.Text, SourceAt: nestedSource}
+				}
+				if err != nil {
+					break
+				}
+				queries = append(queries, nested)
+				if !p.match(tokenComma) {
+					break
+				}
+			}
+			operator = UnionOperator{At: name, Queries: queries}
+		case "join":
+			kind := JoinInner
+			if p.matchIdentifier("kind") {
+				_, err = p.expect(tokenAssign, "expected '=' after join kind")
+				var kindToken token
+				if err == nil {
+					kindToken, err = p.expect(tokenIdentifier, "expected join kind")
+				}
+				if err == nil {
+					switch kindToken.Text {
+					case string(JoinInner):
+						kind = JoinInner
+					case string(JoinLeftOuter):
+						kind = JoinLeftOuter
+					default:
+						err = errorAt(kindToken, "join kind %q is not supported", kindToken.Text)
+					}
+				}
+			}
+			if err == nil {
+				_, err = p.expect(tokenLeftParen, "expected '(' before join query")
+			}
+			var right Query
+			if err == nil {
+				right, err = p.parsePipeline(tokenRightParen)
+			}
+			if err == nil {
+				_, err = p.expect(tokenRightParen, "expected ')' after join query")
+			}
+			if err == nil {
+				_, err = p.expectIdentifier("on", "expected 'on' after join query")
+			}
+			var keys []JoinKey
+			for err == nil {
+				var key token
+				key, err = p.expect(tokenIdentifier, "expected join column after 'on'")
+				if err != nil {
+					break
+				}
+				keys = append(keys, JoinKey{Name: key.Text, At: key})
+				if !p.match(tokenComma) {
+					break
+				}
+			}
+			operator = JoinOperator{At: name, Kind: kind, Right: right, Keys: keys}
 		default:
 			return Query{}, errorAt(name, "operator %q is not supported", name.Text)
 		}

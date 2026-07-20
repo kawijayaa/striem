@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) fields(w http.ResponseWriter, r *http.Request) {
-	discovered, err := s.store.ListFields(r.Context())
+	groups, err := s.store.ListFieldGroups(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list available fields", nil)
 		return
@@ -57,7 +58,7 @@ func (s *Server) fields(w http.ResponseWriter, r *http.Request) {
 		{Path: "Message", Type: "string"},
 		{Path: "RawData", Type: "dynamic"},
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"common": common, "discovered": discovered})
+	writeJSON(w, http.StatusOK, map[string]any{"common": common, "tables": groups})
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -70,22 +71,42 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) schema(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
+	datasets, err := s.store.ListDatasets(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list tables", nil)
+		return
+	}
+	columns := []map[string]string{
+		{"name": "TimeGenerated", "type": "datetime"},
+		{"name": "Source", "type": "string"},
+		{"name": "EventType", "type": "string"},
+		{"name": "Host", "type": "string"},
+		{"name": "User", "type": "string"},
+		{"name": "Message", "type": "string"},
+		{"name": "RawData", "type": "dynamic"},
+	}
+	sort.Slice(datasets, func(i, j int) bool { return datasets[i].Table < datasets[j].Table })
+	var totalEvents int64
+	tables := make([]map[string]any, 0, len(datasets)+1)
+	for _, dataset := range datasets {
+		totalEvents += dataset.EventCount
+	}
+	tables = append(tables, map[string]any{
+		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": columns,
+	})
+	for _, dataset := range datasets {
+		if dataset.Table == "" {
+			continue
+		}
+		tables = append(tables, map[string]any{
+			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": columns,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tables": []map[string]any{{
-			"name": "Events",
-			"columns": []map[string]string{
-				{"name": "TimeGenerated", "type": "datetime"},
-				{"name": "Source", "type": "string"},
-				{"name": "EventType", "type": "string"},
-				{"name": "Host", "type": "string"},
-				{"name": "User", "type": "string"},
-				{"name": "Message", "type": "string"},
-				{"name": "RawData", "type": "dynamic"},
-			},
-		}},
+		"tables":     tables,
 		"statements": []string{"let"},
-		"operators":  []string{"where", "project", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count"},
+		"operators":  []string{"where", "project", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "union", "join"},
 	})
 }
 
@@ -112,7 +133,18 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 		writeQueryError(w, err)
 		return
 	}
-	compiled, err := kql.Compile(parsed, time.Now())
+	datasets, err := s.store.ListDatasets(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not resolve query tables", nil)
+		return
+	}
+	catalog := make(kql.TableCatalog, len(datasets))
+	for _, dataset := range datasets {
+		if dataset.Table != "" {
+			catalog[dataset.Table] = dataset.ID
+		}
+	}
+	compiled, err := kql.Compile(parsed, time.Now(), catalog)
 	if err != nil {
 		writeQueryError(w, err)
 		return
@@ -164,7 +196,7 @@ func scanRows(rows *sql.Rows) ([]map[string]any, error) {
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
 			}
-			if column == "RawData" {
+			if strings.TrimRight(column, "0123456789") == "RawData" {
 				if text, ok := value.(string); ok {
 					var raw any
 					if json.Unmarshal([]byte(text), &raw) == nil {

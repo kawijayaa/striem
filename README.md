@@ -2,7 +2,7 @@
 
 ![Striem web page](screenshot.png)
 
-Striem is a small, per-team CTF log search application. Challenge operators provision JSON or CSV logs at deployment time, and players use a deliberately limited Kusto Query Language (KQL) subset over one `Events` table.
+Striem is a small, per-team CTF log search application. Challenge operators provision JSON or CSV logs at deployment time, and players use a deliberately limited Kusto Query Language (KQL) subset over dataset tables or the combined `Events` table.
 
 ## Run
 
@@ -41,6 +41,7 @@ Example manifest:
 {
   "datasets": [{
     "name": "Northstar Microsoft 365 audit logs",
+    "table": "UAL",
     "path": "events.csv",
     "format": "csv",
     "source": "microsoft365",
@@ -55,7 +56,7 @@ Example manifest:
 }
 ```
 
-Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, and gzip-compressed variants. The optional `format` is `auto`, `json`, or `csv`; auto-detection selects CSV for `.csv` and `.csv.gz` paths and JSON otherwise. Explicit `format` can override the extension.
+Each dataset requires a unique `table` name. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, and gzip-compressed variants. The optional `format` is `auto`, `json`, or `csv`; auto-detection selects CSV for `.csv` and `.csv.gz` paths and JSON otherwise. Explicit `format` can override the extension.
 
 CSV headers become top-level `RawData` fields and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) in mappings, such as `host\.name`.
 
@@ -73,6 +74,18 @@ docker run --rm -p 8080:8080 \
 ```
 
 ## Query
+
+Query a configured dataset directly by its manifest table name:
+
+```kusto
+UAL
+| where EventType == "UserLoginFailed"
+| take 100
+```
+
+`Events` remains available as a union of every configured table:
+
+Every table exposes the normalized columns below. Mappings may leave optional columns null; the complete source record remains in `RawData`.
 
 Available columns:
 
@@ -96,7 +109,7 @@ Events
 | order by Failures desc
 ```
 
-The web interface lists common and discovered JSON fields. Selecting a field inserts its path into the query editor. Keys that are not valid KQL identifiers use bracket access:
+The web interface groups discovered JSON fields by table. Selecting a field inserts its path into the query editor. Keys that are not valid KQL identifiers use bracket access:
 
 ```kusto
 Events
@@ -108,7 +121,27 @@ Supported tabular operators:
 
 ```text
 where, project, extend, summarize, distinct, order by, sort by,
-top, take, limit, count
+top, take, limit, count, union, join
+```
+
+`union` appends rows from tables or parenthesized pipelines with the same column names. Columns are aligned by name:
+
+```kusto
+UAL
+| project TimeGenerated, User, Host
+| union (Sysmon | project Host, User, TimeGenerated)
+| order by TimeGenerated desc
+```
+
+`join` correlates parenthesized pipelines on one or more same-name columns. It defaults to `inner` and also supports `leftouter`. Right-side key columns are omitted, while other duplicate names receive numeric suffixes such as `Host1`:
+
+```kusto
+UAL
+| project User, TimeGenerated
+| join kind=inner (
+    Sysmon
+    | project User, Host, Message
+  ) on User
 ```
 
 Supported scalar operations:

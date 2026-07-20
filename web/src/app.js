@@ -20,10 +20,12 @@ import { tags } from '@lezer/highlight';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
+const availableTables = new Set(['Events']);
 
 const operators = new Set([
   'let', 'where', 'project', 'extend', 'summarize', 'distinct', 'order', 'sort',
-  'top', 'take', 'limit', 'count', 'by', 'asc', 'desc',
+  'top', 'take', 'limit', 'count', 'union', 'join', 'kind', 'inner', 'leftouter',
+  'on', 'by', 'asc', 'desc',
 ]);
 const logicalOperators = new Set([
   'and', 'or', 'not', 'in', 'contains', 'startswith', 'endswith',
@@ -61,7 +63,7 @@ const kqlLanguage = StreamLanguage.define({
       if (logicalOperators.has(word)) return 'operator';
       if (literals.has(word)) return 'bool';
       if (functions.has(word) && stream.match(/^\s*\(/, false)) return 'typeName';
-      if (word === 'Events') return 'className';
+      if (availableTables.has(word)) return 'className';
       return 'variableName';
     }
     stream.next();
@@ -117,6 +119,7 @@ const operatorCompletions = [
   ['summarize', 'Aggregate rows'], ['distinct', 'Return unique rows'],
   ['order by', 'Sort rows'], ['sort by', 'Sort rows'], ['take', 'Limit rows'],
   ['top', 'Rank and limit rows'], ['limit', 'Limit rows'], ['count', 'Count rows'],
+  ['union', 'Combine compatible table rows'], ['join', 'Correlate rows by matching columns'],
 ].map(([label, detail]) => ({ label, apply: `${label} `, type: 'keyword', detail }));
 
 const functionCompletions = [
@@ -130,15 +133,19 @@ const functionCompletions = [
   ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
 ].map(([label, detail]) => ({ label, apply: `${label}()`, type: 'function', detail }));
 
-let availableFields = [];
+let commonFields = [];
+let fieldGroups = [];
 let fieldCompletions = [];
+let tableCompletions = [{ label: 'Events', type: 'class', detail: 'All datasets' }];
+let availableTableMetadata = [];
+let selectedTable = 'Events';
 
 function kqlCompletionSource(context) {
   const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.\[\]"]*/);
   if (!context.explicit && (!word || word.from === word.to)) return null;
   return {
     from: word ? word.from : context.pos,
-    options: [...operatorCompletions, ...functionCompletions, ...fieldCompletions],
+    options: [...tableCompletions, ...operatorCompletions, ...functionCompletions, ...fieldCompletions],
     validFor: /^[A-Za-z_][A-Za-z0-9_.\[\]"]*$/,
   };
 }
@@ -159,10 +166,10 @@ const editor = new EditorView({
       syntaxHighlighting(highlightStyle),
       editorTheme,
       keymap.of([
+        { key: 'Mod-Enter', run: () => { runQuery(); return true; } },
         ...closeBracketsKeymap,
         ...defaultKeymap,
         ...historyKeymap,
-        { key: 'Mod-Enter', run: () => { runQuery(); return true; } },
       ]),
       EditorView.lineWrapping,
     ],
@@ -276,47 +283,111 @@ function insertField(path) {
   editor.focus();
 }
 
+function selectTable(name) {
+  selectedTable = name;
+  const query = editor.state.doc.toString();
+  const sourceLine = /^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=\||$)/m;
+  if (sourceLine.test(query)) {
+    replaceQuery(query.replace(sourceLine, (_, leading, _source, trailing) => `${leading}${name}${trailing}`));
+  } else {
+    replaceQuery(`${name}\n| take 100`);
+  }
+  renderTables();
+  renderFields($('#field-search').value);
+}
+
+function renderTables() {
+  const list = $('#table-list');
+  list.replaceChildren();
+  availableTableMetadata.forEach(table => {
+    const button = document.createElement('button');
+    button.className = 'table-row';
+    button.classList.toggle('selected', table.name === selectedTable);
+    button.setAttribute('aria-pressed', String(table.name === selectedTable));
+    const identity = document.createElement('span');
+    const name = document.createElement('strong');
+    name.textContent = table.name;
+    const description = document.createElement('small');
+    description.textContent = table.description;
+    identity.append(name, description);
+    const count = document.createElement('span');
+    count.className = 'table-count';
+    count.textContent = Number(table.eventCount).toLocaleString();
+    button.append(identity, count);
+    button.addEventListener('click', () => selectTable(table.name));
+    list.append(button);
+  });
+}
+
 function renderFields(filter = '') {
   const list = $('#field-list');
   const normalized = filter.trim().toLowerCase();
-  const fields = availableFields.filter(field => field.path.toLowerCase().includes(normalized));
   list.replaceChildren();
-  if (!fields.length) {
+  const selectedGroups = selectedTable === 'Events'
+    ? fieldGroups
+    : fieldGroups.filter(group => group.table === selectedTable);
+  const groups = [{ table: 'Common', fields: commonFields }, ...selectedGroups]
+    .map(group => ({
+      ...group,
+      fields: group.fields.filter(field => field.path.toLowerCase().includes(normalized)
+        || group.table.toLowerCase().includes(normalized)),
+    }))
+    .filter(group => group.fields.length > 0);
+  const fieldCount = groups.reduce((count, group) => count + group.fields.length, 0);
+  $('#field-count').textContent = `${fieldCount} fields`;
+  if (!groups.length) {
     const empty = document.createElement('span');
     empty.className = 'muted';
     empty.textContent = 'No matching fields.';
     list.append(empty);
     return;
   }
-  fields.forEach(field => {
-    const button = document.createElement('button');
-    button.className = 'field-row';
-    button.title = `Insert ${field.path}`;
-    const path = document.createElement('span');
-    path.className = 'field-path';
-    path.textContent = field.path;
-    const type = document.createElement('span');
-    type.className = 'field-type';
-    type.textContent = field.type;
-    button.append(path, type);
-    button.addEventListener('click', () => insertField(field.path));
-    list.append(button);
+  groups.forEach(group => {
+    const heading = document.createElement('div');
+    heading.className = 'field-group';
+    heading.textContent = group.table;
+    list.append(heading);
+    group.fields.forEach(field => {
+      const button = document.createElement('button');
+      button.className = 'field-row';
+      button.title = `Insert ${field.path}`;
+      const path = document.createElement('span');
+      path.className = 'field-path';
+      path.textContent = field.path;
+      const type = document.createElement('span');
+      type.className = 'field-type';
+      type.textContent = field.type;
+      button.append(path, type);
+      button.addEventListener('click', () => insertField(field.path));
+      list.append(button);
+    });
   });
 }
 
 async function loadFields() {
   try {
-    const result = await request('/api/fields');
-    availableFields = [...result.common, ...result.discovered];
-    fieldCompletions = availableFields.map(field => ({
+    const [result, schema] = await Promise.all([request('/api/fields'), request('/api/schema')]);
+    commonFields = result.common;
+    fieldGroups = result.tables;
+    availableTableMetadata = schema.tables;
+    fieldCompletions = [
+      ...commonFields.map(field => ({ ...field, table: 'Common' })),
+      ...fieldGroups.flatMap(group => group.fields.map(field => ({ ...field, table: group.table }))),
+    ].map(field => ({
       label: field.path,
       type: field.type === 'dynamic' ? 'property' : 'variable',
-      detail: field.type,
+      detail: `${field.type} · ${field.table}`,
     }));
-    $('#field-count').textContent = `${availableFields.length} fields`;
+    tableCompletions = [
+      { label: 'Events', type: 'class', detail: 'All datasets' },
+      ...fieldGroups.map(group => ({ label: group.table, type: 'class', detail: 'Dataset table' })),
+    ];
+    fieldGroups.forEach(group => availableTables.add(group.table));
+    renderTables();
     renderFields();
   } catch {
     $('#field-count').textContent = 'Unavailable';
+    $('#table-list').innerHTML = '<span class="muted">Could not load tables.</span>';
     $('#field-list').innerHTML = '<span class="muted">Could not load fields.</span>';
   }
 }
@@ -328,6 +399,15 @@ rawDialog.addEventListener('click', event => {
   const outside = event.clientX < bounds.left || event.clientX > bounds.right
     || event.clientY < bounds.top || event.clientY > bounds.bottom;
   if (outside) rawDialog.close();
+});
+document.addEventListener('keydown', event => {
+  const isRunShortcut = event.key === 'Enter' && (event.ctrlKey || event.metaKey)
+    && !event.altKey && !event.shiftKey;
+  const isUnrelatedInput = event.target.closest?.('input, textarea, select, [contenteditable="true"]')
+    && !event.target.closest('#query');
+  if (event.defaultPrevented || !isRunShortcut || rawDialog.open || isUnrelatedInput) return;
+  event.preventDefault();
+  runQuery();
 });
 $('#run-query').addEventListener('click', runQuery);
 $('#field-search').addEventListener('input', event => renderFields(event.target.value));

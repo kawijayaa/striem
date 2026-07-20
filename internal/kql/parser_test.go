@@ -67,6 +67,54 @@ func TestCompileSummarize(t *testing.T) {
 	}
 }
 
+func TestCompileDatasetTable(t *testing.T) {
+	query, err := Parse(`Sysmon | where EventType == "1" | take 10`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now(), TableCatalog{"Sysmon": 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.SQL, "WHERE dataset_id = ?1") || compiled.Args[0] != int64(42) {
+		t.Fatalf("compiled table query = %s, %#v", compiled.SQL, compiled.Args)
+	}
+}
+
+func TestCompileUnionAlignsColumnsByName(t *testing.T) {
+	query, err := Parse(`UAL | project Host, Source | union (Sysmon | project Source, Host)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now(), TableCatalog{"UAL": 1, "Sysmon": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.SQL, "UNION ALL") || strings.Join(compiled.Columns, ",") != "Host,Source" {
+		t.Fatalf("compiled union = %s, columns %v", compiled.SQL, compiled.Columns)
+	}
+	if got := compiled.Args[:2]; got[0] != int64(1) || got[1] != int64(2) {
+		t.Fatalf("union table arguments = %#v", got)
+	}
+}
+
+func TestCompileJoinSuffixesRightColumns(t *testing.T) {
+	query, err := Parse(`UAL
+| project User, Host
+| join kind=leftouter (Sysmon | project User, Host, Message) on User
+| project Host, Host1, Message`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now(), TableCatalog{"UAL": 1, "Sysmon": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.SQL, "LEFT OUTER JOIN") || strings.Join(compiled.Columns, ",") != "Host,Host1,Message" {
+		t.Fatalf("compiled join = %s, columns %v", compiled.SQL, compiled.Columns)
+	}
+}
+
 func TestCompileParsedDynamicProperty(t *testing.T) {
 	query, err := Parse(`Events | extend Audit=parse_json(RawData.AuditData) | extend ClientIP=tostring(Audit.ClientIP) | project ClientIP`)
 	if err != nil {
@@ -232,7 +280,7 @@ func TestUsefulDiagnostics(t *testing.T) {
 		message string
 	}{
 		{`Other | take 1`, "unknown table"},
-		{`Events | join Other`, "not supported"},
+		{`Events | join Other`, "expected '(' before join query"},
 		{`Events | where Missing == 1`, "unknown column"},
 		{`Events | extend RawData.foo`, "require a column name"},
 		{`Events | take 1001`, "between 1 and 1000"},
@@ -243,7 +291,7 @@ func TestUsefulDiagnostics(t *testing.T) {
 		{`let value = 1 Events | take 1`, "expected ';'"},
 		{`let subset = Events | where Source == "x"; subset | take 1`, "tabular let bindings"},
 		{`let value = 1; let value = 2; Events | take 1`, "declared more than once"},
-		{`let Host = "x"; Events | take 1`, "conflicts with an Events column"},
+		{`let Host = "x"; Events | take 1`, "conflicts with a table column"},
 		{`let first = second; let second = 2; Events | take first`, "unknown column or variable"},
 		{`let rows = 1.5; Events | take rows`, "constant integer"},
 	}

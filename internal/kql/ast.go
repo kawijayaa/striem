@@ -89,6 +89,34 @@ type CountOperator struct{ At token }
 
 func (CountOperator) operatorNode() {}
 
+type UnionOperator struct {
+	At      token
+	Queries []Query
+}
+
+func (UnionOperator) operatorNode() {}
+
+type JoinKind string
+
+const (
+	JoinInner     JoinKind = "inner"
+	JoinLeftOuter JoinKind = "leftouter"
+)
+
+type JoinKey struct {
+	Name string
+	At   token
+}
+
+type JoinOperator struct {
+	At    token
+	Kind  JoinKind
+	Right Query
+	Keys  []JoinKey
+}
+
+func (JoinOperator) operatorNode() {}
+
 type Expression interface {
 	expressionNode()
 	position() token
