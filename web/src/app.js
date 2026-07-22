@@ -8,7 +8,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { setDiagnostics } from '@codemirror/lint';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import {
   drawSelection,
   dropCursor,
@@ -16,6 +16,7 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view';
+import { vim } from '@replit/codemirror-vim';
 import { tags } from '@lezer/highlight';
 import './style.css';
 
@@ -179,10 +180,14 @@ function kqlCompletionSource(context) {
   };
 }
 
+const vimCompartment = new Compartment();
+let vimEnabled = false;
+
 const editor = new EditorView({
   state: EditorState.create({
     doc: sharedQuery || 'Events\n| order by TimeGenerated desc\n| take 100',
     extensions: [
+      vimCompartment.of([]),
       lineNumbers(),
       history(),
       drawSelection(),
@@ -205,6 +210,16 @@ const editor = new EditorView({
   }),
   parent: $('#query'),
 });
+
+function toggleVim() {
+  vimEnabled = !vimEnabled;
+  const btn = $('#vim-toggle');
+  btn.textContent = vimEnabled ? 'Vim' : 'Normal';
+  btn.classList.toggle('active', vimEnabled);
+  editor.dispatch({ effects: vimCompartment.reconfigure(vimEnabled ? vim() : []) });
+}
+
+
 
 async function request(url, options = {}) {
   const response = await fetch(url, options);
@@ -693,6 +708,7 @@ document.addEventListener('keydown', event => {
 $('#run-query').addEventListener('click', runQuery);
 $('#save-query').addEventListener('click', saveCurrentQuery);
 $('#share-query').addEventListener('click', shareCurrentQuery);
+$('#vim-toggle').addEventListener('click', toggleVim);
 $('#results-view').addEventListener('click', () => {
   resultsPanelView = 'results';
   renderResultsPanelView();

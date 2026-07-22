@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oka/striem/internal/api"
-	"github.com/oka/striem/internal/database"
-	"github.com/oka/striem/internal/deployment"
+	"github.com/kawijayaa/striem/internal/api"
+	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/deployment"
 )
 
 func main() {
@@ -47,6 +47,8 @@ func main() {
 		Addr:              envOrDefault("STRIEM_ADDR", ":8080"),
 		Handler:           api.New(store, logger).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 

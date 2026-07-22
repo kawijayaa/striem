@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oka/striem/internal/database"
-	"github.com/oka/striem/internal/deployment"
-	"github.com/oka/striem/internal/ingest"
+	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/deployment"
+	"github.com/kawijayaa/striem/internal/ingest"
 )
 
 func TestProvisionedDataCanBeQueried(t *testing.T) {
@@ -98,11 +100,39 @@ func TestMicrosoft365FixtureCanBeInvestigated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	fixturePath, err := filepath.Abs(filepath.Join("..", "..", "testdata", "events.csv"))
+	fixtureDirectory := t.TempDir()
+	fixturePath := filepath.Join(fixtureDirectory, "events.csv")
+	fixture, err := os.Create(fixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestPath := filepath.Join(t.TempDir(), "datasets.json")
+	writer := csv.NewWriter(fixture)
+	if err := writer.Write([]string{"CreationDate", "Operations", "UserIds", "RecordType", "AuditData"}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 120; index++ {
+		operation := "UserLoggedIn"
+		clientIP := "203.0.113.10"
+		if index < 7 {
+			operation = "UserLoginFailed"
+			clientIP = "198.51.100.77"
+		} else if index < 10 {
+			operation = "UserLoginFailed"
+			clientIP = "192.0.2.44"
+		}
+		auditData := fmt.Sprintf(`{"ClientIP":%q}`, clientIP)
+		if err := writer.Write([]string{"1/01/2024 1:00:00 AM", operation, "analyst@example.com", "AzureActiveDirectory", auditData}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(fixtureDirectory, "datasets.json")
 	manifest := map[string]any{"datasets": []map[string]any{{
 		"name": "Northstar Microsoft 365 audit logs", "table": "UAL", "path": fixturePath,
 		"format": "csv", "source": "microsoft365", "timestampPath": "CreationDate",

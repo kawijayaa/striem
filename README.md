@@ -10,7 +10,7 @@ Striem is a small, per-team CTF log search application. Challenge operators prov
 node --version
 npm ci
 npm run build
-STRIEM_CONFIG=./testdata/datasets.json go run ./cmd/striem
+STRIEM_CONFIG=/path/to/datasets.json go run ./cmd/striem
 ```
 
 Open <http://localhost:8080>. Data is stored in `./data/striem.db` by default.
@@ -68,7 +68,7 @@ Mappings use GJSON paths for every format. JSON objects or arrays encoded inside
 docker build -t striem .
 docker run --rm -p 8080:8080 \
   -v striem-data:/data \
-  -v "$PWD/testdata:/config:ro" \
+  -v "/path/to/config:/config:ro" \
   -e STRIEM_CONFIG=/config/datasets.json \
   striem
 ```

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oka/striem/internal/eventtime"
+	"github.com/kawijayaa/striem/internal/eventtime"
 )
 
 type CompiledQuery struct {
@@ -292,12 +292,13 @@ func availableColumnName(name string, used map[string]struct{}) string {
 	if _, exists := used[name]; !exists {
 		return name
 	}
-	for suffix := 1; ; suffix++ {
+	for suffix := 1; suffix <= 1000; suffix++ {
 		candidate := fmt.Sprintf("%s%d", name, suffix)
 		if _, exists := used[candidate]; !exists {
 			return candidate
 		}
 	}
+	panic("too many column name collisions")
 }
 
 func (c *compiler) compileNamed(items []NamedExpression, aggregate bool) ([]string, []string, error) {

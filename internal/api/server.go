@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oka/striem/internal/database"
-	"github.com/oka/striem/internal/kql"
-	webassets "github.com/oka/striem/web"
+	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/kql"
+	webassets "github.com/kawijayaa/striem/web"
 )
 
 type Server struct {
@@ -225,7 +225,7 @@ func writeQueryError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, queryError.Message, map[string]int{"line": queryError.Line, "column": queryError.Column})
 		return
 	}
-	writeError(w, http.StatusBadRequest, err.Error(), nil)
+	writeError(w, http.StatusBadRequest, "query could not be executed", nil)
 }
 
 func writeError(w http.ResponseWriter, status int, message string, position map[string]int) {

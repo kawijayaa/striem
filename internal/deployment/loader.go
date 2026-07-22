@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/oka/striem/internal/database"
-	"github.com/oka/striem/internal/ingest"
+	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/ingest"
 )
 
 type Manifest struct {
@@ -45,7 +45,10 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	if len(manifest.Datasets) == 0 {
 		return nil, fmt.Errorf("deployment manifest contains no datasets")
 	}
-	baseDirectory := filepath.Dir(manifestPath)
+	baseDirectory, err := filepath.Abs(filepath.Dir(manifestPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve manifest directory: %w", err)
+	}
 	existingDatasets, err := store.ListDatasets(ctx)
 	if err != nil {
 		return nil, err
@@ -88,6 +91,10 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		path := configured.Path
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(baseDirectory, path)
+		}
+		path = filepath.Clean(path)
+		if !strings.HasPrefix(path, baseDirectory+string(filepath.Separator)) && path != baseDirectory {
+			return nil, fmt.Errorf("dataset %q path %q escapes the base directory", configured.Name, configured.Path)
 		}
 		format, err := datasetFormat(path, configured.Format)
 		if err != nil {

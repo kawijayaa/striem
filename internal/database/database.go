@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {
@@ -36,7 +36,7 @@ type FieldGroup struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -130,6 +130,9 @@ func (s *Store) ensureDatasetSignatureColumn(ctx context.Context) error {
 			found = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
+	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("inspect datasets schema: %w", err)
 	}
@@ -185,6 +188,9 @@ func (s *Store) ensureDatasetTableColumn(ctx context.Context) error {
 		if name == "table_name" {
 			found = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect datasets schema: %w", err)
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("inspect datasets schema: %w", err)

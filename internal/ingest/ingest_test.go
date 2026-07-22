@@ -5,10 +5,12 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/oka/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/database"
 )
 
 func TestImportPreservesTimestampAndMapsFields(t *testing.T) {
@@ -216,7 +218,111 @@ func TestImportCSVRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func openTestStore(t *testing.T) *database.Store {
+func BenchmarkImportNDJSON(b *testing.B) {
+	const eventCount = 20_000
+	var input strings.Builder
+	for index := 0; index < eventCount; index++ {
+		fmt.Fprintf(&input, `{"ts":"2024-01-01T00:00:00Z","event":{"type":"process","host":"pc-%d","user":"user-%d"},"message":"created process","values":[1,2,3]}`+"\n", index%100, index%10)
+	}
+	payload := input.String()
+	store := openTestStore(b)
+	if err := store.DropEventIndexes(b.Context()); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(payload)))
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		result, err := New(store).Import(b.Context(), strings.NewReader(payload), false, Mapping{
+			Name: fmt.Sprintf("benchmark-%d", iteration), Table: fmt.Sprintf("Benchmark%d", iteration),
+			Source: "benchmark", TimestampPath: "ts", TimestampFormat: "rfc3339",
+			FieldPaths: map[string]string{"EventType": "event.type", "Host": "event.host", "User": "event.user", "Message": "message"},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		if _, err := store.DB().ExecContext(b.Context(), "DELETE FROM datasets WHERE id = ?", result.Dataset.ID); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+	}
+	b.ReportMetric(float64(eventCount)/b.Elapsed().Seconds()*float64(b.N), "events/s")
+}
+
+func BenchmarkImportTestdata(b *testing.B) {
+	tests := []struct {
+		name    string
+		file    string
+		mapping Mapping
+	}{
+		{
+			name: "Microsoft365CSV", file: "events.csv",
+			mapping: Mapping{
+				Format: FormatCSV, Source: "microsoft365", TimestampPath: "CreationDate", TimestampFormat: "2/01/2006 3:04:05 PM",
+				FieldPaths: map[string]string{"EventType": "Operations", "User": "UserIds", "Message": "RecordType"},
+			},
+		},
+		{
+			name: "SysmonNDJSON", file: "sysmon.ndjson",
+			mapping: Mapping{
+				Source: "sysmon", TimestampPath: "Event.System.TimeCreated.#attributes.SystemTime", TimestampFormat: "rfc3339",
+				FieldPaths: map[string]string{"EventType": "Event.System.EventID", "Host": "Event.System.Computer", "User": "Event.EventData.User", "Message": "Event.EventData.Image"},
+			},
+		},
+		{
+			name: "SuricataJSON", file: "eve.json",
+			mapping: Mapping{
+				Source: "suricata", TimestampPath: "timestamp", TimestampFormat: "2006-01-02T15:04:05.999999-0700",
+				FieldPaths: map[string]string{"EventType": "event_type", "Message": "alert.signature"},
+			},
+		},
+	}
+	for _, test := range tests {
+		b.Run(test.name, func(b *testing.B) {
+			path := filepath.Join("..", "..", "testdata", test.file)
+			info, err := os.Stat(path)
+			if err != nil {
+				b.Skipf("testdata unavailable: %v", err)
+			}
+			store := openTestStore(b)
+			if err := store.DropEventIndexes(b.Context()); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(info.Size())
+			var imported int64
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				input, err := os.Open(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+				mapping := test.mapping
+				mapping.Name = fmt.Sprintf("%s-%d", test.name, iteration)
+				mapping.Table = fmt.Sprintf("%s%d", test.name, iteration)
+				result, importErr := New(store).Import(b.Context(), input, false, mapping)
+				closeErr := input.Close()
+				if importErr != nil {
+					b.Fatal(importErr)
+				}
+				if closeErr != nil {
+					b.Fatal(closeErr)
+				}
+				imported += result.Dataset.EventCount
+				b.StopTimer()
+				if _, err := store.DB().ExecContext(b.Context(), "DELETE FROM datasets WHERE id = ?", result.Dataset.ID); err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+			}
+			b.ReportMetric(float64(imported)/b.Elapsed().Seconds(), "events/s")
+			b.ReportMetric(float64(imported)/float64(b.N), "events/op")
+		})
+	}
+}
+
+func openTestStore(t testing.TB) *database.Store {
 	t.Helper()
 	store, err := database.Open(t.TempDir() + "/test.db")
 	if err != nil {

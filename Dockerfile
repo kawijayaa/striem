@@ -7,11 +7,12 @@ RUN npm ci && npm run build
 
 FROM golang:1.24-alpine AS build
 WORKDIR /src
+RUN apk add --no-cache gcc musl-dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/striem ./cmd/striem
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/striem ./cmd/striem
 
 FROM alpine:3.22
 RUN addgroup -S striem && adduser -S -G striem striem

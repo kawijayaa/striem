@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oka/striem/internal/database"
-	"github.com/oka/striem/internal/eventtime"
+	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/eventtime"
 	"github.com/tidwall/gjson"
 )
 
 const maxEventSize = 2 << 20
 const maxExpandedSize = 1 << 30
-const eventInsertBatchSize = 250
+const eventInsertBatchSize = 128
 
 const (
 	FormatJSON = "json"
@@ -110,70 +110,41 @@ VALUES (?, ?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Signature, mapp
 	discoveredFields := make(map[string]string)
 	pendingValues := make([]any, 0, eventInsertBatchSize*8)
 	pendingRecords := 0
+	const insertEvents = `INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data) VALUES `
+	batchRows := make([]string, eventInsertBatchSize)
+	for index := range batchRows {
+		batchRows[index] = "(?, ?, ?, ?, ?, ?, ?, ?)"
+	}
+	eventStatement, err := tx.PrepareContext(ctx, insertEvents+strings.Join(batchRows, ","))
+	if err != nil {
+		return Result{}, fmt.Errorf("prepare event insert: %w", err)
+	}
+	defer eventStatement.Close()
 	flushEvents := func() error {
 		if pendingRecords == 0 {
 			return nil
 		}
-		rows := make([]string, pendingRecords)
-		for index := range rows {
-			rows[index] = "(?, ?, ?, ?, ?, ?, ?, ?)"
-		}
-		query := `INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data) VALUES ` + strings.Join(rows, ",")
-		if _, err := tx.ExecContext(ctx, query, pendingValues...); err != nil {
-			return err
+		if pendingRecords == eventInsertBatchSize {
+			if _, err := eventStatement.ExecContext(ctx, pendingValues...); err != nil {
+				return err
+			}
+		} else {
+			query := insertEvents + strings.Join(batchRows[:pendingRecords], ",")
+			if _, err := tx.ExecContext(ctx, query, pendingValues...); err != nil {
+				return err
+			}
 		}
 		pendingValues = pendingValues[:0]
 		pendingRecords = 0
 		return nil
 	}
-
 	count, err := decodeRecords(input, format, func(index int, raw json.RawMessage) error {
-		if len(raw) > maxEventSize {
-			return fmt.Errorf("record %d exceeds the 2 MiB limit", index)
-		}
-		if !gjson.ValidBytes(raw) {
-			return fmt.Errorf("record %d must be a JSON object", index)
-		}
-		parsed := gjson.ParseBytes(raw)
-		if !parsed.IsObject() {
-			return fmt.Errorf("record %d must be a JSON object", index)
-		}
-		if collectResultFields(parsed, "RawData", discoveredFields, 0) {
-			normalized, value, err := normalizeRecord(raw)
-			if err != nil {
-				return fmt.Errorf("normalize record %d: %w", index, err)
-			}
-			raw = normalized
-			collectFields(value, "RawData", discoveredFields)
-		}
-
-		timestampValue := gjson.GetBytes(raw, mapping.TimestampPath)
-		if !timestampValue.Exists() {
-			return fmt.Errorf("record %d has no timestamp at %q", index, mapping.TimestampPath)
-		}
-		timestamp, err := parseTimestamp(timestampValue, mapping.TimestampFormat)
+		values, err := prepareEvent(raw, index, mapping, discoveredFields)
 		if err != nil {
-			return fmt.Errorf("record %d timestamp: %w", index, err)
+			return err
 		}
-
-		source := mapping.Source
-		if mapping.SourcePath != "" {
-			source = valueString(gjson.GetBytes(raw, mapping.SourcePath))
-		}
-		if source == "" {
-			return fmt.Errorf("record %d has an empty source", index)
-		}
-
-		pendingValues = append(pendingValues,
-			datasetID,
-			eventtime.Format(timestamp),
-			source,
-			mappedValue(raw, mapping.FieldPaths, "EventType"),
-			mappedValue(raw, mapping.FieldPaths, "Host"),
-			mappedValue(raw, mapping.FieldPaths, "User"),
-			mappedValue(raw, mapping.FieldPaths, "Message"),
-			string(raw),
-		)
+		pendingValues = append(pendingValues, datasetID)
+		pendingValues = append(pendingValues, values...)
 		pendingRecords++
 		if pendingRecords == eventInsertBatchSize {
 			if err := flushEvents(); err != nil {
@@ -227,6 +198,55 @@ func validTableName(value string) bool {
 		return false
 	}
 	return true
+}
+
+func prepareEvent(raw json.RawMessage, index int, mapping Mapping, discoveredFields map[string]string) ([]any, error) {
+	if len(raw) > maxEventSize {
+		return nil, fmt.Errorf("record %d exceeds the 2 MiB limit", index)
+	}
+	if !gjson.ValidBytes(raw) {
+		return nil, fmt.Errorf("record %d must be a JSON object", index)
+	}
+	parsed := gjson.ParseBytes(raw)
+	if !parsed.IsObject() {
+		return nil, fmt.Errorf("record %d must be a JSON object", index)
+	}
+	if collectResultFields(parsed, "RawData", discoveredFields, 0) {
+		normalized, value, err := normalizeRecord(raw)
+		if err != nil {
+			return nil, fmt.Errorf("normalize record %d: %w", index, err)
+		}
+		raw = normalized
+		collectFields(value, "RawData", discoveredFields)
+		parsed = gjson.ParseBytes(raw)
+	}
+
+	timestampValue := parsed.Get(mapping.TimestampPath)
+	if !timestampValue.Exists() {
+		return nil, fmt.Errorf("record %d has no timestamp at %q", index, mapping.TimestampPath)
+	}
+	timestamp, err := parseTimestamp(timestampValue, mapping.TimestampFormat)
+	if err != nil {
+		return nil, fmt.Errorf("record %d timestamp: %w", index, err)
+	}
+
+	source := mapping.Source
+	if mapping.SourcePath != "" {
+		source = valueString(parsed.Get(mapping.SourcePath))
+	}
+	if source == "" {
+		return nil, fmt.Errorf("record %d has an empty source", index)
+	}
+
+	return []any{
+		eventtime.Format(timestamp),
+		source,
+		mappedValue(parsed, mapping.FieldPaths, "EventType"),
+		mappedValue(parsed, mapping.FieldPaths, "Host"),
+		mappedValue(parsed, mapping.FieldPaths, "User"),
+		mappedValue(parsed, mapping.FieldPaths, "Message"),
+		string(raw),
+	}, nil
 }
 
 func normalizeRecord(raw []byte) ([]byte, any, error) {
@@ -556,12 +576,12 @@ func ensureEOF(decoder *json.Decoder) error {
 	return err
 }
 
-func mappedValue(raw []byte, paths map[string]string, field string) any {
+func mappedValue(record gjson.Result, paths map[string]string, field string) any {
 	path := paths[field]
 	if path == "" {
 		return nil
 	}
-	value := gjson.GetBytes(raw, path)
+	value := record.Get(path)
 	if !value.Exists() || value.Type == gjson.Null {
 		return nil
 	}

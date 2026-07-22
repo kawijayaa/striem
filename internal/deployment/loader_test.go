@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oka/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/database"
 )
 
 func TestLoadUsesRelativePathsAndReplacesDataset(t *testing.T) {
