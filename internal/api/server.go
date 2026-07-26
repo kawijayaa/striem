@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -33,7 +34,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ready", s.health)
 	mux.HandleFunc("GET /api/schema", s.schema)
 	mux.HandleFunc("GET /api/fields", s.fields)
-	mux.HandleFunc("POST /api/query", s.query)
+	mux.HandleFunc("GET /api/questions", s.questions)
+	mux.HandleFunc("POST /api/questions/{id}/answer", requireSameOrigin(s.submitAnswer))
+	mux.HandleFunc("POST /api/query", requireSameOrigin(s.query))
+	mux.HandleFunc("POST /api/query/validate", requireSameOrigin(s.validateQuery))
 
 	static, err := fs.Sub(webassets.Files, "dist")
 	if err != nil {
@@ -77,6 +81,11 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not list tables", nil)
 		return
 	}
+	challengeName, err := s.store.ChallengeName(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load workspace metadata", nil)
+		return
+	}
 	columns := []map[string]string{
 		{"name": "TimeGenerated", "type": "datetime"},
 		{"name": "Source", "type": "string"},
@@ -104,9 +113,10 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tables":     tables,
-		"statements": []string{"let"},
-		"operators":  []string{"where", "project", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "union", "join"},
+		"challengeName": challengeName,
+		"tables":        tables,
+		"statements":    []string{"let"},
+		"operators":     []string{"where", "search", "project", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "mv-expand", "mv-apply", "union", "join"},
 	})
 }
 
@@ -114,12 +124,31 @@ type queryRequest struct {
 	Query string `json:"query"`
 }
 
-func (s *Server) query(w http.ResponseWriter, r *http.Request) {
-	var request queryRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+type answerRequest struct {
+	Answer string `json:"answer"`
+}
+
+func (s *Server) questions(w http.ResponseWriter, r *http.Request) {
+	state, err := s.store.ChallengeState(r.Context())
+	if err != nil {
+		s.logger.Error("list investigation questions", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load investigation questions", nil)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
+		return
+	}
+	var request answerRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Query) == "" {
-		writeError(w, http.StatusBadRequest, "query is required", nil)
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "answer is required", nil)
 		return
 	}
 	var trailing any
@@ -127,26 +156,35 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "request must contain one JSON object", nil)
 		return
 	}
+	request.Answer = strings.TrimSpace(request.Answer)
+	if request.Answer == "" || len(request.Answer) > 512 {
+		writeError(w, http.StatusBadRequest, "answer must contain 1 to 512 characters", nil)
+		return
+	}
+	result, err := s.store.SubmitAnswer(r.Context(), r.PathValue("id"), request.Answer, time.Now().UTC())
+	if errors.Is(err, database.ErrQuestionNotFound) {
+		writeError(w, http.StatusNotFound, "question not found", nil)
+		return
+	}
+	if err != nil {
+		s.logger.Error("submit investigation answer", "question", r.PathValue("id"), "error", err)
+		writeError(w, http.StatusInternalServerError, "could not submit answer", nil)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if result.RetryAfter > 0 {
+		retryMilliseconds := int64((result.RetryAfter + time.Millisecond - 1) / time.Millisecond)
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error": "wait before trying again", "retryAfterMs": retryMilliseconds,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
 
-	parsed, err := kql.Parse(request.Query)
-	if err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	datasets, err := s.store.ListDatasets(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve query tables", nil)
-		return
-	}
-	catalog := make(kql.TableCatalog, len(datasets))
-	for _, dataset := range datasets {
-		if dataset.Table != "" {
-			catalog[dataset.Table] = dataset.ID
-		}
-	}
-	compiled, err := kql.Compile(parsed, time.Now(), catalog)
-	if err != nil {
-		writeQueryError(w, err)
+func (s *Server) query(w http.ResponseWriter, r *http.Request) {
+	compiled, ok := s.compileQuery(w, r)
+	if !ok {
 		return
 	}
 
@@ -161,7 +199,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	results, err := scanRows(rows)
+	results, err := scanRows(rows, compiled.DynamicColumns)
 	if err != nil {
 		s.logger.Error("query result failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read query result", nil)
@@ -175,7 +213,82 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func scanRows(rows *sql.Rows) ([]map[string]any, error) {
+func (s *Server) validateQuery(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.compileQuery(w, r); !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request) (kql.CompiledQuery, bool) {
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
+		return kql.CompiledQuery{}, false
+	}
+	var request queryRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Query) == "" {
+		writeError(w, http.StatusBadRequest, "query is required", nil)
+		return kql.CompiledQuery{}, false
+	}
+	if len(request.Query) > 32<<10 {
+		writeError(w, http.StatusBadRequest, "query cannot exceed 32 KiB", nil)
+		return kql.CompiledQuery{}, false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "request must contain one JSON object", nil)
+		return kql.CompiledQuery{}, false
+	}
+
+	parsed, err := kql.Parse(request.Query)
+	if err != nil {
+		writeQueryError(w, err)
+		return kql.CompiledQuery{}, false
+	}
+	datasets, err := s.store.ListDatasets(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not resolve query tables", nil)
+		return kql.CompiledQuery{}, false
+	}
+	catalog := make(kql.TableCatalog, len(datasets))
+	for _, dataset := range datasets {
+		if dataset.Table != "" {
+			catalog[dataset.Table] = dataset.ID
+		}
+	}
+	compiled, err := kql.Compile(parsed, time.Now(), catalog)
+	if err != nil {
+		writeQueryError(w, err)
+		return kql.CompiledQuery{}, false
+	}
+	return compiled, true
+}
+
+func requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Striem-Request") != "1" {
+			writeError(w, http.StatusForbidden, "request could not be verified", nil)
+			return
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+			writeError(w, http.StatusForbidden, "cross-origin requests are not allowed", nil)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+				writeError(w, http.StatusForbidden, "cross-origin requests are not allowed", nil)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, err
@@ -196,7 +309,8 @@ func scanRows(rows *sql.Rows) ([]map[string]any, error) {
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
 			}
-			if strings.TrimRight(column, "0123456789") == "RawData" {
+			_, dynamic := dynamicColumns[column]
+			if dynamic || strings.TrimRight(column, "0123456789") == "RawData" {
 				if text, ok := value.(string); ok {
 					var raw any
 					if json.Unmarshal([]byte(text), &raw) == nil {

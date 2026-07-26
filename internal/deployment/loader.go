@@ -7,26 +7,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/ingest"
+	"gopkg.in/yaml.v3"
 )
 
 type Manifest struct {
-	Datasets []Dataset `json:"datasets"`
+	ChallengeName      string     `json:"challengeName" yaml:"challengeName"`
+	Flag               string     `json:"flag" yaml:"flag"`
+	SubmissionCooldown string     `json:"submissionCooldown" yaml:"submissionCooldown"`
+	Questions          []Question `json:"questions" yaml:"questions"`
+	Datasets           []Dataset  `json:"datasets" yaml:"datasets"`
+}
+
+type Question struct {
+	ID              string   `json:"id" yaml:"id"`
+	Revision        int      `json:"revision" yaml:"revision"`
+	Title           string   `json:"title" yaml:"title"`
+	Prompt          string   `json:"prompt" yaml:"prompt"`
+	AcceptedAnswers []string `json:"acceptedAnswers" yaml:"acceptedAnswers"`
+	CaseSensitive   bool     `json:"caseSensitive" yaml:"caseSensitive"`
 }
 
 type Dataset struct {
-	Name            string            `json:"name"`
-	Table           string            `json:"table"`
-	Path            string            `json:"path"`
-	Format          string            `json:"format"`
-	Source          string            `json:"source"`
-	SourcePath      string            `json:"sourcePath"`
-	TimestampPath   string            `json:"timestampPath"`
-	TimestampFormat string            `json:"timestampFormat"`
-	FieldPaths      map[string]string `json:"fieldPaths"`
+	Name            string            `json:"name" yaml:"name"`
+	Table           string            `json:"table" yaml:"table"`
+	Path            string            `json:"path" yaml:"path"`
+	Format          string            `json:"format" yaml:"format"`
+	Source          string            `json:"source" yaml:"source"`
+	SourcePath      string            `json:"sourcePath" yaml:"sourcePath"`
+	TimestampPath   string            `json:"timestampPath" yaml:"timestampPath"`
+	TimestampFormat string            `json:"timestampFormat" yaml:"timestampFormat"`
+	FieldPaths      map[string]string `json:"fieldPaths" yaml:"fieldPaths"`
 }
 
 func Load(ctx context.Context, store *database.Store, manifestPath string) ([]database.Dataset, error) {
@@ -37,13 +53,21 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	defer file.Close()
 
 	var manifest Manifest
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
 	if err := decoder.Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("decode deployment manifest: %w", err)
 	}
 	if len(manifest.Datasets) == 0 {
 		return nil, fmt.Errorf("deployment manifest contains no datasets")
+	}
+	manifest.ChallengeName = strings.TrimSpace(manifest.ChallengeName)
+	if len(manifest.ChallengeName) > 120 {
+		return nil, fmt.Errorf("challengeName cannot exceed 120 characters")
+	}
+	challenge, err := validateChallenge(manifest)
+	if err != nil {
+		return nil, err
 	}
 	baseDirectory, err := filepath.Abs(filepath.Dir(manifestPath))
 	if err != nil {
@@ -152,7 +176,90 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		}
 		indexesDropped = false
 	}
+	if err := store.SetChallengeName(ctx, manifest.ChallengeName); err != nil {
+		return nil, err
+	}
+	if err := store.ConfigureChallenge(ctx, challenge); err != nil {
+		return nil, err
+	}
 	return loaded, nil
+}
+
+var questionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) {
+	cooldown := 3 * time.Second
+	if strings.TrimSpace(manifest.SubmissionCooldown) != "" {
+		parsed, err := time.ParseDuration(manifest.SubmissionCooldown)
+		if err != nil {
+			return database.ChallengeDefinition{}, fmt.Errorf("submissionCooldown: %w", err)
+		}
+		if parsed < 0 || parsed > time.Minute {
+			return database.ChallengeDefinition{}, fmt.Errorf("submissionCooldown must be between 0s and 1m")
+		}
+		cooldown = parsed
+	}
+	flag := strings.TrimSpace(manifest.Flag)
+	if len(manifest.Questions) > 0 && flag == "" {
+		return database.ChallengeDefinition{}, fmt.Errorf("flag is required when questions are configured")
+	}
+	if len(flag) > 512 {
+		return database.ChallengeDefinition{}, fmt.Errorf("flag cannot exceed 512 characters")
+	}
+	if len(manifest.Questions) > 100 {
+		return database.ChallengeDefinition{}, fmt.Errorf("questions cannot contain more than 100 entries")
+	}
+	challenge := database.ChallengeDefinition{Flag: flag, Cooldown: cooldown, Questions: make([]database.QuestionDefinition, 0, len(manifest.Questions))}
+	seen := make(map[string]struct{}, len(manifest.Questions))
+	for index, configured := range manifest.Questions {
+		configured.ID = strings.TrimSpace(configured.ID)
+		if !questionIDPattern.MatchString(configured.ID) {
+			return database.ChallengeDefinition{}, fmt.Errorf("question %d id must match %s", index+1, questionIDPattern.String())
+		}
+		if _, duplicate := seen[configured.ID]; duplicate {
+			return database.ChallengeDefinition{}, fmt.Errorf("question id %q is configured more than once", configured.ID)
+		}
+		seen[configured.ID] = struct{}{}
+		if configured.Revision == 0 {
+			configured.Revision = 1
+		}
+		if configured.Revision < 1 {
+			return database.ChallengeDefinition{}, fmt.Errorf("question %q revision must be positive", configured.ID)
+		}
+		configured.Title = strings.TrimSpace(configured.Title)
+		if configured.Title == "" || len(configured.Title) > 120 {
+			return database.ChallengeDefinition{}, fmt.Errorf("question %q title must contain 1 to 120 characters", configured.ID)
+		}
+		configured.Prompt = strings.TrimSpace(configured.Prompt)
+		if configured.Prompt == "" || len(configured.Prompt) > 8192 {
+			return database.ChallengeDefinition{}, fmt.Errorf("question %q prompt must contain 1 to 8192 characters", configured.ID)
+		}
+		if len(configured.AcceptedAnswers) == 0 || len(configured.AcceptedAnswers) > 20 {
+			return database.ChallengeDefinition{}, fmt.Errorf("question %q must contain 1 to 20 acceptedAnswers", configured.ID)
+		}
+		answers := make([]string, 0, len(configured.AcceptedAnswers))
+		answerSet := make(map[string]struct{}, len(configured.AcceptedAnswers))
+		for _, answer := range configured.AcceptedAnswers {
+			answer = strings.TrimSpace(answer)
+			if answer == "" || len(answer) > 512 {
+				return database.ChallengeDefinition{}, fmt.Errorf("question %q acceptedAnswers must contain 1 to 512 characters", configured.ID)
+			}
+			key := answer
+			if !configured.CaseSensitive {
+				key = strings.ToLower(key)
+			}
+			if _, duplicate := answerSet[key]; duplicate {
+				return database.ChallengeDefinition{}, fmt.Errorf("question %q contains duplicate acceptedAnswers", configured.ID)
+			}
+			answerSet[key] = struct{}{}
+			answers = append(answers, answer)
+		}
+		challenge.Questions = append(challenge.Questions, database.QuestionDefinition{
+			ID: configured.ID, Revision: configured.Revision, Title: configured.Title, Prompt: configured.Prompt,
+			AcceptedAnswers: answers, CaseSensitive: configured.CaseSensitive,
+		})
+	}
+	return challenge, nil
 }
 
 func datasetSignature(configured Dataset, path string, info os.FileInfo) (string, error) {

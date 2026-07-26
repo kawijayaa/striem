@@ -13,6 +13,7 @@ type LetBinding struct {
 	Name       string
 	At         token
 	Expression Expression
+	Tabular    *Query
 }
 
 type Operator interface{ operatorNode() }
@@ -24,10 +25,18 @@ type WhereOperator struct {
 
 func (WhereOperator) operatorNode() {}
 
+type SearchOperator struct {
+	At         token
+	Expression Expression
+}
+
+func (SearchOperator) operatorNode() {}
+
 type NamedExpression struct {
 	Name       string
 	At         token
 	Expression Expression
+	Explicit   bool
 }
 
 type ProjectOperator struct {
@@ -89,6 +98,26 @@ type CountOperator struct{ At token }
 
 func (CountOperator) operatorNode() {}
 
+type MVExpandOperator struct {
+	At         token
+	Name       string
+	Expression Expression
+	Limit      Expression
+}
+
+func (MVExpandOperator) operatorNode() {}
+
+type MVApplyOperator struct {
+	At         token
+	Alias      string
+	Expression Expression
+	Limit      Expression
+	Wheres     []Expression
+	Aggregates []NamedExpression
+}
+
+func (MVApplyOperator) operatorNode() {}
+
 type UnionOperator struct {
 	At      token
 	Queries []Query
@@ -101,6 +130,7 @@ type JoinKind string
 const (
 	JoinInner     JoinKind = "inner"
 	JoinLeftOuter JoinKind = "leftouter"
+	JoinLeftAnti  JoinKind = "leftanti"
 )
 
 type JoinKey struct {
@@ -123,8 +153,9 @@ type Expression interface {
 }
 
 type IdentifierExpression struct {
-	At    token
-	Parts []string
+	At      token
+	Parts   []string
+	Indices map[int]int
 }
 
 func (IdentifierExpression) expressionNode()   {}
@@ -180,3 +211,8 @@ type FunctionExpression struct {
 
 func (FunctionExpression) expressionNode()   {}
 func (e FunctionExpression) position() token { return e.At }
+
+type StarExpression struct{ At token }
+
+func (StarExpression) expressionNode()   {}
+func (e StarExpression) position() token { return e.At }

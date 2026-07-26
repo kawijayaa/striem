@@ -1,0 +1,47 @@
+services:
+  striem:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      STRIEM_ADDR: :8080
+      STRIEM_CONFIG: /config/datasets.yaml
+      STRIEM_DATA_DIR: /data
+    expose:
+      - "8080"
+    volumes:
+      - striem-data:/data
+      - ./testdata:/config:ro,Z
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 90s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    command: tunnel --config /etc/cloudflared/config.yml --no-autoupdate run
+    depends_on:
+      striem:
+        condition: service_healthy
+    volumes:
+      - ./deploy/cloudflared/config.yml:/etc/cloudflared/config.yml:ro,Z
+      - ${HOME}/.cloudflared/efda31a1-6210-47ae-9f9f-69bee47f372a.json:/etc/cloudflared/credentials.json:ro,Z
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  striem-data:

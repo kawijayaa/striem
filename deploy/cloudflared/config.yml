@@ -1,0 +1,11 @@
+tunnel: efda31a1-6210-47ae-9f9f-69bee47f372a
+credentials-file: /etc/cloudflared/credentials.json
+protocol: http2
+
+ingress:
+  - hostname: striem.k3ng.xyz
+    service: http://striem:8080
+    originRequest:
+      httpHostHeader: striem.k3ng.xyz
+      connectTimeout: 10s
+  - service: http_status:404

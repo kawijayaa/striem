@@ -10,9 +10,10 @@ import (
 )
 
 type CompiledQuery struct {
-	SQL     string
-	Args    []any
-	Columns []string
+	SQL            string
+	Args           []any
+	Columns        []string
+	DynamicColumns map[string]struct{}
 }
 
 type TableCatalog map[string]int64
@@ -20,15 +21,19 @@ type TableCatalog map[string]int64
 type compiler struct {
 	args      []any
 	columns   map[string]struct{}
+	dynamic   map[string]struct{}
 	variables map[string]string
 	constants map[string]any
+	tabular   map[string]relation
+	declared  map[string]struct{}
 	tables    TableCatalog
 	now       time.Time
 }
 
 type relation struct {
-	SQL     string
-	Columns []string
+	SQL            string
+	Columns        []string
+	DynamicColumns map[string]struct{}
 }
 
 var eventColumns = []string{"TimeGenerated", "Source", "EventType", "Host", "User", "Message", "RawData"}
@@ -40,24 +45,38 @@ func Compile(query Query, now time.Time, catalogs ...TableCatalog) (CompiledQuer
 	}
 	c := &compiler{
 		columns:   make(map[string]struct{}),
+		dynamic:   make(map[string]struct{}),
 		variables: make(map[string]string),
 		constants: make(map[string]any),
+		tabular:   make(map[string]relation),
+		declared:  make(map[string]struct{}),
 		tables:    tables,
 		now:       now.UTC(),
 	}
 	eventColumnSet := columnSet(eventColumns)
 	for _, binding := range query.Bindings {
-		if _, exists := c.variables[binding.Name]; exists {
+		if _, exists := c.declared[binding.Name]; exists {
 			return CompiledQuery{}, errorAt(binding.At, "variable %q is declared more than once", binding.Name)
 		}
 		if _, exists := eventColumnSet[binding.Name]; exists {
 			return CompiledQuery{}, errorAt(binding.At, "variable %q conflicts with a table column", binding.Name)
+		}
+		c.columns = make(map[string]struct{})
+		if binding.Tabular != nil {
+			value, err := c.compilePipeline(*binding.Tabular)
+			if err != nil {
+				return CompiledQuery{}, err
+			}
+			c.tabular[binding.Name] = value
+			c.declared[binding.Name] = struct{}{}
+			continue
 		}
 		value, err := c.compileExpression(binding.Expression, false)
 		if err != nil {
 			return CompiledQuery{}, err
 		}
 		c.variables[binding.Name] = value
+		c.declared[binding.Name] = struct{}{}
 		if constant, ok := c.evaluateConstant(binding.Expression); ok {
 			c.constants[binding.Name] = constant
 		}
@@ -68,22 +87,41 @@ func Compile(query Query, now time.Time, catalogs ...TableCatalog) (CompiledQuer
 	}
 	limit := c.bind(int64(1000))
 	compiled.SQL = fmt.Sprintf("SELECT * FROM (%s) AS result LIMIT %s", compiled.SQL, limit)
-	return CompiledQuery{SQL: compiled.SQL, Args: c.args, Columns: compiled.Columns}, nil
+	return CompiledQuery{SQL: compiled.SQL, Args: c.args, Columns: compiled.Columns, DynamicColumns: compiled.DynamicColumns}, nil
 }
 
 func (c *compiler) compilePipeline(query Query) (relation, error) {
+	previousColumns := c.columns
+	previousDynamic := c.dynamic
+	defer func() {
+		c.columns = previousColumns
+		c.dynamic = previousDynamic
+	}()
+
+	if binding, exists := c.tabular[query.Source]; exists {
+		columns := append([]string(nil), binding.Columns...)
+		c.columns = columnSet(columns)
+		c.dynamic = cloneSet(binding.DynamicColumns)
+		sqlText := projectRelation(binding, columns, "t")
+		return c.compileOperators(sqlText, columns, cloneSet(binding.DynamicColumns), query.Operators)
+	}
 	datasetID, tableFound := c.tables[query.Source]
 	if query.Source != "Events" && !tableFound {
 		return relation{}, errorAt(query.SourceAt, "unknown table %q", query.Source)
 	}
 	c.columns = columnSet(eventColumns)
+	c.dynamic = map[string]struct{}{"RawData": {}}
 	sqlText := `SELECT time_generated AS "TimeGenerated", source AS "Source", event_type AS "EventType", host AS "Host", username AS "User", message AS "Message", raw_data AS "RawData" FROM events`
 	if query.Source != "Events" {
 		sqlText += " WHERE dataset_id = " + c.bind(datasetID)
 	}
 	columns := append([]string(nil), eventColumns...)
+	return c.compileOperators(sqlText, columns, map[string]struct{}{"RawData": {}}, query.Operators)
+}
 
-	for _, rawOperator := range query.Operators {
+func (c *compiler) compileOperators(sqlText string, columns []string, dynamicColumns map[string]struct{}, operators []Operator) (relation, error) {
+	c.dynamic = dynamicColumns
+	for _, rawOperator := range operators {
 		switch operator := rawOperator.(type) {
 		case WhereOperator:
 			expr, err := c.compileExpression(operator.Expression, false)
@@ -91,14 +129,41 @@ func (c *compiler) compilePipeline(query Query) (relation, error) {
 				return relation{}, err
 			}
 			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q WHERE %s", sqlText, expr)
+		case SearchOperator:
+			needle, err := c.compileExpression(operator.Expression, false)
+			if err != nil {
+				return relation{}, err
+			}
+			conditions := make([]string, len(columns))
+			for index, column := range columns {
+				conditions[index] = "kql_has(COALESCE(CAST(q." + quoteIdentifier(column) + " AS TEXT), ''), COALESCE(CAST(" + needle + " AS TEXT), ''), 0)"
+			}
+			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q WHERE (%s)", sqlText, strings.Join(conditions, " OR "))
 		case ProjectOperator:
+			nextDynamic := make(map[string]struct{})
+			for _, item := range operator.Items {
+				if c.expressionIsDynamic(item.Expression, dynamicColumns) {
+					nextDynamic[item.Name] = struct{}{}
+				}
+			}
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
 				return relation{}, err
 			}
 			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
 			columns, c.columns = names, columnSet(names)
+			dynamicColumns = nextDynamic
+			c.dynamic = dynamicColumns
 		case ExtendOperator:
+			nextDynamic := cloneSet(dynamicColumns)
+			for _, item := range operator.Items {
+				delete(nextDynamic, item.Name)
+				if c.expressionIsDynamic(item.Expression, dynamicColumns) {
+					nextDynamic[item.Name] = struct{}{}
+				}
+			}
+			dynamicColumns = nextDynamic
+			c.dynamic = dynamicColumns
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
 				return relation{}, err
@@ -120,30 +185,13 @@ func (c *compiler) compilePipeline(query Query) (relation, error) {
 				c.columns[name] = struct{}{}
 			}
 		case SummarizeOperator:
-			for _, item := range operator.Aggregates {
-				if err := c.validateSummarizeExpression(item.Expression); err != nil {
-					return relation{}, err
-				}
-			}
-			aggregates, aggregateNames, err := c.compileNamed(operator.Aggregates, true)
+			summarized, err := c.compileSummarize(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
 			if err != nil {
 				return relation{}, err
 			}
-			groups, groupNames, err := c.compileNamed(operator.Groups, false)
-			if err != nil {
-				return relation{}, err
-			}
-			selects := append(groups, aggregates...)
-			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
-			if len(groups) > 0 {
-				positions := make([]string, len(groups))
-				for index := range groups {
-					positions[index] = fmt.Sprintf("%d", index+1)
-				}
-				sqlText += " GROUP BY " + strings.Join(positions, ", ")
-			}
-			columns = append(groupNames, aggregateNames...)
+			sqlText, columns, dynamicColumns = summarized.SQL, summarized.Columns, summarized.DynamicColumns
 			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
 		case DistinctOperator:
 			selects, names, err := c.compileNamed(operator.Items, false)
 			if err != nil {
@@ -151,6 +199,14 @@ func (c *compiler) compilePipeline(query Query) (relation, error) {
 			}
 			sqlText = fmt.Sprintf("SELECT DISTINCT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
 			columns, c.columns = names, columnSet(names)
+			nextDynamic := make(map[string]struct{})
+			for _, item := range operator.Items {
+				if c.expressionIsDynamic(item.Expression, dynamicColumns) {
+					nextDynamic[item.Name] = struct{}{}
+				}
+			}
+			dynamicColumns = nextDynamic
+			c.dynamic = dynamicColumns
 		case SortOperator:
 			terms := make([]string, 0, len(operator.Terms))
 			for _, term := range operator.Terms {
@@ -190,28 +246,183 @@ func (c *compiler) compilePipeline(query Query) (relation, error) {
 		case CountOperator:
 			sqlText = fmt.Sprintf(`SELECT COUNT(*) AS "Count" FROM (%s) AS q`, sqlText)
 			columns, c.columns = []string{"Count"}, columnSet([]string{"Count"})
+			dynamicColumns = make(map[string]struct{})
+			c.dynamic = dynamicColumns
+		case MVExpandOperator:
+			expression, err := c.compileExpression(operator.Expression, false)
+			if err != nil {
+				return relation{}, err
+			}
+			limit, err := c.evaluateRowLimit(operator.Limit)
+			if err != nil {
+				return relation{}, err
+			}
+			if limit > 128 {
+				return relation{}, errorAt(operator.At, "mv-expand limit cannot exceed 128")
+			}
+			selects := make([]string, 0, len(columns)+1)
+			replaced := false
+			for _, column := range columns {
+				if column == operator.Name {
+					selects = append(selects, "mv.value AS "+quoteIdentifier(column))
+					replaced = true
+				} else {
+					selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+				}
+			}
+			if !replaced {
+				columns = append(columns, operator.Name)
+				selects = append(selects, "mv.value AS "+quoteIdentifier(operator.Name))
+			}
+			delete(dynamicColumns, operator.Name)
+			c.dynamic = dynamicColumns
+			inputLimit, expansionLimit := c.bind(int64(1000)), c.bind(limit)
+			sqlText = fmt.Sprintf(`SELECT %s FROM (SELECT * FROM (%s) LIMIT %s) AS q JOIN json_each(CASE WHEN json_valid(%s) THEN %s ELSE json_array(%s) END) AS mv ON (mv.key IS NULL OR CAST(mv.key AS INTEGER) < %s)`, strings.Join(selects, ", "), sqlText, inputLimit, expression, expression, expression, expansionLimit)
+			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
+		case MVApplyOperator:
+			applied, err := c.compileMVApply(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = applied.SQL, applied.Columns, applied.DynamicColumns
+			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
 		case UnionOperator:
-			combined, err := c.compileUnion(relation{SQL: sqlText, Columns: columns}, operator)
+			combined, err := c.compileUnion(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
 			if err != nil {
 				return relation{}, err
 			}
-			sqlText, columns = combined.SQL, combined.Columns
+			sqlText, columns, dynamicColumns = combined.SQL, combined.Columns, combined.DynamicColumns
 			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
 		case JoinOperator:
-			joined, err := c.compileJoin(relation{SQL: sqlText, Columns: columns}, operator)
+			joined, err := c.compileJoin(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
 			if err != nil {
 				return relation{}, err
 			}
-			sqlText, columns = joined.SQL, joined.Columns
+			sqlText, columns, dynamicColumns = joined.SQL, joined.Columns, joined.DynamicColumns
 			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
 		}
 	}
-	return relation{SQL: sqlText, Columns: columns}, nil
+	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, nil
+}
+
+func (c *compiler) compileMVApply(input relation, operator MVApplyOperator) (relation, error) {
+	if len(operator.Aggregates) > 32 {
+		return relation{}, errorAt(operator.At, "mv-apply supports at most 32 aggregates")
+	}
+	expressionDynamic := c.expressionIsDynamic(operator.Expression, input.DynamicColumns)
+	expression, err := c.compileExpression(operator.Expression, false)
+	if err != nil {
+		return relation{}, err
+	}
+	limit, err := c.evaluateRowLimit(operator.Limit)
+	if err != nil {
+		return relation{}, err
+	}
+	if limit > 128 {
+		return relation{}, errorAt(operator.At, "mv-apply limit cannot exceed 128")
+	}
+
+	inputColumns := make(map[string]struct{}, len(input.Columns))
+	for _, column := range input.Columns {
+		inputColumns[strings.ToLower(column)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(operator.Aggregates))
+	for _, item := range operator.Aggregates {
+		name := strings.ToLower(item.Name)
+		if _, exists := inputColumns[name]; exists {
+			return relation{}, errorAt(item.At, "mv-apply aggregate column %q conflicts with an input column", item.Name)
+		}
+		if _, exists := seen[name]; exists {
+			return relation{}, errorAt(item.At, "column %q is specified more than once", item.Name)
+		}
+		seen[name] = struct{}{}
+		if function, found := findArgExtremum(item.Expression); found {
+			return relation{}, errorAt(function.At, "%s() is not supported in mv-apply", function.Name)
+		}
+		if err := c.validateSummarizeExpression(item.Expression); err != nil {
+			return relation{}, err
+		}
+	}
+
+	c.columns = map[string]struct{}{operator.Alias: {}}
+	c.dynamic = make(map[string]struct{})
+	if expressionDynamic {
+		c.dynamic[operator.Alias] = struct{}{}
+	}
+	conditions := make([]string, len(operator.Wheres))
+	for index, where := range operator.Wheres {
+		conditions[index], err = c.compileExpression(where, false)
+		if err != nil {
+			return relation{}, err
+		}
+	}
+
+	expansionLimit := c.bind(limit)
+	expanded := fmt.Sprintf(`SELECT mv.value AS %s FROM json_each(CASE WHEN json_valid(%s) THEN %s ELSE json_array(%s) END) AS mv LIMIT %s`, quoteIdentifier(operator.Alias), expression, expression, expression, expansionLimit)
+	whereSQL := ""
+	if len(conditions) > 0 {
+		whereSQL = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	selects := make([]string, 0, len(input.Columns)+len(operator.Aggregates))
+	for _, column := range input.Columns {
+		selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+	}
+	columns := append([]string(nil), input.Columns...)
+	dynamic := cloneSet(input.DynamicColumns)
+	for _, item := range operator.Aggregates {
+		aggregate, compileErr := c.compileExpression(item.Expression, true)
+		if compileErr != nil {
+			return relation{}, compileErr
+		}
+		selects = append(selects, fmt.Sprintf("(SELECT %s FROM (%s) AS q%s) AS %s", aggregate, expanded, whereSQL, quoteIdentifier(item.Name)))
+		columns = append(columns, item.Name)
+		if c.expressionIsDynamic(item.Expression, c.dynamic) {
+			dynamic[item.Name] = struct{}{}
+		}
+	}
+
+	inputLimit := c.bind(int64(1000))
+	sqlText := fmt.Sprintf("SELECT %s FROM (SELECT * FROM (%s) LIMIT %s) AS q", strings.Join(selects, ", "), input.SQL, inputLimit)
+	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamic}, nil
+}
+
+func findArgExtremum(expression Expression) (FunctionExpression, bool) {
+	switch expr := expression.(type) {
+	case UnaryExpression:
+		return findArgExtremum(expr.Operand)
+	case BinaryExpression:
+		if function, found := findArgExtremum(expr.Left); found {
+			return function, true
+		}
+		return findArgExtremum(expr.Right)
+	case ListExpression:
+		for _, item := range expr.Items {
+			if function, found := findArgExtremum(item); found {
+				return function, true
+			}
+		}
+	case FunctionExpression:
+		if expr.Name == "arg_max" || expr.Name == "arg_min" {
+			return expr, true
+		}
+		for _, argument := range expr.Arguments {
+			if function, found := findArgExtremum(argument); found {
+				return function, true
+			}
+		}
+	}
+	return FunctionExpression{}, false
 }
 
 func (c *compiler) compileUnion(left relation, operator UnionOperator) (relation, error) {
 	arms := []string{projectRelation(left, left.Columns, "u0")}
 	leftSet := columnSet(left.Columns)
+	dynamic := cloneSet(left.DynamicColumns)
 	for index, query := range operator.Queries {
 		right, err := c.compilePipeline(query)
 		if err != nil {
@@ -231,9 +442,14 @@ func (c *compiler) compileUnion(left relation, operator UnionOperator) (relation
 				return relation{}, errorAt(query.SourceAt, "union query has unexpected column %q", name)
 			}
 		}
+		for name := range dynamic {
+			if _, exists := right.DynamicColumns[name]; !exists {
+				delete(dynamic, name)
+			}
+		}
 		arms = append(arms, projectRelation(right, left.Columns, fmt.Sprintf("u%d", index+1)))
 	}
-	return relation{SQL: strings.Join(arms, " UNION ALL "), Columns: append([]string(nil), left.Columns...)}, nil
+	return relation{SQL: strings.Join(arms, " UNION ALL "), Columns: append([]string(nil), left.Columns...), DynamicColumns: dynamic}, nil
 }
 
 func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, error) {
@@ -257,9 +473,18 @@ func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, 
 		}
 		conditions = append(conditions, "l."+quoteIdentifier(key.Name)+" = r."+quoteIdentifier(key.Name))
 	}
+	if operator.Kind == JoinLeftAnti {
+		selects := make([]string, len(left.Columns))
+		for index, name := range left.Columns {
+			selects[index] = "l." + quoteIdentifier(name) + " AS " + quoteIdentifier(name)
+		}
+		sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS l WHERE NOT EXISTS (SELECT 1 FROM (%s) AS r WHERE %s)", strings.Join(selects, ", "), left.SQL, right.SQL, strings.Join(conditions, " AND "))
+		return relation{SQL: sqlText, Columns: append([]string(nil), left.Columns...), DynamicColumns: cloneSet(left.DynamicColumns)}, nil
+	}
 	selects := make([]string, 0, len(left.Columns)+len(right.Columns))
 	columns := append([]string(nil), left.Columns...)
 	used := columnSet(columns)
+	dynamic := cloneSet(left.DynamicColumns)
 	for _, name := range left.Columns {
 		selects = append(selects, "l."+quoteIdentifier(name)+" AS "+quoteIdentifier(name))
 	}
@@ -271,13 +496,133 @@ func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, 
 		used[output] = struct{}{}
 		columns = append(columns, output)
 		selects = append(selects, "r."+quoteIdentifier(name)+" AS "+quoteIdentifier(output))
+		if _, isDynamic := right.DynamicColumns[name]; isDynamic {
+			dynamic[output] = struct{}{}
+		}
 	}
 	joinSQL := "INNER JOIN"
 	if operator.Kind == JoinLeftOuter {
 		joinSQL = "LEFT OUTER JOIN"
 	}
 	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS l %s (%s) AS r ON %s", strings.Join(selects, ", "), left.SQL, joinSQL, right.SQL, strings.Join(conditions, " AND "))
-	return relation{SQL: sqlText, Columns: columns}, nil
+	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamic}, nil
+}
+
+func (c *compiler) compileSummarize(input relation, operator SummarizeOperator) (relation, error) {
+	for _, item := range operator.Aggregates {
+		if err := c.validateSummarizeExpression(item.Expression); err != nil {
+			return relation{}, err
+		}
+	}
+	for _, item := range operator.Aggregates {
+		function, ok := item.Expression.(FunctionExpression)
+		if !ok || (function.Name != "arg_max" && function.Name != "arg_min") {
+			continue
+		}
+		if len(operator.Aggregates) != 1 {
+			return relation{}, errorAt(function.At, "%s(..., *) cannot be combined with other aggregations", function.Name)
+		}
+		if item.Explicit {
+			return relation{}, errorAt(item.At, "%s(..., *) cannot have a column alias", function.Name)
+		}
+		return c.compileArgExtremum(input, operator.Groups, function)
+	}
+
+	aggregates, aggregateNames, err := c.compileNamed(operator.Aggregates, true)
+	if err != nil {
+		return relation{}, err
+	}
+	groups, groupNames, err := c.compileNamed(operator.Groups, false)
+	if err != nil {
+		return relation{}, err
+	}
+	selects := append(groups, aggregates...)
+	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), input.SQL)
+	if len(groups) > 0 {
+		positions := make([]string, len(groups))
+		for index := range groups {
+			positions[index] = fmt.Sprintf("%d", index+1)
+		}
+		sqlText += " GROUP BY " + strings.Join(positions, ", ")
+	}
+	columns := append(groupNames, aggregateNames...)
+	dynamic := make(map[string]struct{})
+	for _, item := range append(append([]NamedExpression(nil), operator.Groups...), operator.Aggregates...) {
+		if c.expressionIsDynamic(item.Expression, input.DynamicColumns) {
+			dynamic[item.Name] = struct{}{}
+		}
+	}
+	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamic}, nil
+}
+
+func (c *compiler) compileArgExtremum(input relation, groups []NamedExpression, function FunctionExpression) (relation, error) {
+	if len(function.Arguments) != 2 {
+		return relation{}, errorAt(function.At, "%s() expects a value and '*'", function.Name)
+	}
+	if _, ok := function.Arguments[1].(StarExpression); !ok {
+		return relation{}, errorAt(function.At, "%s() currently requires '*' as its second argument", function.Name)
+	}
+	key, err := c.compileExpression(function.Arguments[0], false)
+	if err != nil {
+		return relation{}, err
+	}
+	groupExpressions := make([]string, len(groups))
+	groupNames := make([]string, len(groups))
+	groupInternalNames := make([]string, len(groups))
+	rankedSelects := make([]string, 0, len(groups)+2)
+	used := make(map[string]struct{})
+	internalNames := columnSet(input.Columns)
+	for index, group := range groups {
+		if _, exists := used[group.Name]; exists {
+			return relation{}, errorAt(group.At, "column %q is specified more than once", group.Name)
+		}
+		used[group.Name] = struct{}{}
+		expression, compileErr := c.compileExpression(group.Expression, false)
+		if compileErr != nil {
+			return relation{}, compileErr
+		}
+		groupExpressions[index], groupNames[index] = expression, group.Name
+		internal := availableColumnName(fmt.Sprintf("__kql_group_%d", index), internalNames)
+		internalNames[internal] = struct{}{}
+		groupInternalNames[index] = internal
+		rankedSelects = append(rankedSelects, expression+" AS "+quoteIdentifier(internal))
+	}
+	rankedSelects = append(rankedSelects, "q.*")
+	direction := "DESC"
+	if function.Name == "arg_min" {
+		direction = "ASC"
+	}
+	window := "ROW_NUMBER() OVER ("
+	if len(groupExpressions) > 0 {
+		window += "PARTITION BY " + strings.Join(groupExpressions, ", ") + " "
+	}
+	rankName := availableColumnName("__kql_rank", internalNames)
+	window += "ORDER BY (" + key + " IS NULL) ASC, " + key + " " + direction + ") AS " + quoteIdentifier(rankName)
+	rankedSelects = append(rankedSelects, window)
+
+	selects := make([]string, 0, len(groups)+len(input.Columns))
+	columns := append([]string(nil), groupNames...)
+	dynamic := make(map[string]struct{})
+	for index, group := range groups {
+		selects = append(selects, "r."+quoteIdentifier(groupInternalNames[index])+" AS "+quoteIdentifier(group.Name))
+		if c.expressionIsDynamic(group.Expression, input.DynamicColumns) {
+			dynamic[group.Name] = struct{}{}
+		}
+	}
+	for _, column := range input.Columns {
+		if _, duplicate := used[column]; duplicate {
+			continue
+		}
+		used[column] = struct{}{}
+		columns = append(columns, column)
+		selects = append(selects, "r."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+		if _, isDynamic := input.DynamicColumns[column]; isDynamic {
+			dynamic[column] = struct{}{}
+		}
+	}
+	ranked := fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(rankedSelects, ", "), input.SQL)
+	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS r WHERE r.%s = 1", strings.Join(selects, ", "), ranked, quoteIdentifier(rankName))
+	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamic}, nil
 }
 
 func projectRelation(value relation, columns []string, alias string) string {
@@ -342,14 +687,20 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 			return "", errorAt(expr.At, "unknown column or variable %q", root)
 		}
 		path := "$"
-		for _, part := range expr.Parts[1:] {
-			path += `."` + strings.ReplaceAll(part, `"`, `\"`) + `"`
+		for index, part := range expr.Parts[1:] {
+			if arrayIndex, indexed := expr.Indices[index+1]; indexed {
+				path += fmt.Sprintf("[%d]", arrayIndex)
+			} else {
+				path += `."` + strings.ReplaceAll(part, `"`, `\"`) + `"`
+			}
 		}
-		return `json_extract(` + base + `, ` + c.bind(path) + `)`, nil
+		return `json_extract(CASE WHEN json_valid(` + base + `) THEN ` + base + ` ELSE NULL END, ` + c.bind(path) + `)`, nil
 	case LiteralExpression:
 		return c.bind(expr.Value), nil
 	case DurationExpression:
 		return "", errorAt(expr.At, "duration literals are only valid in ago() and bin()")
+	case StarExpression:
+		return "", errorAt(expr.At, "'*' is only supported as the second argument to arg_max() or arg_min()")
 	case UnaryExpression:
 		operand, err := c.compileExpression(expr.Operand, aggregate)
 		if err != nil {
@@ -380,7 +731,7 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 		if err != nil {
 			return "", err
 		}
-		if expr.Operator == "in" {
+		if expr.Operator == "in" || expr.Operator == "in~" || expr.Operator == "!in" || expr.Operator == "!in~" {
 			list := expr.Right.(ListExpression)
 			values := make([]string, 0, len(list.Items))
 			for _, item := range list.Items {
@@ -390,7 +741,34 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 				}
 				values = append(values, value)
 			}
-			return fmt.Sprintf("(%s IN (%s))", left, strings.Join(values, ", ")), nil
+			caseInsensitive := expr.Operator == "in~" || expr.Operator == "!in~"
+			if caseInsensitive {
+				for index := range values {
+					values[index] = "lower(CAST(" + values[index] + " AS TEXT))"
+				}
+				left = "lower(CAST(" + left + " AS TEXT))"
+			}
+			negated := ""
+			if expr.Operator == "!in" || expr.Operator == "!in~" {
+				negated = " NOT"
+			}
+			return fmt.Sprintf("(%s%s IN (%s))", left, negated, strings.Join(values, ", ")), nil
+		}
+		if expr.Operator == "has_any" || expr.Operator == "has_all" {
+			list := expr.Right.(ListExpression)
+			conditions := make([]string, 0, len(list.Items))
+			for _, item := range list.Items {
+				value, itemErr := c.compileExpression(item, aggregate)
+				if itemErr != nil {
+					return "", itemErr
+				}
+				conditions = append(conditions, "kql_has(CAST("+left+" AS TEXT), CAST("+value+" AS TEXT), 0)")
+			}
+			separator := " OR "
+			if expr.Operator == "has_all" {
+				separator = " AND "
+			}
+			return "(" + strings.Join(conditions, separator) + ")", nil
 		}
 		right, err := c.compileExpression(expr.Right, aggregate)
 		if err != nil {
@@ -407,6 +785,12 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 				op = "="
 			}
 			return "(" + left + " " + op + " " + right + ")", nil
+		case "=~", "!~":
+			op := "="
+			if expr.Operator == "!~" {
+				op = "!="
+			}
+			return "(lower(CAST(" + left + " AS TEXT)) " + op + " lower(CAST(" + right + " AS TEXT)))", nil
 		case "+", "-", "*", "/", "%":
 			return "(" + left + " " + expr.Operator + " " + right + ")", nil
 		case "contains":
@@ -415,6 +799,18 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 			return "(substr(lower(CAST(" + left + " AS TEXT)), 1, length(CAST(" + right + " AS TEXT))) = lower(CAST(" + right + " AS TEXT)))", nil
 		case "endswith":
 			return "(substr(lower(CAST(" + left + " AS TEXT)), -length(CAST(" + right + " AS TEXT))) = lower(CAST(" + right + " AS TEXT)))", nil
+		case "contains_cs":
+			return "(instr(CAST(" + left + " AS TEXT), CAST(" + right + " AS TEXT)) > 0)", nil
+		case "startswith_cs":
+			return "(substr(CAST(" + left + " AS TEXT), 1, length(CAST(" + right + " AS TEXT))) = CAST(" + right + " AS TEXT))", nil
+		case "endswith_cs":
+			return "(substr(CAST(" + left + " AS TEXT), -length(CAST(" + right + " AS TEXT))) = CAST(" + right + " AS TEXT))", nil
+		case "has", "has_cs":
+			caseSensitive := 0
+			if expr.Operator == "has_cs" {
+				caseSensitive = 1
+			}
+			return fmt.Sprintf("kql_has(CAST(%s AS TEXT), CAST(%s AS TEXT), %d)", left, right, caseSensitive), nil
 		}
 	case FunctionExpression:
 		return c.compileFunction(expr, aggregate)
@@ -429,7 +825,7 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		}
 		values := make([]string, expected)
 		for index, argument := range expr.Arguments {
-			value, err := c.compileExpression(argument, false)
+			value, err := c.compileExpression(argument, aggregate)
 			if err != nil {
 				return nil, err
 			}
@@ -473,7 +869,7 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		if len(expr.Arguments) != 2 {
 			return "", errorAt(expr.At, "bin() expects a value and duration")
 		}
-		value, err := c.compileExpression(expr.Arguments[0], false)
+		value, err := c.compileExpression(expr.Arguments[0], aggregate)
 		if err != nil {
 			return "", err
 		}
@@ -519,7 +915,7 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		}
 		args := make([]string, len(expr.Arguments))
 		for index, argument := range expr.Arguments {
-			value, err := c.compileExpression(argument, false)
+			value, err := c.compileExpression(argument, aggregate)
 			if err != nil {
 				return "", err
 			}
@@ -532,7 +928,7 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		}
 		args := make([]string, len(expr.Arguments))
 		for index, argument := range expr.Arguments {
-			value, err := c.compileExpression(argument, false)
+			value, err := c.compileExpression(argument, aggregate)
 			if err != nil {
 				return "", err
 			}
@@ -543,20 +939,44 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 			result += ", " + args[2]
 		}
 		return result + ")", nil
+	case "split":
+		args, err := compileArgs(2)
+		if err != nil {
+			return "", err
+		}
+		return "kql_split(CAST(" + args[0] + " AS TEXT), CAST(" + args[1] + " AS TEXT))", nil
+	case "extract":
+		args, err := compileArgs(3)
+		if err != nil {
+			return "", err
+		}
+		return "NULLIF(kql_extract(CAST(" + args[0] + " AS TEXT), CAST(" + args[1] + " AS INTEGER), CAST(" + args[2] + " AS TEXT)), '')", nil
+	case "trim":
+		args, err := compileArgs(2)
+		if err != nil {
+			return "", err
+		}
+		return "kql_trim(CAST(" + args[0] + " AS TEXT), CAST(" + args[1] + " AS TEXT))", nil
+	case "replace_string":
+		args, err := compileArgs(3)
+		if err != nil {
+			return "", err
+		}
+		return "replace(CAST(" + args[0] + " AS TEXT), CAST(" + args[1] + " AS TEXT), CAST(" + args[2] + " AS TEXT))", nil
 	case "strcat":
 		if len(expr.Arguments) < 2 {
 			return "", errorAt(expr.At, "strcat() expects at least 2 arguments")
 		}
 		args := make([]string, len(expr.Arguments))
 		for index, argument := range expr.Arguments {
-			value, err := c.compileExpression(argument, false)
+			value, err := c.compileExpression(argument, aggregate)
 			if err != nil {
 				return "", err
 			}
 			args[index] = "COALESCE(CAST(" + value + " AS TEXT), '')"
 		}
 		return "(" + strings.Join(args, " || ") + ")", nil
-	case "count", "dcount", "sum", "min", "max", "avg", "countif":
+	case "count", "dcount", "sum", "min", "max", "avg", "countif", "make_set", "make_list", "take_any":
 		if !aggregate {
 			return "", errorAt(expr.At, "%s() is only supported in summarize", expr.Name)
 		}
@@ -574,10 +994,26 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		case "dcount":
 			return "COUNT(DISTINCT " + args[0] + ")", nil
 		case "countif":
-			return "SUM(CASE WHEN " + args[0] + " THEN 1 ELSE 0 END)", nil
+			return "COALESCE(SUM(CASE WHEN " + args[0] + " THEN 1 ELSE 0 END), 0)", nil
+		case "make_set":
+			dynamic := 0
+			if c.expressionIsDynamic(expr.Arguments[0], c.dynamic) {
+				dynamic = 1
+			}
+			return fmt.Sprintf("kql_make_set(%s, %d)", args[0], dynamic), nil
+		case "make_list":
+			dynamic := 0
+			if c.expressionIsDynamic(expr.Arguments[0], c.dynamic) {
+				dynamic = 1
+			}
+			return fmt.Sprintf("kql_make_list(%s, %d)", args[0], dynamic), nil
+		case "take_any":
+			return "COALESCE(MIN(CASE WHEN typeof(" + args[0] + ") <> 'text' OR " + args[0] + " <> '' THEN " + args[0] + " END), MIN(" + args[0] + "))", nil
 		default:
 			return strings.ToUpper(expr.Name) + "(" + args[0] + ")", nil
 		}
+	case "arg_max", "arg_min":
+		return "", errorAt(expr.At, "%s(..., *) must be a top-level summarize aggregation", expr.Name)
 	}
 	return "", errorAt(expr.At, "function %q is not supported", expr.Name)
 }
@@ -707,7 +1143,7 @@ func (c *compiler) inspectSummarizeExpression(expression Expression, insideAggre
 		}
 		return found, nil
 	case FunctionExpression:
-		isAggregate := expr.Name == "count" || expr.Name == "countif" || expr.Name == "dcount" || expr.Name == "sum" || expr.Name == "min" || expr.Name == "max" || expr.Name == "avg"
+		isAggregate := isAggregateFunction(expr.Name)
 		if isAggregate && insideAggregate {
 			return false, errorAt(expr.At, "aggregation functions cannot be nested")
 		}
@@ -725,10 +1161,42 @@ func (c *compiler) inspectSummarizeExpression(expression Expression, insideAggre
 	}
 }
 
+func isAggregateFunction(name string) bool {
+	switch name {
+	case "count", "countif", "dcount", "sum", "min", "max", "avg", "make_set", "make_list", "take_any", "arg_max", "arg_min":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *compiler) expressionIsDynamic(expression Expression, dynamicColumns map[string]struct{}) bool {
+	switch expr := expression.(type) {
+	case IdentifierExpression:
+		_, exists := dynamicColumns[expr.Parts[0]]
+		return exists
+	case FunctionExpression:
+		switch expr.Name {
+		case "make_set", "make_list", "parse_json", "split":
+			return true
+		case "take_any":
+			return len(expr.Arguments) == 1 && c.expressionIsDynamic(expr.Arguments[0], dynamicColumns)
+		}
+	}
+	return false
+}
+
 func quoteIdentifier(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }
 func columnSet(values []string) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return result
+}
+func cloneSet(values map[string]struct{}) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for value := range values {
 		result[value] = struct{}{}
 	}
 	return result

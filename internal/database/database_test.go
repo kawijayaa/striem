@@ -49,3 +49,36 @@ VALUES ('legacy', 'legacy', 'ts', '2024-01-01T00:00:00Z');`); err != nil {
 		t.Fatalf("update migrated input signature: %v", err)
 	}
 }
+
+func TestOpenMigratesQuestionAnswers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE investigation_progress (
+    question_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    solved_at TEXT
+);`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`
+INSERT INTO investigation_progress(question_id, revision, answer)
+VALUES ('question', 1, 'accepted')`); err != nil {
+		t.Fatalf("write migrated question answer: %v", err)
+	}
+}

@@ -31,17 +31,24 @@ func (p *parser) parseQuery() (Query, error) {
 		if _, err := p.expect(tokenAssign, "expected '=' after variable name"); err != nil {
 			return Query{}, err
 		}
-		expression, err := p.parseExpression(0)
-		if err != nil {
-			return Query{}, err
-		}
-		if p.check(tokenPipe) {
-			return Query{}, errorAt(p.peek(), "tabular let bindings are not supported")
+		var expression Expression
+		var tabular *Query
+		if p.check(tokenIdentifier) && p.peekNext().Kind == tokenPipe {
+			pipeline, parseErr := p.parsePipeline(tokenSemicolon)
+			if parseErr != nil {
+				return Query{}, parseErr
+			}
+			tabular = &pipeline
+		} else {
+			expression, err = p.parseExpression(0)
+			if err != nil {
+				return Query{}, err
+			}
 		}
 		if _, err := p.expect(tokenSemicolon, "expected ';' after variable declaration"); err != nil {
 			return Query{}, err
 		}
-		bindings = append(bindings, LetBinding{Name: name.Text, At: name, Expression: expression})
+		bindings = append(bindings, LetBinding{Name: name.Text, At: name, Expression: expression, Tabular: tabular})
 	}
 	query, err := p.parsePipeline(tokenEOF)
 	query.Bindings = bindings
@@ -63,12 +70,26 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 		if err != nil {
 			return Query{}, err
 		}
+		if name.Text == "mv" && p.match(tokenMinus) {
+			suffix, suffixErr := p.expect(tokenIdentifier, "expected 'expand' or 'apply' after 'mv-'")
+			if suffixErr != nil {
+				return Query{}, suffixErr
+			}
+			if suffix.Text != "expand" && suffix.Text != "apply" {
+				return Query{}, errorAt(suffix, "operator %q is not supported", "mv-"+suffix.Text)
+			}
+			name.Text = "mv-" + suffix.Text
+		}
 		var operator Operator
 		switch name.Text {
 		case "where":
 			expr, parseErr := p.parseExpression(0)
 			err = parseErr
 			operator = WhereOperator{At: name, Expression: expr}
+		case "search":
+			expr, parseErr := p.parseExpression(0)
+			err = parseErr
+			operator = SearchOperator{At: name, Expression: expr}
 		case "project":
 			var items []NamedExpression
 			items, err = p.parseNamedList(false, false)
@@ -119,6 +140,28 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			operator = TopOperator{At: name, Count: value, Term: term}
 		case "count":
 			operator = CountOperator{At: name}
+		case "mv-expand":
+			start := p.peek()
+			columnName := ""
+			if p.check(tokenIdentifier) && p.peekNext().Kind == tokenAssign {
+				columnName = p.advance().Text
+				p.advance()
+			}
+			var expression Expression
+			expression, err = p.parseExpression(0)
+			if err == nil && columnName == "" {
+				columnName = expressionName(expression, 1)
+				if strings.HasPrefix(columnName, "Column") {
+					err = errorAt(start, "mv-expand expressions require a column name")
+				}
+			}
+			limit := Expression(LiteralExpression{At: name, Value: float64(128)})
+			if err == nil && p.matchIdentifier("limit") {
+				limit, err = p.parseRowLimit()
+			}
+			operator = MVExpandOperator{At: name, Name: columnName, Expression: expression, Limit: limit}
+		case "mv-apply":
+			operator, err = p.parseMVApply(name)
 		case "union":
 			var queries []Query
 			for {
@@ -156,6 +199,8 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 						kind = JoinInner
 					case string(JoinLeftOuter):
 						kind = JoinLeftOuter
+					case string(JoinLeftAnti):
+						kind = JoinLeftAnti
 					default:
 						err = errorAt(kindToken, "join kind %q is not supported", kindToken.Text)
 					}
@@ -205,6 +250,66 @@ func (p *parser) parseRowLimit() (Expression, error) {
 	return p.parseExpression(0)
 }
 
+func (p *parser) parseMVApply(at token) (Operator, error) {
+	alias, err := p.expect(tokenIdentifier, "mv-apply requires an aliased expression")
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenAssign, "mv-apply requires an alias followed by '='"); err != nil {
+		return nil, err
+	}
+	expression, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	if p.check(tokenComma) {
+		return nil, errorAt(p.peek(), "mv-apply supports exactly one aliased expression")
+	}
+
+	limit := Expression(LiteralExpression{At: at, Value: float64(128)})
+	if p.matchIdentifier("limit") {
+		limit, err = p.parseRowLimit()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err = p.expectIdentifier("on", "expected 'on' after mv-apply expression"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenLeftParen, "expected '(' after mv-apply 'on'"); err != nil {
+		return nil, err
+	}
+
+	wheres := make([]Expression, 0, 1)
+	for p.matchIdentifier("where") {
+		where, parseErr := p.parseExpression(0)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		wheres = append(wheres, where)
+		if _, err = p.expect(tokenPipe, "mv-apply where must be followed by summarize"); err != nil {
+			return nil, err
+		}
+	}
+	if !p.matchIdentifier("summarize") {
+		return nil, errorAt(p.peek(), "mv-apply body supports only where followed by summarize")
+	}
+	aggregates, err := p.parseNamedList(false, true)
+	if err != nil {
+		return nil, err
+	}
+	if p.checkIdentifier("by") {
+		return nil, errorAt(p.peek(), "mv-apply summarize does not support 'by'")
+	}
+	if p.check(tokenPipe) {
+		return nil, errorAt(p.peek(), "mv-apply summarize must be the final body operator")
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after mv-apply body"); err != nil {
+		return nil, err
+	}
+	return MVApplyOperator{At: at, Alias: alias.Text, Expression: expression, Limit: limit, Wheres: wheres, Aggregates: aggregates}, nil
+}
+
 func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression, error) {
 	items := make([]NamedExpression, 0, 4)
 	for {
@@ -213,9 +318,11 @@ func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression,
 		}
 		start := p.peek()
 		name := ""
+		explicit := false
 		if p.check(tokenIdentifier) && p.peekNext().Kind == tokenAssign {
 			name = p.advance().Text
 			p.advance()
+			explicit = true
 		}
 		expr, err := p.parseExpression(0)
 		if err != nil {
@@ -227,7 +334,7 @@ func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression,
 			}
 			name = expressionName(expr, len(items)+1)
 		}
-		items = append(items, NamedExpression{Name: name, At: start, Expression: expr})
+		items = append(items, NamedExpression{Name: name, At: start, Expression: expr, Explicit: explicit})
 		if !p.match(tokenComma) {
 			break
 		}
@@ -270,7 +377,7 @@ func (p *parser) parseExpression(minPrecedence int) (Expression, error) {
 			break
 		}
 		at := p.advance()
-		if op == "in" {
+		if op == "in" || op == "in~" || op == "!in" || op == "!in~" || op == "has_any" || op == "has_all" {
 			if _, err := p.expect(tokenLeftParen, "expected '(' after in"); err != nil {
 				return nil, err
 			}
@@ -348,11 +455,15 @@ func (p *parser) parsePrimary() (Expression, error) {
 		if p.match(tokenLeftParen) {
 			args := make([]Expression, 0, 2)
 			for !p.check(tokenRightParen) {
-				arg, err := p.parseExpression(0)
-				if err != nil {
-					return nil, err
+				if p.match(tokenStar) {
+					args = append(args, StarExpression{At: p.previous()})
+				} else {
+					arg, err := p.parseExpression(0)
+					if err != nil {
+						return nil, err
+					}
+					args = append(args, arg)
 				}
-				args = append(args, arg)
 				if !p.match(tokenComma) {
 					break
 				}
@@ -363,6 +474,7 @@ func (p *parser) parsePrimary() (Expression, error) {
 			return FunctionExpression{At: tok, Name: tok.Text, Arguments: args}, nil
 		}
 		parts := []string{tok.Text}
+		indices := make(map[int]int)
 		for {
 			if p.match(tokenDot) {
 				part, err := p.expect(tokenIdentifier, "expected property name after '.'")
@@ -373,19 +485,28 @@ func (p *parser) parsePrimary() (Expression, error) {
 				continue
 			}
 			if p.match(tokenLeftBracket) {
-				part, err := p.expect(tokenString, "expected quoted property name after '['")
-				if err != nil {
-					return nil, err
+				part := p.advance()
+				if part.Kind != tokenString && part.Kind != tokenNumber {
+					return nil, errorAt(part, "expected quoted property name or array index after '['")
 				}
 				if _, err := p.expect(tokenRightBracket, "expected ']' after property name"); err != nil {
 					return nil, err
 				}
-				parts = append(parts, part.Text)
+				if part.Kind == tokenNumber {
+					index, parseErr := strconv.Atoi(part.Text)
+					if parseErr != nil || index < 0 {
+						return nil, errorAt(part, "array index must be a non-negative integer")
+					}
+					parts = append(parts, "")
+					indices[len(parts)-1] = index
+				} else {
+					parts = append(parts, part.Text)
+				}
 				continue
 			}
 			break
 		}
-		return IdentifierExpression{At: tok, Parts: parts}, nil
+		return IdentifierExpression{At: tok, Parts: parts, Indices: indices}, nil
 	case tokenLeftParen:
 		expr, err := p.parseExpression(0)
 		if err != nil {
@@ -405,6 +526,10 @@ func (p *parser) infixOperator() (string, int) {
 		return "==", 3
 	case tokenNotEqual:
 		return "!=", 3
+	case tokenEqualInsensitive:
+		return "=~", 3
+	case tokenNotEqualInsensitive:
+		return "!~", 3
 	case tokenLess:
 		return "<", 3
 	case tokenLessEqual:
@@ -430,7 +555,7 @@ func (p *parser) infixOperator() (string, int) {
 			return "or", 1
 		case "and":
 			return "and", 2
-		case "in", "contains", "startswith", "endswith":
+		case "in", "in~", "!in", "!in~", "contains", "contains_cs", "startswith", "startswith_cs", "endswith", "endswith_cs", "has", "has_cs", "has_any", "has_all":
 			return tok.Text, 3
 		}
 	}
@@ -470,6 +595,9 @@ func parseDuration(value string) (time.Duration, bool) {
 func expressionName(expr Expression, index int) string {
 	switch value := expr.(type) {
 	case IdentifierExpression:
+		if _, indexed := value.Indices[len(value.Parts)-1]; indexed {
+			return fmt.Sprintf("Column%d", index)
+		}
 		return value.Parts[len(value.Parts)-1]
 	case FunctionExpression:
 		if value.Name == "count" {

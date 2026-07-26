@@ -20,6 +20,8 @@ const (
 	tokenAssign
 	tokenEqual
 	tokenNotEqual
+	tokenEqualInsensitive
+	tokenNotEqualInsensitive
 	tokenLess
 	tokenLessEqual
 	tokenGreater

@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	challengeMu sync.RWMutex
+	challenge   ChallengeDefinition
 }
 
 type Dataset struct {
@@ -36,7 +39,7 @@ type FieldGroup struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open(sqliteDriverName, path)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -91,14 +94,38 @@ CREATE TABLE IF NOT EXISTS dataset_fields (
     PRIMARY KEY(dataset_id, path, type)
 );
 
+CREATE TABLE IF NOT EXISTS workspace_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS investigation_progress (
+    question_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    solved_at TEXT,
+    answer TEXT
+);
+
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("initialize database: %w", err)
 	}
-	if err := s.ensureDatasetTableColumn(ctx); err != nil {
-		return err
+	datasetColumns := []struct {
+		name        string
+		definition  string
+		description string
+	}{
+		{name: "table_name", definition: "TEXT NOT NULL DEFAULT ''", description: "dataset table name"},
+		{name: "input_signature", definition: "TEXT NOT NULL DEFAULT ''", description: "dataset input signature"},
 	}
-	if err := s.ensureDatasetSignatureColumn(ctx); err != nil {
+	for _, column := range datasetColumns {
+		if err := s.ensureColumn(ctx, "datasets", column.name, column.definition, column.description); err != nil {
+			return err
+		}
+	}
+	if err := s.ensureColumn(ctx, "investigation_progress", "answer", "TEXT", "question answer"); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `
@@ -112,10 +139,16 @@ ON datasets(table_name) WHERE table_name <> '';`); err != nil {
 	return nil
 }
 
-func (s *Store) ensureDatasetSignatureColumn(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(datasets)")
+func (s *Store) ensureColumn(
+	ctx context.Context,
+	table string,
+	column string,
+	definition string,
+	description string,
+) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
+		return fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	found := false
 	for rows.Next() {
@@ -124,23 +157,24 @@ func (s *Store) ensureDatasetSignatureColumn(ctx context.Context) error {
 		var defaultValue any
 		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
 			rows.Close()
-			return fmt.Errorf("inspect datasets column: %w", err)
+			return fmt.Errorf("inspect %s column: %w", table, err)
 		}
-		if name == "input_signature" {
+		if name == column {
 			found = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
+		return fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
+		return fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	if found {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, "ALTER TABLE datasets ADD COLUMN input_signature TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("add dataset input signature: %w", err)
+	statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
+	if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		return fmt.Errorf("add %s: %w", description, err)
 	}
 	return nil
 }
@@ -171,45 +205,33 @@ CREATE INDEX IF NOT EXISTS idx_events_dataset_time ON events(dataset_id, time_ge
 	return nil
 }
 
-func (s *Store) ensureDatasetTableColumn(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(datasets)")
-	if err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
-	}
-	found := false
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, dataType string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			rows.Close()
-			return fmt.Errorf("inspect datasets column: %w", err)
-		}
-		if name == "table_name" {
-			found = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("inspect datasets schema: %w", err)
-	}
-	if found {
-		return nil
-	}
-	if _, err := s.db.ExecContext(ctx, "ALTER TABLE datasets ADD COLUMN table_name TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("add dataset table name: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func (s *Store) SetChallengeName(ctx context.Context, name string) error {
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO workspace_metadata(key, value) VALUES ('challenge_name', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, name); err != nil {
+		return fmt.Errorf("set challenge name: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ChallengeName(ctx context.Context) (string, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM workspace_metadata WHERE key = 'challenge_name'").Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get challenge name: %w", err)
+	}
+	return name, nil
 }
 
 func (s *Store) ListDatasets(ctx context.Context) ([]Dataset, error) {

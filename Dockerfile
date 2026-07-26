@@ -1,9 +1,11 @@
 FROM node:22-alpine AS web
 WORKDIR /src
-COPY package.json package-lock.json vite.config.js ./
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json vite.config.js ./
 COPY web/index.html ./web/index.html
 COPY web/src ./web/src
-RUN npm ci && npm run build
+RUN npm run build
 
 FROM golang:1.24-alpine AS build
 WORKDIR /src

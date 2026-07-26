@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "check": "node --check web/src/app.js"
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -18,7 +18,10 @@
     "@replit/codemirror-vim": "^6.3.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "esbuild": "^0.28.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
     "vite": "^8.1.5"
   }
 }

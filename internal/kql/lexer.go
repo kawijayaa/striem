@@ -75,12 +75,30 @@ func lex(input string) ([]token, error) {
 			kind, width := tokenAssign, 1
 			if offset+1 < len(input) && input[offset+1] == '=' {
 				kind, width = tokenEqual, 2
+			} else if offset+1 < len(input) && input[offset+1] == '~' {
+				kind, width = tokenEqualInsensitive, 2
 			}
 			tokens = append(tokens, makeToken(kind, input[start:start+width], start, start+width, line, startColumn))
 			offset, column = offset+width, column+width
 		case '!':
+			if offset+1 < len(input) && input[offset+1] == '~' {
+				tokens = append(tokens, makeToken(tokenNotEqualInsensitive, "!~", start, start+2, line, startColumn))
+				offset, column = offset+2, column+2
+				continue
+			}
+			if strings.HasPrefix(input[offset:], "!in") {
+				width := 3
+				if offset+width < len(input) && input[offset+width] == '~' {
+					width++
+				}
+				if offset+width == len(input) || !isIdentifierRune(rune(input[offset+width])) {
+					tokens = append(tokens, makeToken(tokenIdentifier, input[start:start+width], start, start+width, line, startColumn))
+					offset, column = offset+width, column+width
+					continue
+				}
+			}
 			if offset+1 >= len(input) || input[offset+1] != '=' {
-				return nil, &Error{Message: "expected !=", Line: line, Column: column}
+				return nil, &Error{Message: "expected !=, !~, or !in", Line: line, Column: column}
 			}
 			tokens = append(tokens, makeToken(tokenNotEqual, "!=", start, start+2, line, startColumn))
 			offset, column = offset+2, column+2
@@ -158,7 +176,41 @@ func lex(input string) ([]token, error) {
 					offset += nextSize
 					column++
 				}
-				tokens = append(tokens, makeToken(tokenIdentifier, input[start:offset], start, offset, line, startColumn))
+				if offset < len(input) && input[offset] == '~' {
+					offset, column = offset+1, column+1
+				}
+				identifier := input[start:offset]
+				tokens = append(tokens, makeToken(tokenIdentifier, identifier, start, offset, line, startColumn))
+				if identifier == "datetime" {
+					cursor, cursorColumn := offset, column
+					for cursor < len(input) && (input[cursor] == ' ' || input[cursor] == '\t') {
+						cursor, cursorColumn = cursor+1, cursorColumn+1
+					}
+					if cursor < len(input) && input[cursor] == '(' {
+						valueStart := cursor + 1
+						for valueStart < len(input) && (input[valueStart] == ' ' || input[valueStart] == '\t') {
+							valueStart++
+						}
+						if valueStart < len(input) && input[valueStart] >= '0' && input[valueStart] <= '9' {
+							close := valueStart
+							for close < len(input) && input[close] != ')' && input[close] != '\n' {
+								close++
+							}
+							if close < len(input) && input[close] == ')' {
+								valueEnd := close
+								for valueEnd > valueStart && (input[valueEnd-1] == ' ' || input[valueEnd-1] == '\t') {
+									valueEnd--
+								}
+								tokens = append(tokens,
+									makeToken(tokenLeftParen, "(", cursor, cursor+1, line, cursorColumn),
+									makeToken(tokenString, input[valueStart:valueEnd], valueStart, valueEnd, line, cursorColumn+valueStart-cursor),
+									makeToken(tokenRightParen, ")", close, close+1, line, cursorColumn+close-cursor),
+								)
+								offset, column = close+1, cursorColumn+close-cursor+1
+							}
+						}
+					}
+				}
 				continue
 			}
 			if unicode.IsDigit(r) {
@@ -186,6 +238,10 @@ func lex(input string) ([]token, error) {
 
 	tokens = append(tokens, token{Kind: tokenEOF, Offset: len(input), End: len(input), Line: line, Column: column})
 	return tokens, nil
+}
+
+func isIdentifierRune(value rune) bool {
+	return unicode.IsLetter(value) || unicode.IsDigit(value) || value == '_'
 }
 
 func makeToken(kind tokenKind, text string, start, end, line, column int) token {

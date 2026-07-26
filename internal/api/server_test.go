@@ -33,11 +33,14 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SetChallengeName(t.Context(), "Operation Northstar"); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
 	defer server.Close()
 
 	queryBody := bytes.NewBufferString(`{"query":"Sysmon | extend Process=tostring(RawData.process.name) | where Process contains 'powershell' | project Host, Process"}`)
-	response, err := http.Post(server.URL+"/api/query", "application/json", queryBody)
+	response, err := postAPI(server.URL+"/api/query", queryBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +80,8 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	}
 	defer schemaResponse.Body.Close()
 	var schema struct {
-		Tables []struct {
+		ChallengeName string `json:"challengeName"`
+		Tables        []struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 			EventCount  int64  `json:"eventCount"`
@@ -86,12 +90,153 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	if err := json.NewDecoder(schemaResponse.Body).Decode(&schema); err != nil {
 		t.Fatal(err)
 	}
+	if schema.ChallengeName != "Operation Northstar" {
+		t.Fatalf("challenge name = %q, want Operation Northstar", schema.ChallengeName)
+	}
 	if len(schema.Tables) != 2 || schema.Tables[0].Name != "Events" || schema.Tables[1].Name != "Sysmon" {
 		t.Fatalf("schema tables = %#v", schema.Tables)
 	}
 	if schema.Tables[0].EventCount != 2 || schema.Tables[0].Description != "All datasets" || schema.Tables[1].EventCount != 2 || schema.Tables[1].Description != "demo" {
 		t.Fatalf("schema table metadata = %#v", schema.Tables)
 	}
+}
+
+func TestStateChangingRequestsRequireSameOrigin(t *testing.T) {
+	store, err := database.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	tests := []struct {
+		name   string
+		header map[string]string
+		status int
+	}{
+		{name: "missing verification header", header: map[string]string{"Content-Type": "application/json"}, status: http.StatusForbidden},
+		{name: "cross-site fetch", header: map[string]string{"Content-Type": "application/json", "X-Striem-Request": "1", "Sec-Fetch-Site": "cross-site"}, status: http.StatusForbidden},
+		{name: "foreign origin", header: map[string]string{"Content-Type": "application/json", "X-Striem-Request": "1", "Origin": "https://attacker.example"}, status: http.StatusForbidden},
+		{name: "same origin", header: map[string]string{"Content-Type": "application/json", "X-Striem-Request": "1", "Origin": server.URL, "Sec-Fetch-Site": "same-origin"}, status: http.StatusOK},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/api/query", strings.NewReader(`{"query":"Events | take 1"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, value := range test.header {
+				request.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != test.status {
+				t.Fatalf("status = %d, want %d", response.StatusCode, test.status)
+			}
+		})
+	}
+}
+
+func TestQueryValidation(t *testing.T) {
+	store, err := database.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	t.Run("valid query", func(t *testing.T) {
+		response, err := postAPI(server.URL+"/api/query/validate", strings.NewReader(`{"query":"Events | take 1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			body, _ := io.ReadAll(response.Body)
+			t.Fatalf("status = %d, want %d: %s", response.StatusCode, http.StatusNoContent, body)
+		}
+		if response.Header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("Cache-Control = %q, want no-store", response.Header.Get("Cache-Control"))
+		}
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) != 0 {
+			t.Fatalf("body = %q, want empty response without rows or SQL", body)
+		}
+	})
+
+	for _, test := range []struct {
+		name  string
+		query string
+	}{
+		{name: "parser error", query: "Events | where"},
+		{name: "compiler error", query: "Events | where Missing == 1"},
+	} {
+		t.Run(test.name+" includes position", func(t *testing.T) {
+			response, err := postAPI(server.URL+"/api/query/validate", bytes.NewReader(mustJSON(t, map[string]string{"query": test.query})))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				body, _ := io.ReadAll(response.Body)
+				t.Fatalf("status = %d, want %d: %s", response.StatusCode, http.StatusBadRequest, body)
+			}
+			var result struct {
+				Error    string `json:"error"`
+				Position struct {
+					Line   int `json:"line"`
+					Column int `json:"column"`
+				} `json:"position"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Error == "" || result.Position.Line < 1 || result.Position.Column < 1 {
+				t.Fatalf("diagnostic = %#v, want error with positive line and column", result)
+			}
+		})
+	}
+
+	t.Run("requires same-origin header", func(t *testing.T) {
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/query/validate", strings.NewReader(`{"query":"Events | take 1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusForbidden)
+		}
+	})
+
+	t.Run("rejects wrong media type", func(t *testing.T) {
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/query/validate", strings.NewReader(`{"query":"Events | take 1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("X-Striem-Request", "1")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnsupportedMediaType {
+			t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusUnsupportedMediaType)
+		}
+	})
 }
 
 func TestMicrosoft365FixtureCanBeInvestigated(t *testing.T) {
@@ -132,14 +277,22 @@ func TestMicrosoft365FixtureCanBeInvestigated(t *testing.T) {
 	if err := fixture.Close(); err != nil {
 		t.Fatal(err)
 	}
-	manifestPath := filepath.Join(fixtureDirectory, "datasets.json")
-	manifest := map[string]any{"datasets": []map[string]any{{
-		"name": "Northstar Microsoft 365 audit logs", "table": "UAL", "path": fixturePath,
-		"format": "csv", "source": "microsoft365", "timestampPath": "CreationDate",
-		"timestampFormat": "2/01/2006 3:04:05 PM",
-		"fieldPaths":      map[string]string{"EventType": "Operations", "User": "UserIds", "Message": "RecordType"},
-	}}}
-	if err := os.WriteFile(manifestPath, mustJSON(t, manifest), 0o600); err != nil {
+	manifestPath := filepath.Join(fixtureDirectory, "datasets.yaml")
+	manifest := `challengeName: Northstar Investigation
+datasets:
+  - name: Northstar Microsoft 365 audit logs
+    table: UAL
+    path: events.csv
+    format: csv
+    source: microsoft365
+    timestampPath: CreationDate
+    timestampFormat: 2/01/2006 3:04:05 PM
+    fieldPaths:
+      EventType: Operations
+      User: UserIds
+      Message: RecordType
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := deployment.Load(t.Context(), store, manifestPath)
@@ -157,7 +310,7 @@ func TestMicrosoft365FixtureCanBeInvestigated(t *testing.T) {
 | extend ClientIP=tostring(RawData.AuditData.ClientIP)
 | summarize Failures=count() by ClientIP
 | order by Failures desc`
-	response, err := http.Post(server.URL+"/api/query", "application/json", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
+	response, err := postAPI(server.URL+"/api/query", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +362,7 @@ func TestExtendReplacesExistingColumn(t *testing.T) {
 	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
 	defer server.Close()
 
-	response, err := http.Post(server.URL+"/api/query", "application/json", bytes.NewBufferString(`{"query":"Events | extend Host='new' | where Host == 'new' | project Host"}`))
+	response, err := postAPI(server.URL+"/api/query", bytes.NewBufferString(`{"query":"Events | extend Host='new' | where Host == 'new' | project Host"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +401,7 @@ Events
 | extend Score=toint(RawData.score) * multiplier, Label=strcat(coalesce(User, fallback), ":", substring(Message, 0, 3)), Kind=iff(Message == null, "missing", "present")
 | top rows by Score desc
 | project Host, Score, Label, Kind`
-	response, err := http.Post(server.URL+"/api/query", "application/json", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
+	response, err := postAPI(server.URL+"/api/query", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,6 +418,115 @@ Events
 	}
 	if len(result.Rows) != 1 || result.Rows[0]["Host"] != "high" || result.Rows[0]["Score"] != float64(6) || result.Rows[0]["Label"] != "unknown:" || result.Rows[0]["Kind"] != "missing" {
 		t.Fatalf("rows = %#v", result.Rows)
+	}
+}
+
+func TestSecurityKQLFeaturesExecute(t *testing.T) {
+	store, err := database.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`INSERT INTO datasets(id,name,table_name,source,timestamp_path,created_at,event_count) VALUES(1,'x','Test','x','ts','2024-01-01T00:00:00Z',2)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`INSERT INTO events(dataset_id,time_generated,source,host,username,message,raw_data) VALUES
+		(1,'2024-01-01T00:00:00.000000000Z','sysmon','pc-1','Admin','PowerShell.exe alpha-user','{"tags":["Alpha","Beta"]}'),
+		(1,'2024-01-01T00:01:00.000000000Z','sysmon','pc-2','guest','notpowershell gamma-user','{"tags":["Gamma"]}')`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	indexed := queryRows(t, server.URL, `Events | where Message has_all ("powershell", "alpha") and Message has_any ("cmd", "powershell") and User =~ "ADMIN" and User !~ "guest" and User !in~ ("GUEST") | project Tag=tostring(RawData.tags[0])`)
+	if len(indexed) != 1 || indexed[0]["Tag"] != "Alpha" {
+		t.Fatalf("indexed rows = %#v", indexed)
+	}
+	expanded := queryRows(t, server.URL, `Events | extend Tags=RawData.tags | mv-expand Tag=Tags limit 8 | where Tag in~ ("beta", "gamma") | project Host, Tag | order by Host`)
+	if len(expanded) != 2 || expanded[0]["Tag"] != "Beta" || expanded[1]["Tag"] != "Gamma" {
+		t.Fatalf("expanded rows = %#v", expanded)
+	}
+	applied := queryRows(t, server.URL, `Events | mv-apply Tag=RawData.tags on (where Tag in~ ("beta", "gamma") | summarize MatchCount=count(), Matches=make_list(Tag)) | project Host, MatchCount, Matches | order by Host`)
+	if len(applied) != 2 || applied[0]["MatchCount"] != float64(1) || applied[1]["MatchCount"] != float64(1) {
+		t.Fatalf("applied rows = %#v", applied)
+	}
+	if matches, ok := applied[0]["Matches"].([]any); !ok || len(matches) != 1 || matches[0] != "Beta" {
+		t.Fatalf("applied matches = %#v", applied[0]["Matches"])
+	}
+	missing := queryRows(t, server.URL, `Events | mv-apply Tag=RawData.tags on (where Tag == "missing" | summarize MatchCount=count()) | project Host, MatchCount | order by Host`)
+	if len(missing) != 2 || missing[0]["MatchCount"] != float64(0) || missing[1]["MatchCount"] != float64(0) {
+		t.Fatalf("empty applied rows = %#v", missing)
+	}
+	dynamicStrings := queryRows(t, server.URL, `Events | take 1 | mv-apply Item=parse_json('["true","1","null",{"x":1}]') on (summarize Values=make_list(Item)) | project Values`)
+	values, ok := dynamicStrings[0]["Values"].([]any)
+	if !ok || len(values) != 4 || values[0] != "true" || values[1] != "1" || values[2] != "null" {
+		t.Fatalf("dynamic string values = %#v", dynamicStrings)
+	}
+	mixed := queryRows(t, server.URL, `Events | take 1 | mv-apply Item=parse_json('[{"x":1},"plain"]') on (summarize Values=make_list(Item.x)) | project Values`)
+	mixedValues, ok := mixed[0]["Values"].([]any)
+	if !ok || len(mixedValues) != 1 || mixedValues[0] != float64(1) {
+		t.Fatalf("mixed dynamic values = %#v", mixed)
+	}
+	parsed := queryRows(t, server.URL, `Events | where Host == "pc-1" | extend Parts=split(Message, " ") | mv-expand Part=Parts | where Part contains_cs "PowerShell" | project Part, UserPart=extract("([a-z]+)-user", 1, Message), Clean=trim("\\s+", "  value  "), Replaced=replace_string(Message, "PowerShell", "pwsh")`)
+	if len(parsed) != 1 || parsed[0]["Part"] != "PowerShell.exe" || parsed[0]["UserPart"] != "alpha" || parsed[0]["Clean"] != "value" || parsed[0]["Replaced"] != "pwsh.exe alpha-user" {
+		t.Fatalf("parsed rows = %#v", parsed)
+	}
+}
+
+func TestPriorityInvestigationKQLFeaturesExecute(t *testing.T) {
+	store, err := database.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`INSERT INTO datasets(id,name,table_name,source,timestamp_path,created_at,event_count) VALUES(1,'x','Test','x','ts','2024-01-01T00:00:00Z',3)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`INSERT INTO events(dataset_id,time_generated,source,host,username,message,raw_data) VALUES
+		(1,'2024-01-01T00:00:00.000000000Z','sysmon','pc-1','alice','started','{"command":"PowerShell.exe","score":1}'),
+		(1,'2024-01-01T00:01:00.000000000Z','sysmon','pc-1','bob','completed','{"command":"PowerShell.exe","score":2}'),
+		(1,'2024-01-01T00:02:00.000000000Z','sysmon','pc-2','alice','benign','{"command":"cmd.exe","score":3}')`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	latest := queryRows(t, server.URL, `let hits = Events | search "powershell";
+hits | summarize arg_max(TimeGenerated, *) by Host`)
+	if len(latest) != 1 || latest[0]["Host"] != "pc-1" || latest[0]["User"] != "bob" {
+		t.Fatalf("latest rows = %#v", latest)
+	}
+	if raw, ok := latest[0]["RawData"].(map[string]any); !ok || raw["score"] != float64(2) {
+		t.Fatalf("latest RawData = %#v", latest[0]["RawData"])
+	}
+	collision := queryRows(t, server.URL, `Events | where Host == "pc-1" | extend __kql_rank=0, __kql_group_0="user" | summarize arg_max(TimeGenerated, *) by Host`)
+	if len(collision) != 1 || collision[0]["User"] != "bob" {
+		t.Fatalf("collision rows = %#v", collision)
+	}
+
+	aggregated := queryRows(t, server.URL, `Events | where Host == "pc-1" | summarize Users=make_set(User), Sequence=make_list(User), Objects=make_list(RawData), Sample=take_any(User)`)
+	if len(aggregated) != 1 {
+		t.Fatalf("aggregate rows = %#v", aggregated)
+	}
+	users, usersOK := aggregated[0]["Users"].([]any)
+	sequence, sequenceOK := aggregated[0]["Sequence"].([]any)
+	objects, objectsOK := aggregated[0]["Objects"].([]any)
+	objectOK := false
+	if objectsOK && len(objects) > 0 {
+		_, objectOK = objects[0].(map[string]any)
+	}
+	if !usersOK || len(users) != 2 || !sequenceOK || len(sequence) != 2 || !objectsOK || len(objects) != 2 || !objectOK || aggregated[0]["Sample"] == nil {
+		t.Fatalf("aggregate row = %#v", aggregated[0])
+	}
+	projected := queryRows(t, server.URL, `Events | where Host == "pc-1" | project Payload=RawData`)
+	if _, ok := projected[0]["Payload"].(map[string]any); !ok {
+		t.Fatalf("projected dynamic value = %#v", projected[0]["Payload"])
+	}
+	joined := queryRows(t, server.URL, `let left = Events | where Host == "pc-1" | project User, Host;
+let right = Events | where Message == "benign" | project User, Message;
+left | join (right) on User`)
+	if len(joined) != 1 || joined[0]["User"] != "alice" || joined[0]["Message"] != "benign" {
+		t.Fatalf("tabular join rows = %#v", joined)
 	}
 }
 
@@ -311,11 +573,17 @@ func TestUnionAndJoinTables(t *testing.T) {
 	if len(leftRows) != 2 || leftRows[1]["User"] != "bob" || leftRows[1]["Message"] != nil {
 		t.Fatalf("left join rows = %#v", leftRows)
 	}
+
+	anti := `UAL | project User, Host | join kind=leftanti (Sysmon | project User) on User | order by User`
+	antiRows := queryRows(t, server.URL, anti)
+	if len(antiRows) != 1 || antiRows[0]["User"] != "bob" {
+		t.Fatalf("leftanti join rows = %#v", antiRows)
+	}
 }
 
 func queryRows(t *testing.T, serverURL, query string) []map[string]any {
 	t.Helper()
-	response, err := http.Post(serverURL+"/api/query", "application/json", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
+	response, err := postAPI(serverURL+"/api/query", bytes.NewBuffer(mustJSON(t, map[string]string{"query": query})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,4 +599,14 @@ func queryRows(t *testing.T, serverURL, query string) []map[string]any {
 		t.Fatal(err)
 	}
 	return result.Rows
+}
+
+func postAPI(url string, body io.Reader) (*http.Response, error) {
+	request, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Striem-Request", "1")
+	return http.DefaultClient.Do(request)
 }
