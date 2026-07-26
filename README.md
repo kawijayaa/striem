@@ -117,18 +117,6 @@ docker run --rm -p 8080:8080 \
 
 The Dockerfile uses separate Node.js and Go build stages. The Node.js stage installs the locked frontend dependencies, performs the strict TypeScript check, and builds the Tailwind/Vite assets. The Go stage embeds those generated assets into a single stripped binary. The runtime image contains only the binary and its writable `/data` volume; Node.js, the TypeScript sources, and build tools are not included.
 
-### Cloudflare deployment
-
-The repository includes `compose.cloudflare.yml` for the public test deployment at <https://striem.k3ng.xyz>. It keeps the application port private and routes traffic through the `striem-k3ng` named Cloudflare Tunnel:
-
-```bash
-docker compose -f compose.cloudflare.yml up -d --build
-docker compose -f compose.cloudflare.yml ps
-docker compose -f compose.cloudflare.yml logs -f
-```
-
-The tunnel credentials remain outside the repository at `~/.cloudflared/efda31a1-6210-47ae-9f9f-69bee47f372a.json`. Stop the deployment without deleting investigation data using `docker compose -f compose.cloudflare.yml down`. Add `-v` only when intentionally resetting the imported data and shared question progress.
-
 ## Query
 
 Query a configured dataset directly by its manifest table name:
