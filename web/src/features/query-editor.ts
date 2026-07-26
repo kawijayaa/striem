@@ -16,7 +16,8 @@ import { Vim, vim } from '@replit/codemirror-vim';
 import type { QueryError } from '../types';
 
 const keywords = new Set([
-  'let', 'where', 'search', 'project', 'extend', 'summarize', 'distinct', 'order', 'sort',
+  'let', 'where', 'search', 'project', 'project-away', 'project-rename', 'extend', 'parse',
+  'parse-where', 'evaluate', 'with', 'simple', 'summarize', 'distinct', 'order', 'sort',
   'top', 'take', 'limit', 'count', 'mv-expand', 'mv-apply', 'union', 'join', 'kind', 'inner', 'leftouter',
   'leftanti', 'on', 'by', 'asc', 'desc',
 ]);
@@ -26,16 +27,21 @@ const logicalOperators = new Set([
 ]);
 const functions = new Set([
   'now', 'ago', 'datetime', 'bin', 'tostring', 'toint', 'tolower', 'toupper', 'isnull',
-  'isnotnull', 'parse_json', 'count', 'countif', 'iff', 'coalesce', 'strlen', 'substring',
+  'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'bag_keys', 'todatetime',
+  'bag_unpack', 'count', 'countif', 'iff', 'coalesce', 'strlen', 'substring',
   'strcat', 'dcount', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
   'arg_max', 'arg_min', 'make_set', 'make_list', 'take_any',
 ]);
 const literals = new Set(['true', 'false', 'null']);
+const types = new Set(['string', 'long', 'real', 'dynamic']);
 
 const operatorCompletions = createCompletions('keyword', [
   ['let', 'Declare a scalar or tabular value'],
   ['where', 'Filter rows'], ['search', 'Search all visible columns'],
-  ['project', 'Select columns'], ['extend', 'Add a calculated column'],
+  ['project', 'Select columns'], ['project-away', 'Remove columns'],
+  ['project-rename', 'Rename columns'], ['extend', 'Add a calculated column'],
+  ['parse', 'Extract typed values from text'], ['parse-where', 'Parse text and keep matching rows'],
+  ['evaluate bag_unpack', 'Expand dynamic object properties'],
   ['summarize', 'Aggregate rows'], ['distinct', 'Return unique rows'],
   ['order by', 'Sort rows'], ['sort by', 'Sort rows'], ['take', 'Limit rows'],
   ['top', 'Rank and limit rows'], ['limit', 'Limit rows'], ['count', 'Count rows'],
@@ -49,6 +55,9 @@ const functionCompletions = createCompletions('function', [
   ['bin', 'Bucket a value'], ['tostring', 'Convert to string'], ['toint', 'Convert to integer'],
   ['tolower', 'Lowercase text'], ['toupper', 'Uppercase text'], ['isnull', 'Test for null'],
   ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'],
+  ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
+  ['array_length', 'Number of array elements'], ['bag_keys', 'Keys of a dynamic object'],
+  ['todatetime', 'Convert ISO text to UTC datetime'],
   ['iff', 'Conditional value'], ['coalesce', 'First non-null value'], ['strlen', 'String length'],
   ['substring', 'Extract text'], ['strcat', 'Concatenate values'],
   ['split', 'Split text into a dynamic array'], ['extract', 'Extract a regular expression group'],
@@ -91,7 +100,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
 
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
-    const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.\[\]"]*/);
+    const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.\[\]"-]*(?:\s+[A-Za-z_][A-Za-z0-9_-]*)?/);
     if (!context.explicit && (!word || word.from === word.to)) return null;
     return {
       from: word?.from ?? context.pos,
@@ -101,7 +110,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         ...functionCompletions,
         ...options.getFieldCompletions(),
       ],
-      validFor: /^[A-Za-z_][A-Za-z0-9_.\[\]"]*$/,
+      validFor: /^[A-Za-z_][A-Za-z0-9_.\[\]"-]*(?:\s+[A-Za-z_][A-Za-z0-9_-]*)?$/,
     };
   };
 
@@ -196,12 +205,13 @@ function createLanguage(availableTables: Set<string>) {
       if (stream.match(/^\d+(?:\.\d+)?(?:ms|[smhdw])?/)) return 'number';
       if (stream.match(/^(?:==|!=|=~|!~|<=|>=|[+\-*/%<>=])/)) return 'operator';
       if (stream.match(/^(?:!in~?|in~)(?=\s|\()/)) return 'operator';
-      if (stream.match(/^mv-(?:expand|apply)\b/)) return 'keyword';
+      if (stream.match(/^(?:mv-(?:expand|apply)|parse-where|project-(?:away|rename))\b/)) return 'keyword';
       if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
         const word = stream.current();
         if (keywords.has(word)) return 'keyword';
         if (logicalOperators.has(word)) return 'operator';
         if (literals.has(word)) return 'bool';
+        if (types.has(word)) return 'typeName';
         if (functions.has(word) && stream.match(/^\s*\(/, false)) return 'typeName';
         if (availableTables.has(word)) return 'className';
         return 'variableName';

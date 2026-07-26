@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,7 +81,9 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	}
 	defer schemaResponse.Body.Close()
 	var schema struct {
-		ChallengeName string `json:"challengeName"`
+		ChallengeName string   `json:"challengeName"`
+		Operators     []string `json:"operators"`
+		Functions     []string `json:"functions"`
 		Tables        []struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -98,6 +101,16 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	}
 	if schema.Tables[0].EventCount != 2 || schema.Tables[0].Description != "All datasets" || schema.Tables[1].EventCount != 2 || schema.Tables[1].Description != "demo" {
 		t.Fatalf("schema table metadata = %#v", schema.Tables)
+	}
+	for _, operator := range []string{"parse", "parse-where", "project-away", "project-rename", "evaluate bag_unpack"} {
+		if !slices.Contains(schema.Operators, operator) {
+			t.Fatalf("schema operators do not include %q: %v", operator, schema.Operators)
+		}
+	}
+	for _, function := range []string{"array_length", "bag_keys", "isempty", "isnotempty", "todatetime"} {
+		if !slices.Contains(schema.Functions, function) {
+			t.Fatalf("schema functions do not include %q: %v", function, schema.Functions)
+		}
 	}
 }
 
@@ -470,6 +483,51 @@ func TestSecurityKQLFeaturesExecute(t *testing.T) {
 	parsed := queryRows(t, server.URL, `Events | where Host == "pc-1" | extend Parts=split(Message, " ") | mv-expand Part=Parts | where Part contains_cs "PowerShell" | project Part, UserPart=extract("([a-z]+)-user", 1, Message), Clean=trim("\\s+", "  value  "), Replaced=replace_string(Message, "PowerShell", "pwsh")`)
 	if len(parsed) != 1 || parsed[0]["Part"] != "PowerShell.exe" || parsed[0]["UserPart"] != "alpha" || parsed[0]["Clean"] != "value" || parsed[0]["Replaced"] != "pwsh.exe alpha-user" {
 		t.Fatalf("parsed rows = %#v", parsed)
+	}
+}
+
+func TestDataShapingKQLFeaturesExecute(t *testing.T) {
+	store, err := database.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`INSERT INTO datasets(id,name,table_name,source,timestamp_path,created_at,event_count) VALUES(1,'x','Test','x','ts','2024-01-01T00:00:00Z',2)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`INSERT INTO events(dataset_id,time_generated,source,host,username,message,raw_data) VALUES
+		(1,'2024-01-01T00:00:00.000000000Z','sysmon','pc-1','','user=alice id=42','{"command":"pwsh","score":7,"context":{"admin":true},"items":[1,2]}'),
+		(1,'2024-01-01T00:01:00.000000000Z','sysmon','pc-2',NULL,'invalid','{"command":5,"score":"bad","context":"true","items":{}}')`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	defer server.Close()
+
+	parsed := queryRows(t, server.URL, `Events | parse Message with "user=" ParsedUser:string " id=" ParsedID:long | project Host, ParsedUser, ParsedID | order by Host`)
+	if len(parsed) != 2 || parsed[0]["ParsedUser"] != "alice" || parsed[0]["ParsedID"] != float64(42) || parsed[1]["ParsedUser"] != nil {
+		t.Fatalf("parsed rows = %#v", parsed)
+	}
+	parsedWhere := queryRows(t, server.URL, `Events | parse-where Message with "user=" ParsedUser:string " id=" ParsedID:long | project ParsedUser, ParsedID`)
+	if len(parsedWhere) != 1 || parsedWhere[0]["ParsedUser"] != "alice" || parsedWhere[0]["ParsedID"] != float64(42) {
+		t.Fatalf("parse-where rows = %#v", parsedWhere)
+	}
+	projected := queryRows(t, server.URL, `Events | project-away Source, EventType, RawData | project-rename Computer=Host, Account=User | project Computer, Account | order by Computer`)
+	if len(projected) != 2 || projected[0]["Computer"] != "pc-1" {
+		t.Fatalf("projected rows = %#v", projected)
+	}
+	unpacked := queryRows(t, server.URL, `Events | evaluate bag_unpack(RawData) : (*, command:string, score:long, context:dynamic, items:dynamic) | project Host, command, score, context, items | order by Host`)
+	if len(unpacked) != 2 || unpacked[0]["command"] != "pwsh" || unpacked[0]["score"] != float64(7) || unpacked[1]["command"] != nil || unpacked[1]["score"] != nil {
+		t.Fatalf("unpacked rows = %#v", unpacked)
+	}
+	if context, ok := unpacked[0]["context"].(map[string]any); !ok || context["admin"] != true || unpacked[1]["context"] != "true" {
+		t.Fatalf("unpacked dynamic values = %#v", unpacked)
+	}
+	helpers := queryRows(t, server.URL, `Events | extend Size=array_length(RawData.items), Keys=bag_keys(RawData), Empty=isempty(User), Present=isnotempty(Message), Parsed=todatetime("2024-01-01T01:00:00+01:00") | project Host, Size, Keys, Empty, Present, Parsed | order by Host`)
+	if len(helpers) != 2 || helpers[0]["Size"] != float64(2) || helpers[1]["Size"] != nil || helpers[0]["Empty"] != float64(1) || helpers[0]["Parsed"] != "2024-01-01T00:00:00.000000000Z" {
+		t.Fatalf("helper rows = %#v", helpers)
+	}
+	if keys, ok := helpers[0]["Keys"].([]any); !ok || len(keys) != 4 {
+		t.Fatalf("bag keys = %#v", helpers[0]["Keys"])
 	}
 }
 

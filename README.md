@@ -1,8 +1,8 @@
 # Striem
 
-![Striem web page](screenshot.png)
+Striem is a per-team CTF log investigation application. Challenge operators provision prepared JSON or CSV telemetry and investigation questions at deployment time. Players query the telemetry with a bounded Kusto Query Language (KQL) subset, inspect event JSON, bookmark evidence, and solve tasks to unlock the challenge flag.
 
-Striem is a small, per-team CTF log search application. Challenge operators provision JSON or CSV logs at deployment time, and players use a deliberately limited Kusto Query Language (KQL) subset over dataset tables or the combined `Events` table.
+The current interface includes first-run onboarding, live preflight query diagnostics, table and field completion, sortable and resizable results, CSV export, an event timeline, mobile result cards, saved queries, query history, bookmarks, and shared task progress. Correctly submitted answers remain visible after a task is solved.
 
 ## Run
 
@@ -26,9 +26,9 @@ Open the Vite URL shown in the terminal. Requests under `/api` are proxied to th
 
 ## Frontend
 
-The browser application uses strict TypeScript, Vite, Tailwind CSS 4, and CodeMirror 6. The entry point is `web/src/app.ts`. Shared API contracts are defined in `web/src/types.ts`, while infrastructure and UI behavior are separated into modules under `web/src/features`, `web/src/kql`, and `web/src/ui`.
+The browser application uses strict TypeScript, Vite, Tailwind CSS 4, and CodeMirror 6. The entry point is `web/src/app.ts`. Shared API contracts are defined in `web/src/types.ts`, while editor, result, timeline, storage, and UI behavior are separated into modules under `web/src/features`, `web/src/kql`, and `web/src/ui`.
 
-Most application styling uses Tailwind utilities directly in `web/index.html` and in TypeScript-generated elements. `web/src/style.css` contains the Tailwind theme plus specialized rules for CodeMirror, dynamic table state, JSON highlighting, scrollbars, and other behavior that is not practical to express as static utilities.
+Static layout additions use Tailwind utilities directly in `web/index.html` and TypeScript-generated elements. `web/src/style.css` contains the established component styles plus specialized rules for CodeMirror, result tables, JSON highlighting, timelines, and responsive behavior.
 
 Frontend commands:
 
@@ -39,6 +39,20 @@ npm run dev    # Vite development server
 ```
 
 The Go binary embeds `web/dist`, so run `npm run build` before compiling or running the Go service from a clean checkout.
+
+## Architecture
+
+```text
+cmd/striem/          Process startup and HTTP lifecycle
+internal/api/        JSON API, query validation, and static serving
+internal/database/   SQLite schema, progress, and KQL SQL functions
+internal/deployment/ YAML loading and deployment reconciliation
+internal/ingest/     Streaming JSON, NDJSON, CSV, and gzip ingestion
+internal/kql/        KQL lexer, parser, AST, and SQL compiler
+web/src/             TypeScript application and Tailwind/CSS interface
+```
+
+The API parses and compiles every query into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
 
 Configuration:
 
@@ -159,13 +173,15 @@ Events
 | order by TimeGenerated desc
 ```
 
-The browser keeps recent queries, named saved queries, bookmarked result rows, and bookmark notes in local storage. Share creates a URL containing the current query. Results that include `TimeGenerated` also display a histogram of the visible rows.
+The navigation bar shows the project and challenge names. Help reopens the onboarding guide. The browser keeps onboarding state, recent queries, named saved queries, bookmarked result rows, and bookmark notes in local storage. Share creates a URL containing the current query. Results that include `TimeGenerated` display a selectable histogram of the visible rows.
 
 Supported tabular operators:
 
 ```text
-where, search, project, extend, summarize, distinct, order by, sort by,
-top, take, limit, count, mv-expand, mv-apply, union, join
+where, search, project, project-away, project-rename, extend,
+parse, parse-where, evaluate bag_unpack, summarize, distinct,
+order by, sort by, top, take, limit, count, mv-expand, mv-apply,
+union, join
 ```
 
 `search` performs case-insensitive whole-token matching across every currently visible column, including `RawData`:
@@ -195,6 +211,37 @@ UAL
   ) on User
 ```
 
+`project-away` removes exact columns or columns matched by an edge wildcard. `project-rename` performs simultaneous column renames:
+
+```kusto
+Events
+| project-away Source, Raw*
+| project-rename Computer=Host, Account=User
+```
+
+`parse` appends typed captures and keeps unmatched rows with null captures. `parse-where` keeps only matching rows. This bounded implementation supports `kind=simple`, quoted literal delimiters, `*`, and captures explicitly typed as `string`, `long`, or `real`:
+
+```kusto
+Events
+| parse-where Message with "user=" ParsedUser:string " id=" ParsedID:long
+| project TimeGenerated, ParsedUser, ParsedID
+```
+
+`evaluate bag_unpack()` expands selected properties from a dynamic object. An explicit output schema is required so result columns remain static and bounded. The schema must begin with `*`, supports at most 32 outputs, and accepts `string`, `long`, `real`, and `dynamic` types:
+
+```kusto
+Events
+| evaluate bag_unpack(RawData) : (*, command:string, score:long, context:dynamic)
+| project TimeGenerated, Host, command, score, context
+```
+
+An optional prefix maps prefixed output names back to unprefixed JSON keys:
+
+```kusto
+Events
+| evaluate bag_unpack(RawData, "raw_") : (*, raw_command:string, raw_score:long)
+```
+
 Supported scalar operations:
 
 ```text
@@ -202,8 +249,9 @@ Supported scalar operations:
 in, in~, !in, !in~, contains, contains_cs, startswith, startswith_cs,
 endswith, endswith_cs, has, has_cs, has_any, has_all
 now(), ago(), datetime(), bin(), tostring(), toint(), tolower(),
-toupper(), isnull(), isnotnull(), parse_json(), iff(), coalesce(),
-strlen(), substring(), strcat(), split(), extract(), trim(), replace_string()
+toupper(), todatetime(), isnull(), isnotnull(), isempty(), isnotempty(),
+parse_json(), array_length(), bag_keys(), iff(), coalesce(), strlen(),
+substring(), strcat(), split(), extract(), trim(), replace_string()
 ```
 
 Dynamic arrays support zero-based indexing such as `RawData.tags[0]`. `mv-expand Name=Expression [limit N]` expands an array into rows. Expansion defaults to 128 values per input row, cannot exceed 128, and considers at most 1,000 input rows per expansion stage:
@@ -228,6 +276,8 @@ Events
 
 `has` performs case-insensitive whole-token matching; `_cs` variants are case-sensitive and `in~` performs case-insensitive membership. `extract()` uses Go's bounded RE2 regular-expression syntax and accepts a pattern, capture-group index, and source string.
 
+`array_length()` returns the number of elements in a valid dynamic array. `bag_keys()` returns the sorted root keys of a valid dynamic object. Both return null for malformed or mismatched dynamic input. `isempty()` tests for null or empty text, while `isnotempty()` is its complement. `todatetime()` accepts bounded ISO date/time text, interprets timezone-less values as UTC, and normalizes valid values to UTC; invalid input returns null.
+
 Supported aggregation functions are `count`, `countif`, `dcount`, `sum`, `min`, `max`, `avg`, `make_set`, `make_list`, and `take_any`. `make_set` and `make_list` return dynamic arrays, omit null values, and retain at most 1,000 values or 1 MiB of encoded data per group. `arg_max(Value, *)` and `arg_min(Value, *)` return the complete row containing the extreme value; they must be the only aggregation in that `summarize`. Duration literals support milliseconds, seconds, minutes, hours, days, and weeks, such as `500ms`, `15m`, `2d`, or `1w`.
 
 `top N by Expression [asc|desc]` sorts and limits in one operator, defaulting to descending order. Comparisons to `null` use null semantics, so both `Value == null` and `Value != null` are supported alongside `isnull()` and `isnotnull()`.
@@ -244,7 +294,7 @@ selectedEvents
 
 Bindings are case-sensitive, must be declared before use, and cannot use the same name as an `Events` column. Tabular bindings require a pipeline on the right side and can be reused as the main source or inside `union` and `join` pipelines.
 
-This is a KQL subset, not a complete Kusto engine. Unsupported syntax is rejected with a line and column diagnostic. Queries are limited to five seconds and at most 1,000 rows unless a smaller explicit limit is used.
+This is a KQL subset, not a complete Kusto engine. Unsupported syntax is rejected with a line and column diagnostic. Query source is limited to 32 KiB, execution to five seconds, and results to 1,000 rows unless a smaller explicit limit is used. Parse patterns support at most 16 captures; projection lists, `bag_unpack` schemas, and `mv-apply` aggregate lists are bounded to prevent compilation amplification.
 
 ## API
 
@@ -271,4 +321,5 @@ State-changing API requests require `Content-Type: application/json` and `X-Stri
 npm run check
 npm run build
 go test ./...
+go test -race ./...
 ```

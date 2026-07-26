@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/kawijayaa/striem/internal/database"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -594,4 +595,346 @@ func TestMVApplyAggregateLimit(t *testing.T) {
 	if _, err = Compile(query, time.Now()); err == nil || !strings.Contains(err.Error(), "at most 32") {
 		t.Fatalf("aggregate limit error = %v", err)
 	}
+}
+
+func TestParseSimplePatterns(t *testing.T) {
+	query, err := Parse(`Events | parse-where kind=simple Message with * "user=" ParsedUser:string ", count=" Total:long ", ratio=" Ratio:real`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, ok := query.Operators[0].(ParseOperator)
+	if !ok || !operator.Where || len(operator.Pattern) != 7 {
+		t.Fatalf("operator = %#v", query.Operators[0])
+	}
+
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(compiled.Columns[len(compiled.Columns)-3:], ","); got != "ParsedUser,Total,Ratio" {
+		t.Fatalf("capture columns = %q", got)
+	}
+	for _, fragment := range []string{"kql_parse(", "json_valid", "json_extract", "IS NOT NULL"} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+	if compiled.Args[1] != "string,long,real" {
+		t.Fatalf("parse type descriptor = %#v", compiled.Args[1])
+	}
+}
+
+func TestCompileAndExecuteParseAndParseWhere(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	for _, message := range []string{"user=alice, count=42, ratio=1.5", "does not match"} {
+		if _, err := db.Exec(`INSERT INTO events (message) VALUES (?)`, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		operator string
+		rows     int
+	}{
+		{operator: "parse", rows: 2},
+		{operator: "parse-where", rows: 1},
+	} {
+		query, err := Parse(`Events | ` + test.operator + ` Message with "user=" ParsedUser:string ", count=" Total:long ", ratio=" Ratio:real | project ParsedUser, Total, Ratio`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compiled, err := Compile(query, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.Query(compiled.SQL, compiled.Args...)
+		if err != nil {
+			t.Fatalf("execute %s: %v\n%s", test.operator, err, compiled.SQL)
+		}
+		count := 0
+		for rows.Next() {
+			var user sql.NullString
+			var total sql.NullInt64
+			var ratio sql.NullFloat64
+			if err = rows.Scan(&user, &total, &ratio); err != nil {
+				t.Fatal(err)
+			}
+			if count == 0 && (!user.Valid || user.String != "alice" || !total.Valid || total.Int64 != 42 || !ratio.Valid || ratio.Float64 != 1.5) {
+				t.Fatalf("parsed row = %#v, %#v, %#v", user, total, ratio)
+			}
+			count++
+		}
+		if err = rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if count != test.rows {
+			t.Fatalf("%s rows = %d, want %d", test.operator, count, test.rows)
+		}
+	}
+}
+
+func TestCompileProjectAwayAndSimultaneousRename(t *testing.T) {
+	query, err := Parse(`Events | project-away Raw*, *Type, Mess* | project-rename User=Host, Host=User`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(compiled.Columns, ","); got != "TimeGenerated,Source,User,Host" {
+		t.Fatalf("columns = %q", got)
+	}
+	if !strings.Contains(compiled.SQL, `q."Host" AS "User"`) || !strings.Contains(compiled.SQL, `q."User" AS "Host"`) {
+		t.Fatalf("rename is not simultaneous: %s", compiled.SQL)
+	}
+	if len(compiled.DynamicColumns) != 0 {
+		t.Fatalf("dynamic columns = %#v", compiled.DynamicColumns)
+	}
+}
+
+func TestCompileBagUnpackSchemaAndDynamicMetadata(t *testing.T) {
+	query, err := Parse(`Events | evaluate bag_unpack(RawData) : (*, Name:string, Count:long, Ratio:real, Details:dynamic) | project Host, Name, Count, Ratio, Details`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(compiled.Columns, ","); got != "Host,Name,Count,Ratio,Details" {
+		t.Fatalf("columns = %q", got)
+	}
+	if _, dynamic := compiled.DynamicColumns["Details"]; !dynamic {
+		t.Fatal("dynamic bag output is not marked dynamic")
+	}
+	for _, fragment := range []string{"CASE WHEN json_valid", "json_extract", "json_type", "json_quote"} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+
+	prefixed, err := Parse(`Events | evaluate bag_unpack(RawData, "bag_") : (*, bag_Name:string)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixedCompiled, err := Compile(prefixed, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range prefixedCompiled.Columns {
+		if column == "RawData" {
+			t.Fatal("bag_unpack retained its input dynamic column")
+		}
+	}
+	if prefixedCompiled.Args[0] != `$."Name"` {
+		t.Fatalf("prefixed property path = %#v", prefixedCompiled.Args[0])
+	}
+}
+
+func TestExecuteBagUnpackGuardsMalformedJSON(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	for _, row := range []struct {
+		host string
+		data string
+	}{
+		{host: "valid", data: `{"Name":"alice","Count":7,"Ratio":2.5,"Details":{"active":true}}`},
+		{host: "invalid", data: `{broken`},
+	} {
+		if _, err := db.Exec(`INSERT INTO events (host, raw_data) VALUES (?, ?)`, row.host, row.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query, err := Parse(`Events | evaluate bag_unpack(RawData) : (*, Name:string, Count:long, Ratio:real, Details:dynamic) | project Host, Name, Count, Ratio, Details | order by Host desc`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("execute bag_unpack: %v\n%s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("missing valid row")
+	}
+	var host string
+	var name, details sql.NullString
+	var count sql.NullInt64
+	var ratio sql.NullFloat64
+	if err = rows.Scan(&host, &name, &count, &ratio, &details); err != nil {
+		t.Fatal(err)
+	}
+	if host != "valid" || name.String != "alice" || count.Int64 != 7 || ratio.Float64 != 2.5 || details.String != `{"active":true}` {
+		t.Fatalf("valid row = %q, %#v, %#v, %#v, %#v", host, name, count, ratio, details)
+	}
+	if !rows.Next() {
+		t.Fatal("missing invalid row")
+	}
+	if err = rows.Scan(&host, &name, &count, &ratio, &details); err != nil {
+		t.Fatal(err)
+	}
+	if host != "invalid" || name.Valid || count.Valid || ratio.Valid || details.Valid {
+		t.Fatalf("malformed JSON row was not null guarded: %q, %#v, %#v, %#v, %#v", host, name, count, ratio, details)
+	}
+}
+
+func TestExecuteBagUnpackRejectsUnsafeNumbers(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO events (raw_data) VALUES (?)`, `{"TooLarge":9223372036854775808,"Infinite":1e400}`); err != nil {
+		t.Fatal(err)
+	}
+	query, err := Parse(`Events | evaluate bag_unpack(RawData) : (*, TooLarge:long, Infinite:real) | project TooLarge, Infinite`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tooLarge sql.NullInt64
+	var infinite sql.NullFloat64
+	if err = db.QueryRow(compiled.SQL, compiled.Args...).Scan(&tooLarge, &infinite); err != nil {
+		t.Fatal(err)
+	}
+	if tooLarge.Valid || infinite.Valid {
+		t.Fatalf("unsafe numbers = %#v, %#v", tooLarge, infinite)
+	}
+}
+
+func TestCompileNewScalarFunctions(t *testing.T) {
+	query, err := Parse(`Events | extend Length=array_length(RawData.items), Keys=bag_keys(RawData), Empty=isempty(User), Present=isnotempty(Message), Date=todatetime(Message) | project Length, Keys, Empty, Present, Date`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"kql_array_length", "kql_bag_keys", "COALESCE(length", "kql_todatetime"} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+	if _, dynamic := compiled.DynamicColumns["Keys"]; !dynamic {
+		t.Fatal("bag_keys output is not marked dynamic")
+	}
+}
+
+func TestExecuteNewScalarFunctions(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO events (username, message, raw_data) VALUES (?, ?, ?)`, "", "2026-07-20T12:34:56Z", `{"items":[1,2],"value":3}`); err != nil {
+		t.Fatal(err)
+	}
+	query, err := Parse(`Events | extend Length=array_length(RawData.items), Keys=bag_keys(RawData), Empty=isempty(User), Present=isnotempty(Message), Date=todatetime(Message) | project Length, Keys, Empty, Present, Date`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var length, empty, present int64
+	var keys, date string
+	if err = db.QueryRow(compiled.SQL, compiled.Args...).Scan(&length, &keys, &empty, &present, &date); err != nil {
+		t.Fatalf("execute scalar functions: %v\n%s", err, compiled.SQL)
+	}
+	if length != 2 || keys != `["items","value"]` || empty != 1 || present != 1 || date != "2026-07-20T12:34:56.000000000Z" {
+		t.Fatalf("scalar results = %d, %q, %d, %d, %q", length, keys, empty, present, date)
+	}
+}
+
+func TestBoundedBatchLimits(t *testing.T) {
+	captures := make([]string, 17)
+	for index := range captures {
+		captures[index] = fmt.Sprintf("C%d:string", index)
+	}
+	projections := make([]string, 33)
+	awayPatterns := make([]string, 33)
+	bagItems := make([]string, 33)
+	for index := range projections {
+		projections[index] = fmt.Sprintf("C%d=Host", index)
+		awayPatterns[index] = fmt.Sprintf("C%d", index)
+		bagItems[index] = fmt.Sprintf("C%d:string", index)
+	}
+	tests := []struct {
+		query   string
+		message string
+	}{
+		{query: "Events | parse Message with " + strings.Join(captures, ` "," `), message: "at most 16"},
+		{query: "Events | project " + strings.Join(projections, ", "), message: "at most 32"},
+		{query: "Events | project-away " + strings.Join(awayPatterns, ", "), message: "at most 32"},
+		{query: "Events | project-rename " + strings.Join(projections, ", "), message: "at most 32"},
+		{query: "Events | evaluate bag_unpack(RawData) : (*, " + strings.Join(bagItems, ", ") + ")", message: "at most 32"},
+	}
+	for _, test := range tests {
+		if _, err := Parse(test.query); err == nil || !strings.Contains(err.Error(), test.message) {
+			t.Fatalf("Parse() error = %v, want %q", err, test.message)
+		}
+	}
+}
+
+func TestParsePatternLimit(t *testing.T) {
+	query, err := Parse(`Events | parse Message with "` + strings.Repeat("x", maxParsePattern) + `" Value:string`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Compile(query, time.Now()); err == nil || !strings.Contains(err.Error(), "cannot exceed") {
+		t.Fatalf("pattern limit error = %v", err)
+	}
+}
+
+func TestBoundedBatchDiagnostics(t *testing.T) {
+	tests := []struct {
+		query   string
+		message string
+	}{
+		{query: `Events | parse kind=regex Message with Value:string`, message: "parse kind"},
+		{query: `Events | parse Message with Value:dynamic`, message: "not supported"},
+		{query: `Events | parse Message with Value`, message: "explicit type"},
+		{query: `Events | parse Message with "literal"`, message: "at least one capture"},
+		{query: `Events | parse Message with Value:string *`, message: "literal separator"},
+		{query: `Events | project Host, host=Source`, message: "specified more than once"},
+		{query: `Events | project-rename Source=Host`, message: "conflicts with another output"},
+		{query: `Events | project-away Missing`, message: "unknown column"},
+		{query: `Events | evaluate bag_unpack(RawData)`, message: "explicit output schema"},
+		{query: `Events | evaluate bag_unpack(Message) : (*, Value:string)`, message: "requires a dynamic column"},
+		{query: `Events | evaluate bag_unpack(RawData) : (*, Host:string)`, message: "conflicts with another output"},
+		{query: `Events | evaluate bag_unpack(RawData, "bag_") : (*, Name:string)`, message: "must start with prefix"},
+		{query: `Events | evaluate bag_unpack(RawData) : (*, Value:bool)`, message: "not supported"},
+	}
+	for _, test := range tests {
+		t.Run(test.message+test.query, func(t *testing.T) {
+			query, err := Parse(test.query)
+			if err == nil {
+				_, err = Compile(query, time.Now())
+			}
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error = %v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func openKQLTestDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("striem_sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`CREATE TABLE events (
+		time_generated TEXT, source TEXT, event_type TEXT, host TEXT,
+		username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER
+	)`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	return db
 }

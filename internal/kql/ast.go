@@ -46,6 +46,33 @@ type ProjectOperator struct {
 
 func (ProjectOperator) operatorNode() {}
 
+type ColumnPattern struct {
+	At             token
+	Name           string
+	PrefixWildcard bool
+	SuffixWildcard bool
+}
+
+type ProjectAwayOperator struct {
+	At       token
+	Patterns []ColumnPattern
+}
+
+func (ProjectAwayOperator) operatorNode() {}
+
+type ColumnRename struct {
+	At     token
+	Name   string
+	Source string
+}
+
+type ProjectRenameOperator struct {
+	At    token
+	Items []ColumnRename
+}
+
+func (ProjectRenameOperator) operatorNode() {}
+
 type ExtendOperator struct {
 	At    token
 	Items []NamedExpression
@@ -97,6 +124,54 @@ func (TopOperator) operatorNode() {}
 type CountOperator struct{ At token }
 
 func (CountOperator) operatorNode() {}
+
+type ScalarType string
+
+const (
+	ScalarString  ScalarType = "string"
+	ScalarLong    ScalarType = "long"
+	ScalarReal    ScalarType = "real"
+	ScalarDynamic ScalarType = "dynamic"
+)
+
+type ParsePatternKind int
+
+const (
+	ParseDelimiter ParsePatternKind = iota
+	ParseWildcard
+	ParseCapture
+)
+
+type ParsePatternItem struct {
+	At   token
+	Kind ParsePatternKind
+	Text string
+	Type ScalarType
+}
+
+type ParseOperator struct {
+	At         token
+	Expression Expression
+	Pattern    []ParsePatternItem
+	Where      bool
+}
+
+func (ParseOperator) operatorNode() {}
+
+type BagUnpackItem struct {
+	At   token
+	Name string
+	Type ScalarType
+}
+
+type BagUnpackOperator struct {
+	At     token
+	Column string
+	Prefix string
+	Items  []BagUnpackItem
+}
+
+func (BagUnpackOperator) operatorNode() {}
 
 type MVExpandOperator struct {
 	At         token

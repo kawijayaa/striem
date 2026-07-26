@@ -4,11 +4,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/kawijayaa/striem/internal/eventtime"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -28,6 +33,18 @@ func init() {
 		if err := connection.RegisterFunc("kql_trim", kqlTrim, true); err != nil {
 			return err
 		}
+		if err := connection.RegisterFunc("kql_parse", kqlParse, true); err != nil {
+			return err
+		}
+		if err := connection.RegisterFunc("kql_array_length", kqlArrayLength, true); err != nil {
+			return err
+		}
+		if err := connection.RegisterFunc("kql_bag_keys", kqlBagKeys, true); err != nil {
+			return err
+		}
+		if err := connection.RegisterFunc("kql_todatetime", kqlToDatetime, true); err != nil {
+			return err
+		}
 		if err := connection.RegisterAggregator("kql_make_list", func() *kqlCollection { return &kqlCollection{} }, true); err != nil {
 			return err
 		}
@@ -41,7 +58,13 @@ func init() {
 const (
 	maxCollectionValues = 1000
 	maxCollectionBytes  = 1 << 20
+	maxParseCaptures    = 16
+	maxParsePattern     = 2 << 10
+	maxParseSource      = 64 << 10
+	maxParseTypes       = maxParseCaptures*len("string") + maxParseCaptures - 1
 )
+
+var isoDatetimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?$`)
 
 type kqlCollection struct {
 	values   []any
@@ -63,7 +86,7 @@ func (collection *kqlCollection) Step(value any, dynamic int64) error {
 	if dynamic != 0 {
 		if text, ok := value.(string); ok {
 			trimmed := strings.TrimSpace(text)
-			if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, `"`) {
 				var decoded any
 				if json.Unmarshal([]byte(trimmed), &decoded) == nil {
 					value = decoded
@@ -162,4 +185,115 @@ func kqlTrim(pattern, value string) (string, error) {
 		return "", err
 	}
 	return expression.ReplaceAllString(value, ""), nil
+}
+
+func kqlParse(patternValue, typesValue, sourceValue any) any {
+	pattern, patternOK := patternValue.(string)
+	types, typesOK := typesValue.(string)
+	source, sourceOK := sourceValue.(string)
+	if !patternOK || !typesOK || !sourceOK || len(pattern) > maxParsePattern || len(types) > maxParseTypes || len(source) > maxParseSource {
+		return nil
+	}
+
+	expression, err := regexp.Compile(pattern)
+	if err != nil || expression.NumSubexp() > maxParseCaptures {
+		return nil
+	}
+	descriptors := make([]string, 0)
+	if types != "" {
+		descriptors = strings.Split(types, ",")
+	}
+	if len(descriptors) != expression.NumSubexp() {
+		return nil
+	}
+	for _, descriptor := range descriptors {
+		if descriptor != "string" && descriptor != "long" && descriptor != "real" {
+			return nil
+		}
+	}
+
+	matches := expression.FindStringSubmatch(source)
+	if matches == nil {
+		return nil
+	}
+	values := make([]any, len(descriptors))
+	for index, descriptor := range descriptors {
+		capture := matches[index+1]
+		switch descriptor {
+		case "string":
+			values[index] = capture
+		case "long":
+			value, err := strconv.ParseInt(capture, 10, 64)
+			if err != nil {
+				return nil
+			}
+			values[index] = value
+		case "real":
+			value, err := strconv.ParseFloat(capture, 64)
+			if err != nil || math.IsInf(value, 0) || math.IsNaN(value) {
+				return nil
+			}
+			values[index] = value
+		}
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil
+	}
+	return string(encoded)
+}
+
+func kqlArrayLength(value any) any {
+	text, ok := value.(string)
+	if !ok || !strings.HasPrefix(strings.TrimSpace(text), "[") {
+		return nil
+	}
+	var values []json.RawMessage
+	if err := json.Unmarshal([]byte(text), &values); err != nil {
+		return nil
+	}
+	return int64(len(values))
+}
+
+func kqlBagKeys(value any) any {
+	text, ok := value.(string)
+	if !ok || !strings.HasPrefix(strings.TrimSpace(text), "{") {
+		return nil
+	}
+	var bag map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &bag); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(bag))
+	for key := range bag {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return nil
+	}
+	return string(encoded)
+}
+
+func kqlToDatetime(value any) any {
+	text, ok := value.(string)
+	if !ok || !isoDatetimePattern.MatchString(text) {
+		return nil
+	}
+
+	var parsed time.Time
+	var err error
+	switch {
+	case len(text) == len("2006-01-02"):
+		parsed, err = time.ParseInLocation("2006-01-02", text, time.UTC)
+	case strings.HasSuffix(text, "Z") || text[len(text)-6] == '+' || text[len(text)-6] == '-':
+		parsed, err = time.Parse(time.RFC3339Nano, strings.Replace(text, " ", "T", 1))
+	default:
+		parsed, err = time.ParseInLocation("2006-01-02T15:04:05", strings.Replace(text, " ", "T", 1), time.UTC)
+	}
+	if err != nil {
+		return nil
+	}
+	return eventtime.Format(parsed)
 }

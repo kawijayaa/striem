@@ -3,6 +3,7 @@ package kql
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -140,6 +141,9 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			}
 			sqlText = fmt.Sprintf("SELECT * FROM (%s) AS q WHERE (%s)", sqlText, strings.Join(conditions, " OR "))
 		case ProjectOperator:
+			if len(operator.Items) > maxProjectionItems {
+				return relation{}, errorAt(operator.At, "projection supports at most %d items", maxProjectionItems)
+			}
 			nextDynamic := make(map[string]struct{})
 			for _, item := range operator.Items {
 				if c.expressionIsDynamic(item.Expression, dynamicColumns) {
@@ -154,7 +158,59 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			columns, c.columns = names, columnSet(names)
 			dynamicColumns = nextDynamic
 			c.dynamic = dynamicColumns
+		case ProjectAwayOperator:
+			if len(operator.Patterns) > maxProjectionItems {
+				return relation{}, errorAt(operator.At, "projection supports at most %d items", maxProjectionItems)
+			}
+			removed := make(map[string]struct{})
+			for _, pattern := range operator.Patterns {
+				matched := false
+				for _, column := range columns {
+					if columnPatternMatches(pattern, column) {
+						removed[column] = struct{}{}
+						matched = true
+					}
+				}
+				if !matched && !pattern.PrefixWildcard && !pattern.SuffixWildcard {
+					return relation{}, errorAt(pattern.At, "unknown column %q", pattern.Name)
+				}
+			}
+			nextColumns := make([]string, 0, len(columns))
+			selects := make([]string, 0, len(columns))
+			nextDynamic := cloneSet(dynamicColumns)
+			for _, column := range columns {
+				if _, drop := removed[column]; drop {
+					delete(nextDynamic, column)
+					continue
+				}
+				nextColumns = append(nextColumns, column)
+				selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+			}
+			if len(nextColumns) == 0 {
+				return relation{}, errorAt(operator.At, "project-away cannot remove every column")
+			}
+			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
+			columns, dynamicColumns = nextColumns, nextDynamic
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
+		case ProjectRenameOperator:
+			if len(operator.Items) > maxProjectionItems {
+				return relation{}, errorAt(operator.At, "projection supports at most %d items", maxProjectionItems)
+			}
+			renamed, err := c.compileProjectRename(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = renamed.SQL, renamed.Columns, renamed.DynamicColumns
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
 		case ExtendOperator:
+			inputNames := caseInsensitiveColumnSet(columns)
+			for _, item := range operator.Items {
+				if _, collision := inputNames[strings.ToLower(item.Name)]; collision {
+					if _, replaces := c.columns[item.Name]; !replaces {
+						return relation{}, errorAt(item.At, "column %q conflicts with another output column", item.Name)
+					}
+				}
+			}
 			nextDynamic := cloneSet(dynamicColumns)
 			for _, item := range operator.Items {
 				delete(nextDynamic, item.Name)
@@ -248,7 +304,26 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			columns, c.columns = []string{"Count"}, columnSet([]string{"Count"})
 			dynamicColumns = make(map[string]struct{})
 			c.dynamic = dynamicColumns
+		case ParseOperator:
+			parsed, err := c.compileParse(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = parsed.SQL, parsed.Columns, parsed.DynamicColumns
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
+		case BagUnpackOperator:
+			unpacked, err := c.compileBagUnpack(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = unpacked.SQL, unpacked.Columns, unpacked.DynamicColumns
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
 		case MVExpandOperator:
+			if _, collision := caseInsensitiveColumnSet(columns)[strings.ToLower(operator.Name)]; collision {
+				if _, replaces := c.columns[operator.Name]; !replaces {
+					return relation{}, errorAt(operator.At, "column %q conflicts with another output column", operator.Name)
+				}
+			}
 			expression, err := c.compileExpression(operator.Expression, false)
 			if err != nil {
 				return relation{}, err
@@ -307,6 +382,208 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 		}
 	}
 	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, nil
+}
+
+func columnPatternMatches(pattern ColumnPattern, column string) bool {
+	if pattern.PrefixWildcard && pattern.SuffixWildcard {
+		return strings.Contains(column, pattern.Name)
+	}
+	if pattern.PrefixWildcard {
+		return strings.HasSuffix(column, pattern.Name)
+	}
+	if pattern.SuffixWildcard {
+		return strings.HasPrefix(column, pattern.Name)
+	}
+	return column == pattern.Name
+}
+
+func (c *compiler) compileProjectRename(input relation, operator ProjectRenameOperator) (relation, error) {
+	sources := make(map[string]ColumnRename, len(operator.Items))
+	for _, item := range operator.Items {
+		if _, exists := c.columns[item.Source]; !exists {
+			return relation{}, errorAt(item.At, "unknown column %q", item.Source)
+		}
+		if _, duplicate := sources[item.Source]; duplicate {
+			return relation{}, errorAt(item.At, "column %q is renamed more than once", item.Source)
+		}
+		sources[item.Source] = item
+	}
+
+	columns := make([]string, len(input.Columns))
+	seen := make(map[string]struct{}, len(input.Columns))
+	for index, source := range input.Columns {
+		name := source
+		at := operator.At
+		if item, rename := sources[source]; rename {
+			name, at = item.Name, item.At
+		}
+		key := strings.ToLower(name)
+		if _, duplicate := seen[key]; duplicate {
+			return relation{}, errorAt(at, "column %q conflicts with another output column", name)
+		}
+		seen[key] = struct{}{}
+		columns[index] = name
+	}
+
+	selects := make([]string, len(input.Columns))
+	dynamic := make(map[string]struct{})
+	for index, source := range input.Columns {
+		output := columns[index]
+		selects[index] = "q." + quoteIdentifier(source) + " AS " + quoteIdentifier(output)
+		if _, exists := input.DynamicColumns[source]; exists {
+			dynamic[output] = struct{}{}
+		}
+	}
+	return relation{SQL: fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), input.SQL), Columns: columns, DynamicColumns: dynamic}, nil
+}
+
+func (c *compiler) compileParse(input relation, operator ParseOperator) (relation, error) {
+	if len(operator.Pattern) == 0 {
+		return relation{}, errorAt(operator.At, "parse pattern cannot be empty")
+	}
+	seen := caseInsensitiveColumnSet(input.Columns)
+	captures := make([]ParsePatternItem, 0, maxParseCaptures)
+	var pattern strings.Builder
+	pattern.WriteString("(?s)^")
+	for _, item := range operator.Pattern {
+		switch item.Kind {
+		case ParseDelimiter:
+			pattern.WriteString(regexp.QuoteMeta(item.Text))
+		case ParseWildcard:
+			pattern.WriteString(".*?")
+		case ParseCapture:
+			key := strings.ToLower(item.Text)
+			if _, collision := seen[key]; collision {
+				return relation{}, errorAt(item.At, "column %q conflicts with another output column", item.Text)
+			}
+			seen[key] = struct{}{}
+			captures = append(captures, item)
+			switch item.Type {
+			case ScalarString:
+				pattern.WriteString("(.*?)")
+			case ScalarLong:
+				pattern.WriteString("([+-]?[0-9]+)")
+			case ScalarReal:
+				pattern.WriteString("([+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)")
+			default:
+				return relation{}, errorAt(item.At, "parse capture type %q is not supported", item.Type)
+			}
+		}
+	}
+	pattern.WriteString("$")
+	if len(captures) > maxParseCaptures {
+		return relation{}, errorAt(operator.At, "parse supports at most %d captures", maxParseCaptures)
+	}
+	if pattern.Len() > maxParsePattern {
+		return relation{}, errorAt(operator.At, "parse pattern cannot exceed %d bytes", maxParsePattern)
+	}
+
+	expression, err := c.compileExpression(operator.Expression, false)
+	if err != nil {
+		return relation{}, err
+	}
+	internal := availableCaseInsensitiveColumnName("__kql_parse_result", seen)
+	types := make([]string, len(captures))
+	for index, capture := range captures {
+		types[index] = string(capture.Type)
+	}
+	parsed := "kql_parse(" + c.bind(pattern.String()) + ", " + c.bind(strings.Join(types, ",")) + ", CAST(" + expression + " AS TEXT))"
+	inner := fmt.Sprintf("SELECT q.*, %s AS %s FROM (%s) AS q", parsed, quoteIdentifier(internal), input.SQL)
+	guarded := "CASE WHEN json_valid(q." + quoteIdentifier(internal) + ") THEN q." + quoteIdentifier(internal) + " ELSE NULL END"
+
+	selects := make([]string, 0, len(input.Columns)+len(captures))
+	columns := append([]string(nil), input.Columns...)
+	for _, column := range input.Columns {
+		selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+	}
+	for index, capture := range captures {
+		value := fmt.Sprintf("json_extract(%s, '$[%d]')", guarded, index)
+		switch capture.Type {
+		case ScalarString:
+			value = "CAST(" + value + " AS TEXT)"
+		case ScalarLong:
+			value = "CAST(" + value + " AS INTEGER)"
+		case ScalarReal:
+			value = "CAST(" + value + " AS REAL)"
+		}
+		selects = append(selects, value+" AS "+quoteIdentifier(capture.Text))
+		columns = append(columns, capture.Text)
+	}
+	where := ""
+	if operator.Where {
+		where = " WHERE q." + quoteIdentifier(internal) + " IS NOT NULL"
+	}
+	return relation{SQL: fmt.Sprintf("SELECT %s FROM (%s) AS q%s", strings.Join(selects, ", "), inner, where), Columns: columns, DynamicColumns: cloneSet(input.DynamicColumns)}, nil
+}
+
+func (c *compiler) compileBagUnpack(input relation, operator BagUnpackOperator) (relation, error) {
+	if _, exists := c.columns[operator.Column]; !exists {
+		return relation{}, errorAt(operator.At, "unknown column %q", operator.Column)
+	}
+	if _, dynamic := input.DynamicColumns[operator.Column]; !dynamic {
+		return relation{}, errorAt(operator.At, "bag_unpack requires a dynamic column")
+	}
+	if len(operator.Items) > maxBagUnpackItems {
+		return relation{}, errorAt(operator.At, "bag_unpack supports at most %d output columns", maxBagUnpackItems)
+	}
+
+	preservedColumns := make([]string, 0, len(input.Columns)-1)
+	for _, column := range input.Columns {
+		if column != operator.Column {
+			preservedColumns = append(preservedColumns, column)
+		}
+	}
+	seen := caseInsensitiveColumnSet(preservedColumns)
+	selects := make([]string, 0, len(input.Columns)+len(operator.Items))
+	columns := append([]string(nil), preservedColumns...)
+	dynamic := cloneSet(input.DynamicColumns)
+	delete(dynamic, operator.Column)
+	for _, column := range preservedColumns {
+		selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+	}
+	base := "q." + quoteIdentifier(operator.Column)
+	guarded := "CASE WHEN json_valid(" + base + ") THEN " + base + " ELSE NULL END"
+	for _, item := range operator.Items {
+		key := strings.ToLower(item.Name)
+		if _, collision := seen[key]; collision {
+			return relation{}, errorAt(item.At, "column %q conflicts with another output column", item.Name)
+		}
+		seen[key] = struct{}{}
+		property := item.Name
+		if operator.Prefix != "" {
+			if !strings.HasPrefix(item.Name, operator.Prefix) || len(item.Name) == len(operator.Prefix) {
+				return relation{}, errorAt(item.At, "bag_unpack output column %q must start with prefix %q", item.Name, operator.Prefix)
+			}
+			property = strings.TrimPrefix(item.Name, operator.Prefix)
+		}
+		path := c.bind(`$."` + strings.ReplaceAll(property, `"`, `\"`) + `"`)
+		value := "json_extract(" + guarded + ", " + path + ")"
+		jsonType := "json_type(" + guarded + ", " + path + ")"
+		switch item.Type {
+		case ScalarString:
+			value = "CASE WHEN " + jsonType + " = 'text' THEN " + value + " END"
+		case ScalarLong:
+			value = "CASE WHEN " + jsonType + " = 'integer' AND typeof(" + value + ") = 'integer' THEN " + value + " END"
+		case ScalarReal:
+			value = "CASE WHEN " + jsonType + " IN ('integer', 'real') AND abs(CAST(" + value + " AS REAL)) <= 1.7976931348623157e308 THEN CAST(" + value + " AS REAL) END"
+		case ScalarDynamic:
+			value = "CASE " + jsonType +
+				" WHEN 'text' THEN json_quote(" + value + ")" +
+				" WHEN 'object' THEN " + value +
+				" WHEN 'array' THEN " + value +
+				" WHEN 'true' THEN 'true'" +
+				" WHEN 'false' THEN 'false'" +
+				" WHEN 'integer' THEN " + value +
+				" WHEN 'real' THEN CASE WHEN abs(CAST(" + value + " AS REAL)) <= 1.7976931348623157e308 THEN " + value + " END" +
+				" ELSE NULL END"
+			dynamic[item.Name] = struct{}{}
+		default:
+			return relation{}, errorAt(item.At, "bag_unpack output type %q is not supported", item.Type)
+		}
+		selects = append(selects, value+" AS "+quoteIdentifier(item.Name))
+		columns = append(columns, item.Name)
+	}
+	return relation{SQL: fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), input.SQL), Columns: columns, DynamicColumns: dynamic}, nil
 }
 
 func (c *compiler) compileMVApply(input relation, operator MVApplyOperator) (relation, error) {
@@ -536,6 +813,14 @@ func (c *compiler) compileSummarize(input relation, operator SummarizeOperator) 
 	if err != nil {
 		return relation{}, err
 	}
+	outputNames := make(map[string]struct{}, len(groupNames)+len(aggregateNames))
+	for _, item := range append(append([]NamedExpression(nil), operator.Groups...), operator.Aggregates...) {
+		key := strings.ToLower(item.Name)
+		if _, duplicate := outputNames[key]; duplicate {
+			return relation{}, errorAt(item.At, "column %q is specified more than once", item.Name)
+		}
+		outputNames[key] = struct{}{}
+	}
 	selects := append(groups, aggregates...)
 	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), input.SQL)
 	if len(groups) > 0 {
@@ -573,10 +858,11 @@ func (c *compiler) compileArgExtremum(input relation, groups []NamedExpression, 
 	used := make(map[string]struct{})
 	internalNames := columnSet(input.Columns)
 	for index, group := range groups {
-		if _, exists := used[group.Name]; exists {
+		nameKey := strings.ToLower(group.Name)
+		if _, exists := used[nameKey]; exists {
 			return relation{}, errorAt(group.At, "column %q is specified more than once", group.Name)
 		}
-		used[group.Name] = struct{}{}
+		used[nameKey] = struct{}{}
 		expression, compileErr := c.compileExpression(group.Expression, false)
 		if compileErr != nil {
 			return relation{}, compileErr
@@ -610,10 +896,11 @@ func (c *compiler) compileArgExtremum(input relation, groups []NamedExpression, 
 		}
 	}
 	for _, column := range input.Columns {
-		if _, duplicate := used[column]; duplicate {
+		nameKey := strings.ToLower(column)
+		if _, duplicate := used[nameKey]; duplicate {
 			continue
 		}
-		used[column] = struct{}{}
+		used[nameKey] = struct{}{}
 		columns = append(columns, column)
 		selects = append(selects, "r."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
 		if _, isDynamic := input.DynamicColumns[column]; isDynamic {
@@ -634,12 +921,20 @@ func projectRelation(value relation, columns []string, alias string) string {
 }
 
 func availableColumnName(name string, used map[string]struct{}) string {
-	if _, exists := used[name]; !exists {
+	contains := func(candidate string) bool {
+		for existing := range used {
+			if strings.EqualFold(existing, candidate) {
+				return true
+			}
+		}
+		return false
+	}
+	if !contains(name) {
 		return name
 	}
 	for suffix := 1; suffix <= 1000; suffix++ {
 		candidate := fmt.Sprintf("%s%d", name, suffix)
-		if _, exists := used[candidate]; !exists {
+		if !contains(candidate) {
 			return candidate
 		}
 	}
@@ -651,10 +946,11 @@ func (c *compiler) compileNamed(items []NamedExpression, aggregate bool) ([]stri
 	names := make([]string, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		if _, exists := seen[item.Name]; exists {
+		key := strings.ToLower(item.Name)
+		if _, exists := seen[key]; exists {
 			return nil, nil, errorAt(item.At, "column %q is specified more than once", item.Name)
 		}
-		seen[item.Name] = struct{}{}
+		seen[key] = struct{}{}
 		expr, err := c.compileExpression(item.Expression, aggregate)
 		if err != nil {
 			return nil, nil, err
@@ -880,13 +1176,16 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		seconds := int64(duration.Value / time.Second)
 		first, second := c.bind(seconds), c.bind(seconds)
 		return "strftime('%Y-%m-%dT%H:%M:%SZ', (CAST(strftime('%s', " + value + ") AS INTEGER) / " + first + ") * " + second + ", 'unixepoch')", nil
-	case "tostring", "toint", "tolower", "toupper", "isnull", "isnotnull", "parse_json", "strlen":
+	case "tostring", "toint", "tolower", "toupper", "isnull", "isnotnull", "parse_json", "strlen", "array_length", "bag_keys", "isempty", "isnotempty", "todatetime":
 		args, err := compileArgs(1)
 		if err != nil {
 			return "", err
 		}
 		switch expr.Name {
 		case "tostring":
+			if c.expressionIsDynamic(expr.Arguments[0], c.dynamic) {
+				return "CASE WHEN json_valid(" + args[0] + ") AND json_type(" + args[0] + ") = 'text' THEN json_extract(" + args[0] + ", '$') ELSE CAST(" + args[0] + " AS TEXT) END", nil
+			}
 			return "CAST(" + args[0] + " AS TEXT)", nil
 		case "toint":
 			return "CAST(" + args[0] + " AS INTEGER)", nil
@@ -902,6 +1201,22 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 			return "json(" + args[0] + ")", nil
 		case "strlen":
 			return "length(CAST(" + args[0] + " AS TEXT))", nil
+		case "array_length":
+			return "kql_array_length(" + args[0] + ")", nil
+		case "bag_keys":
+			return "kql_bag_keys(" + args[0] + ")", nil
+		case "isempty":
+			if c.expressionIsDynamic(expr.Arguments[0], c.dynamic) {
+				return "(" + args[0] + " IS NULL OR CASE WHEN json_valid(" + args[0] + ") AND json_type(" + args[0] + ") = 'text' THEN length(json_extract(" + args[0] + ", '$')) = 0 ELSE length(CAST(" + args[0] + " AS TEXT)) = 0 END)", nil
+			}
+			return "(COALESCE(length(CAST(" + args[0] + " AS TEXT)), 0) = 0)", nil
+		case "isnotempty":
+			if c.expressionIsDynamic(expr.Arguments[0], c.dynamic) {
+				return "(" + args[0] + " IS NOT NULL AND CASE WHEN json_valid(" + args[0] + ") AND json_type(" + args[0] + ") = 'text' THEN length(json_extract(" + args[0] + ", '$')) > 0 ELSE length(CAST(" + args[0] + " AS TEXT)) > 0 END)", nil
+			}
+			return "(COALESCE(length(CAST(" + args[0] + " AS TEXT)), 0) > 0)", nil
+		case "todatetime":
+			return "kql_todatetime(" + args[0] + ")", nil
 		}
 	case "iff":
 		args, err := compileArgs(3)
@@ -1177,7 +1492,7 @@ func (c *compiler) expressionIsDynamic(expression Expression, dynamicColumns map
 		return exists
 	case FunctionExpression:
 		switch expr.Name {
-		case "make_set", "make_list", "parse_json", "split":
+		case "make_set", "make_list", "parse_json", "split", "bag_keys":
 			return true
 		case "take_any":
 			return len(expr.Arguments) == 1 && c.expressionIsDynamic(expr.Arguments[0], dynamicColumns)
@@ -1193,6 +1508,25 @@ func columnSet(values []string) map[string]struct{} {
 		result[value] = struct{}{}
 	}
 	return result
+}
+func caseInsensitiveColumnSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[strings.ToLower(value)] = struct{}{}
+	}
+	return result
+}
+func availableCaseInsensitiveColumnName(name string, used map[string]struct{}) string {
+	if _, exists := used[strings.ToLower(name)]; !exists {
+		return name
+	}
+	for suffix := 1; suffix <= 1000; suffix++ {
+		candidate := fmt.Sprintf("%s%d", name, suffix)
+		if _, exists := used[strings.ToLower(candidate)]; !exists {
+			return candidate
+		}
+	}
+	panic("too many column name collisions")
 }
 func cloneSet(values map[string]struct{}) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))

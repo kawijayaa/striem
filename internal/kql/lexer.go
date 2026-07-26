@@ -59,6 +59,9 @@ func lex(input string) ([]token, error) {
 		case '.':
 			tokens = append(tokens, makeToken(tokenDot, ".", start, start+1, line, startColumn))
 			offset, column = offset+1, column+1
+		case ':':
+			tokens = append(tokens, makeToken(tokenColon, ":", start, start+1, line, startColumn))
+			offset, column = offset+1, column+1
 		case '(':
 			tokens = append(tokens, makeToken(tokenLeftParen, "(", start, start+1, line, startColumn))
 			offset, column = offset+1, column+1

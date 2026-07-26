@@ -12,6 +12,13 @@ type parser struct {
 	current int
 }
 
+const (
+	maxParseCaptures   = 16
+	maxParsePattern    = 2 << 10
+	maxProjectionItems = 32
+	maxBagUnpackItems  = 32
+)
+
 func Parse(input string) (Query, error) {
 	tokens, err := lex(input)
 	if err != nil {
@@ -70,15 +77,12 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 		if err != nil {
 			return Query{}, err
 		}
-		if name.Text == "mv" && p.match(tokenMinus) {
-			suffix, suffixErr := p.expect(tokenIdentifier, "expected 'expand' or 'apply' after 'mv-'")
+		if p.match(tokenMinus) {
+			suffix, suffixErr := p.expect(tokenIdentifier, "expected operator name after '-'")
 			if suffixErr != nil {
 				return Query{}, suffixErr
 			}
-			if suffix.Text != "expand" && suffix.Text != "apply" {
-				return Query{}, errorAt(suffix, "operator %q is not supported", "mv-"+suffix.Text)
-			}
-			name.Text = "mv-" + suffix.Text
+			name.Text += "-" + suffix.Text
 		}
 		var operator Operator
 		switch name.Text {
@@ -92,22 +96,30 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			operator = SearchOperator{At: name, Expression: expr}
 		case "project":
 			var items []NamedExpression
-			items, err = p.parseNamedList(false, false)
+			items, err = p.parseNamedList(false, false, maxProjectionItems)
 			operator = ProjectOperator{At: name, Items: items}
+		case "project-away":
+			var patterns []ColumnPattern
+			patterns, err = p.parseColumnPatterns()
+			operator = ProjectAwayOperator{At: name, Patterns: patterns}
+		case "project-rename":
+			var items []ColumnRename
+			items, err = p.parseColumnRenames()
+			operator = ProjectRenameOperator{At: name, Items: items}
 		case "extend":
 			var items []NamedExpression
-			items, err = p.parseNamedList(true, false)
+			items, err = p.parseNamedList(true, false, 0)
 			operator = ExtendOperator{At: name, Items: items}
 		case "summarize":
 			var aggregates, groups []NamedExpression
-			aggregates, err = p.parseNamedList(false, true)
+			aggregates, err = p.parseNamedList(false, true, 0)
 			if err == nil && p.matchIdentifier("by") {
-				groups, err = p.parseNamedList(false, false)
+				groups, err = p.parseNamedList(false, false, 0)
 			}
 			operator = SummarizeOperator{At: name, Aggregates: aggregates, Groups: groups}
 		case "distinct":
 			var items []NamedExpression
-			items, err = p.parseNamedList(false, false)
+			items, err = p.parseNamedList(false, false, 0)
 			operator = DistinctOperator{At: name, Items: items}
 		case "order", "sort":
 			_, err = p.expectIdentifier("by", "expected 'by' after sort operator")
@@ -140,6 +152,10 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			operator = TopOperator{At: name, Count: value, Term: term}
 		case "count":
 			operator = CountOperator{At: name}
+		case "parse", "parse-where":
+			operator, err = p.parseParse(name, name.Text == "parse-where")
+		case "evaluate":
+			operator, err = p.parseEvaluate(name)
 		case "mv-expand":
 			start := p.peek()
 			columnName := ""
@@ -294,7 +310,7 @@ func (p *parser) parseMVApply(at token) (Operator, error) {
 	if !p.matchIdentifier("summarize") {
 		return nil, errorAt(p.peek(), "mv-apply body supports only where followed by summarize")
 	}
-	aggregates, err := p.parseNamedList(false, true)
+	aggregates, err := p.parseNamedList(false, true, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +326,7 @@ func (p *parser) parseMVApply(at token) (Operator, error) {
 	return MVApplyOperator{At: at, Alias: alias.Text, Expression: expression, Limit: limit, Wheres: wheres, Aggregates: aggregates}, nil
 }
 
-func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression, error) {
+func (p *parser) parseNamedList(requireAlias, stopAtBy bool, maxItems int) ([]NamedExpression, error) {
 	items := make([]NamedExpression, 0, 4)
 	for {
 		if p.check(tokenPipe) || p.check(tokenEOF) || (stopAtBy && p.checkIdentifier("by")) {
@@ -335,6 +351,9 @@ func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression,
 			name = expressionName(expr, len(items)+1)
 		}
 		items = append(items, NamedExpression{Name: name, At: start, Expression: expr, Explicit: explicit})
+		if maxItems > 0 && len(items) > maxItems {
+			return nil, errorAt(start, "projection supports at most %d items", maxItems)
+		}
 		if !p.match(tokenComma) {
 			break
 		}
@@ -343,6 +362,195 @@ func (p *parser) parseNamedList(requireAlias, stopAtBy bool) ([]NamedExpression,
 		return nil, errorAt(p.peek(), "expected expression")
 	}
 	return items, nil
+}
+
+func (p *parser) parseColumnPatterns() ([]ColumnPattern, error) {
+	patterns := make([]ColumnPattern, 0, 4)
+	for {
+		start := p.peek()
+		prefix := p.match(tokenStar)
+		name := ""
+		if p.check(tokenIdentifier) {
+			name = p.advance().Text
+		}
+		suffix := p.match(tokenStar)
+		if name == "" && !prefix {
+			return nil, errorAt(start, "expected column name or wildcard pattern")
+		}
+		patterns = append(patterns, ColumnPattern{At: start, Name: name, PrefixWildcard: prefix, SuffixWildcard: suffix})
+		if len(patterns) > maxProjectionItems {
+			return nil, errorAt(start, "projection supports at most %d items", maxProjectionItems)
+		}
+		if !p.match(tokenComma) {
+			break
+		}
+	}
+	return patterns, nil
+}
+
+func (p *parser) parseColumnRenames() ([]ColumnRename, error) {
+	items := make([]ColumnRename, 0, 4)
+	for {
+		name, err := p.expect(tokenIdentifier, "expected new column name")
+		if err != nil {
+			return nil, err
+		}
+		if _, err = p.expect(tokenAssign, "expected '=' after new column name"); err != nil {
+			return nil, err
+		}
+		source, err := p.expect(tokenIdentifier, "expected source column name")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, ColumnRename{At: name, Name: name.Text, Source: source.Text})
+		if len(items) > maxProjectionItems {
+			return nil, errorAt(name, "projection supports at most %d items", maxProjectionItems)
+		}
+		if !p.match(tokenComma) {
+			break
+		}
+	}
+	return items, nil
+}
+
+func (p *parser) parseParse(at token, where bool) (Operator, error) {
+	if p.matchIdentifier("kind") {
+		if _, err := p.expect(tokenAssign, "expected '=' after parse kind"); err != nil {
+			return nil, err
+		}
+		kind, err := p.expect(tokenIdentifier, "expected parse kind")
+		if err != nil {
+			return nil, err
+		}
+		if kind.Text != "simple" {
+			return nil, errorAt(kind, "parse kind %q is not supported", kind.Text)
+		}
+	}
+	expression, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expectIdentifier("with", "expected 'with' before parse pattern"); err != nil {
+		return nil, err
+	}
+	pattern := make([]ParsePatternItem, 0, 8)
+	captures := 0
+	for !p.check(tokenPipe) && !p.check(tokenEOF) && !p.check(tokenRightParen) && !p.check(tokenSemicolon) {
+		itemAt := p.peek()
+		switch {
+		case p.match(tokenString):
+			pattern = append(pattern, ParsePatternItem{At: itemAt, Kind: ParseDelimiter, Text: p.previous().Text})
+		case p.match(tokenStar):
+			pattern = append(pattern, ParsePatternItem{At: itemAt, Kind: ParseWildcard})
+		case p.check(tokenIdentifier):
+			name := p.advance()
+			if _, err = p.expect(tokenColon, "parse captures require an explicit type"); err != nil {
+				return nil, err
+			}
+			valueType, typeErr := p.parseScalarType(false, "parse capture")
+			if typeErr != nil {
+				return nil, typeErr
+			}
+			captures++
+			if captures > maxParseCaptures {
+				return nil, errorAt(name, "parse supports at most %d captures", maxParseCaptures)
+			}
+			pattern = append(pattern, ParsePatternItem{At: name, Kind: ParseCapture, Text: name.Text, Type: valueType})
+		default:
+			return nil, errorAt(itemAt, "expected string delimiter, '*', or typed capture in parse pattern")
+		}
+	}
+	if len(pattern) == 0 {
+		return nil, errorAt(p.peek(), "parse pattern cannot be empty")
+	}
+	if captures == 0 {
+		return nil, errorAt(at, "parse pattern requires at least one capture")
+	}
+	if len(pattern) > 1 {
+		for index := 1; index < len(pattern); index++ {
+			if pattern[index-1].Kind != ParseDelimiter && pattern[index].Kind != ParseDelimiter {
+				return nil, errorAt(pattern[index].At, "parse variable fields require a literal separator")
+			}
+		}
+	}
+	return ParseOperator{At: at, Expression: expression, Pattern: pattern, Where: where}, nil
+}
+
+func (p *parser) parseEvaluate(at token) (Operator, error) {
+	function, err := p.expect(tokenIdentifier, "expected evaluate function")
+	if err != nil {
+		return nil, err
+	}
+	if function.Text != "bag_unpack" {
+		return nil, errorAt(function, "evaluate function %q is not supported", function.Text)
+	}
+	if _, err = p.expect(tokenLeftParen, "expected '(' after bag_unpack"); err != nil {
+		return nil, err
+	}
+	column, err := p.expect(tokenIdentifier, "bag_unpack requires a dynamic column")
+	if err != nil {
+		return nil, err
+	}
+	prefix := ""
+	if p.match(tokenComma) {
+		value, prefixErr := p.expect(tokenString, "bag_unpack prefix must be a string literal")
+		if prefixErr != nil {
+			return nil, prefixErr
+		}
+		prefix = value.Text
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after bag_unpack arguments"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenColon, "bag_unpack requires an explicit output schema"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenLeftParen, "expected '(' before bag_unpack output schema"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenStar, "bag_unpack output schema must start with '*'"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenComma, "bag_unpack output schema requires at least one typed column"); err != nil {
+		return nil, err
+	}
+	items := make([]BagUnpackItem, 0, 4)
+	for {
+		name, itemErr := p.expect(tokenIdentifier, "expected bag_unpack output column")
+		if itemErr != nil {
+			return nil, itemErr
+		}
+		if _, itemErr = p.expect(tokenColon, "bag_unpack output columns require an explicit type"); itemErr != nil {
+			return nil, itemErr
+		}
+		valueType, typeErr := p.parseScalarType(true, "bag_unpack output")
+		if typeErr != nil {
+			return nil, typeErr
+		}
+		items = append(items, BagUnpackItem{At: name, Name: name.Text, Type: valueType})
+		if len(items) > maxBagUnpackItems {
+			return nil, errorAt(name, "bag_unpack supports at most %d output columns", maxBagUnpackItems)
+		}
+		if !p.match(tokenComma) {
+			break
+		}
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after bag_unpack output schema"); err != nil {
+		return nil, err
+	}
+	return BagUnpackOperator{At: at, Column: column.Text, Prefix: prefix, Items: items}, nil
+}
+
+func (p *parser) parseScalarType(allowDynamic bool, context string) (ScalarType, error) {
+	typeToken, err := p.expect(tokenIdentifier, "expected "+context+" type")
+	if err != nil {
+		return "", err
+	}
+	valueType := ScalarType(typeToken.Text)
+	if valueType == ScalarString || valueType == ScalarLong || valueType == ScalarReal || allowDynamic && valueType == ScalarDynamic {
+		return valueType, nil
+	}
+	return "", errorAt(typeToken, "%s type %q is not supported", context, typeToken.Text)
 }
 
 func (p *parser) parseSortTerms() ([]SortTerm, error) {

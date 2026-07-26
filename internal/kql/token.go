@@ -13,6 +13,7 @@ const (
 	tokenComma
 	tokenSemicolon
 	tokenDot
+	tokenColon
 	tokenLeftParen
 	tokenRightParen
 	tokenLeftBracket
