@@ -165,7 +165,7 @@ Events
 | order by Failures desc
 ```
 
-The web interface groups discovered JSON fields by table. Selecting a field inserts its path into the query editor. Keys that are not valid KQL identifiers use bracket access:
+The web interface lists every available data source and groups discovered JSON fields by table. Selecting a source updates the current query; selecting a field inserts its path into the editor. Keys that are not valid KQL identifiers use bracket access:
 
 ```kusto
 Events
@@ -178,10 +178,10 @@ The navigation bar shows the project and challenge names. Help reopens the onboa
 Supported tabular operators:
 
 ```text
-where, search, project, project-away, project-rename, extend,
-parse, parse-where, evaluate bag_unpack, summarize, distinct,
+where, search, project, project-away, project-rename, project-reorder,
+extend, parse, parse-where, parse-kv, evaluate bag_unpack, summarize, distinct,
 order by, sort by, top, take, limit, count, mv-expand, mv-apply,
-union, join
+union, join, lookup
 ```
 
 `search` performs case-insensitive whole-token matching across every currently visible column, including `RawData`:
@@ -211,6 +211,16 @@ UAL
   ) on User
 ```
 
+`lookup` enriches rows from a parenthesized pipeline using up to 16 same-name keys. It defaults to `leftouter`, also supports `inner`, and limits the right side to 1,000 rows:
+
+```kusto
+UAL
+| lookup kind=leftouter (
+    Sysmon
+    | project Host, Process=Message
+  ) on Host
+```
+
 `project-away` removes exact columns or columns matched by an edge wildcard. `project-rename` performs simultaneous column renames:
 
 ```kusto
@@ -219,12 +229,26 @@ Events
 | project-rename Computer=Host, Account=User
 ```
 
+`project-reorder` moves exact columns or edge-wildcard matches to the front. The first matching pattern wins; unspecified columns retain source order:
+
+```kusto
+Events
+| project-reorder TimeGenerated, *Type, Host
+```
+
 `parse` appends typed captures and keeps unmatched rows with null captures. `parse-where` keeps only matching rows. This bounded implementation supports `kind=simple`, quoted literal delimiters, `*`, and captures explicitly typed as `string`, `long`, or `real`:
 
 ```kusto
 Events
 | parse-where Message with "user=" ParsedUser:string " id=" ParsedID:long
 | project TimeGenerated, ParsedUser, ParsedID
+```
+
+`parse-kv` extracts up to 16 explicitly typed key-value fields. Pair and key-value delimiters are required and limited to 16 bytes. The first duplicate key wins; absent strings are empty and absent or invalid numeric values are null:
+
+```kusto
+Events
+| parse-kv Message as (ParsedUser:string, ParsedID:long) with (pair_delimiter=" ", kv_delimiter="=")
 ```
 
 `evaluate bag_unpack()` expands selected properties from a dynamic object. An explicit output schema is required so result columns remain static and bounded. The schema must begin with `*`, supports at most 32 outputs, and accepts `string`, `long`, `real`, and `dynamic` types:
@@ -251,15 +275,17 @@ endswith, endswith_cs, has, has_cs, has_any, has_all
 now(), ago(), datetime(), bin(), tostring(), toint(), tolower(),
 toupper(), todatetime(), isnull(), isnotnull(), isempty(), isnotempty(),
 parse_json(), array_length(), bag_keys(), iff(), coalesce(), strlen(),
-substring(), strcat(), split(), extract(), trim(), replace_string()
+bag_has_key(), set_has_element(), base64_decode_tostring(), url_decode(),
+ipv4_is_private(), ipv4_is_in_range(), substring(), strcat(), split(),
+extract(), trim(), replace_string()
 ```
 
-Dynamic arrays support zero-based indexing such as `RawData.tags[0]`. `mv-expand Name=Expression [limit N]` expands an array into rows. Expansion defaults to 128 values per input row, cannot exceed 128, and considers at most 1,000 input rows per expansion stage:
+Dynamic arrays support zero-based indexing such as `RawData.tags[0]`. `mv-expand [with_itemindex=Index] Name=Expression [limit N]` expands an array or object into rows and can append its zero-based item index. Expansion defaults to 128 values per input row, cannot exceed 128, and considers at most 1,000 input rows per expansion stage:
 
 ```kusto
 Events
 | extend Recipients=RawData.AuditData.Recipients
-| mv-expand Recipient=Recipients limit 32
+| mv-expand with_itemindex=RecipientIndex Recipient=Recipients limit 32
 | where tostring(Recipient) has "example.com"
 ```
 
@@ -277,6 +303,8 @@ Events
 `has` performs case-insensitive whole-token matching; `_cs` variants are case-sensitive and `in~` performs case-insensitive membership. `extract()` uses Go's bounded RE2 regular-expression syntax and accepts a pattern, capture-group index, and source string.
 
 `array_length()` returns the number of elements in a valid dynamic array. `bag_keys()` returns the sorted root keys of a valid dynamic object. Both return null for malformed or mismatched dynamic input. `isempty()` tests for null or empty text, while `isnotempty()` is its complement. `todatetime()` accepts bounded ISO date/time text, interprets timezone-less values as UTC, and normalizes valid values to UTC; invalid input returns null.
+
+`base64_decode_tostring()` requires canonical padded Base64 and valid UTF-8. `url_decode()` decodes one path-escape pass and preserves `+`. `bag_has_key()` checks a root key or a bounded property path, and `set_has_element()` tests scalar membership in a dynamic array. `ipv4_is_private()` recognizes RFC1918 addresses; `ipv4_is_in_range()` accepts one exact IPv4 address, CIDR, or a comma-separated list. These bounded helpers return null for malformed, mismatched, or oversized input.
 
 Supported aggregation functions are `count`, `countif`, `dcount`, `sum`, `min`, `max`, `avg`, `make_set`, `make_list`, and `take_any`. `make_set` and `make_list` return dynamic arrays, omit null values, and retain at most 1,000 values or 1 MiB of encoded data per group. `arg_max(Value, *)` and `arg_min(Value, *)` return the complete row containing the extreme value; they must be the only aggregation in that `summarize`. Duration literals support milliseconds, seconds, minutes, hours, days, and weeks, such as `500ms`, `15m`, `2d`, or `1w`.
 
