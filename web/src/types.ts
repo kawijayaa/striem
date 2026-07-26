@@ -37,6 +37,12 @@ export interface FieldsResponse {
 export interface SchemaResponse {
   challengeName?: string;
   functions?: string[];
+  tables?: SchemaTable[];
+}
+
+export interface SchemaTable {
+  name: string;
+  description: string;
 }
 
 export interface SavedQuery {

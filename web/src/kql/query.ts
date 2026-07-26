@@ -2,6 +2,13 @@ export function querySource(query: string): string | undefined {
   return query.match(/^(?:\s*)([A-Za-z_][A-Za-z0-9_]*)(?=\s*(?:\||$))/m)?.[1];
 }
 
+export function replaceQuerySource(query: string, source: string): string {
+  const sourceLine = /^(\s*)[A-Za-z_][A-Za-z0-9_]*(?=\s*(?:\||$))/m;
+  return sourceLine.test(query)
+    ? query.replace(sourceLine, `$1${source}`)
+    : `${source}\n${query.trimStart()}`;
+}
+
 export function insertAfterSource(query: string, clause: string): string {
   const sourceLine = /^(\s*[A-Za-z_][A-Za-z0-9_]*\s*)(?=\||$)/m;
   return sourceLine.test(query)

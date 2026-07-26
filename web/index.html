@@ -108,6 +108,11 @@
       </div>
 
       <section id="fields-pane" class="side-section side-workspace field-section" role="tabpanel" aria-labelledby="fields-tab">
+        <div class="source-heading">
+          <strong>Data sources</strong>
+          <span id="source-count">0</span>
+        </div>
+        <div id="source-list" class="source-list"><span class="muted">Loading data sources…</span></div>
         <label class="field-search">
           <span class="sr-only">Filter available fields</span>
           <input id="field-search" type="search" placeholder="Filter fields" autocomplete="off">
@@ -142,6 +147,7 @@
         <dl class="mt-4 grid gap-3 text-sm">
           <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Query</dt><dd class="m-0 text-[var(--paper-2)]">Write KQL and run it with Ctrl/Cmd+Enter.</dd></div>
           <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Results</dt><dd class="m-0 text-[var(--paper-2)]">Inspect events, filter by values, and export CSV.</dd></div>
+          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Sources</dt><dd class="m-0 text-[var(--paper-2)]">Choose from the available datasets and update the current query.</dd></div>
           <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Fields</dt><dd class="m-0 text-[var(--paper-2)]">Select a field to insert it into the query.</dd></div>
           <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Tasks</dt><dd class="m-0 text-[var(--paper-2)]">Answer prompts to unlock the challenge flag.</dd></div>
           <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Bookmarks</dt><dd class="m-0 text-[var(--paper-2)]">Save events and notes in this browser.</dd></div>

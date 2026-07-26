@@ -13,7 +13,7 @@ import {
 } from './features/results';
 import type { ResultSort } from './features/results';
 import { createTimeline } from './features/timeline';
-import { addTimeRangeFilter, addValueFilter, querySource } from './kql/query';
+import { addTimeRangeFilter, addValueFilter, querySource, replaceQuerySource } from './kql/query';
 import {
   createBrowserStorage,
   readBookmarks,
@@ -34,6 +34,7 @@ import type {
   QueryResult,
   SavedQuery,
   SchemaResponse,
+  SchemaTable,
 } from './types';
 import { createEventDialog } from './ui/event-dialog';
 import { createMobileWorkspace } from './ui/mobile';
@@ -89,6 +90,7 @@ const availableTables = new Set(['Events']);
 
 let commonFields: FieldMetadata[] = [];
 let fieldGroups: FieldGroup[] = [];
+let dataSources: SchemaTable[] = [];
 let fieldCompletions: Completion[] = [];
 let tableCompletions: Completion[] = [{ label: 'Events', type: 'class' }];
 let activeTable = 'Events';
@@ -548,6 +550,7 @@ function syncActiveTable() {
   const source = querySource(editor.state.doc.toString());
   if (!source || source === activeTable || !availableTables.has(source)) return;
   activeTable = source;
+  renderDataSources();
   renderFields($<HTMLInputElement>('#field-search').value);
 }
 
@@ -774,6 +777,7 @@ function replaceQuery(query: string): void {
   const source = querySource(query);
   if (source && availableTables.has(source)) {
     activeTable = source;
+    renderDataSources();
     renderFields($<HTMLInputElement>('#field-search').value);
   }
   editor.focus();
@@ -797,6 +801,42 @@ function renderSidePanelView() {
     tab: $<HTMLButtonElement>(`[data-side-view="${name}"]`),
     panel: $(`#${name}-pane`),
   })));
+}
+
+function renderDataSources(): void {
+  const list = $('#source-list');
+  list.replaceChildren();
+  $('#source-count').textContent = String(dataSources.length);
+  if (!dataSources.length) {
+    const empty = document.createElement('span');
+    empty.className = ui.muted;
+    empty.textContent = 'No data sources available.';
+    list.append(empty);
+    return;
+  }
+  dataSources.forEach(source => {
+    const button = document.createElement('button');
+    button.className = 'source-row';
+    button.type = 'button';
+    button.title = `Use ${source.name} in the current query`;
+    button.classList.toggle('selected', source.name === activeTable);
+    button.setAttribute('aria-current', source.name === activeTable ? 'true' : 'false');
+    const details = document.createElement('span');
+    details.className = 'source-details';
+    const name = document.createElement('strong');
+    name.textContent = source.name;
+    const description = document.createElement('small');
+    description.textContent = source.description || 'Configured data source';
+    details.append(name, description);
+    const state = document.createElement('span');
+    state.className = 'source-state';
+    state.textContent = source.name === activeTable ? 'Active' : 'Use';
+    button.append(details, state);
+    button.addEventListener('click', () => {
+      replaceQuery(replaceQuerySource(editor.state.doc.toString(), source.name));
+    });
+    list.append(button);
+  });
 }
 
 function renderQuestions() {
@@ -1081,6 +1121,7 @@ async function loadFields() {
     ]);
     commonFields = result.common;
     fieldGroups = result.tables;
+    dataSources = schema.tables ?? [];
     const challengeName = schema.challengeName?.trim() || 'Investigation workspace';
     const challengeLabel = $('#challenge-name');
     challengeLabel.textContent = challengeName;
@@ -1101,8 +1142,10 @@ async function loadFields() {
       { label: 'Events', type: 'class' },
       ...fieldGroups.map(group => ({ label: group.table, type: 'class' })),
     ];
+    renderDataSources();
     renderFields();
   } catch {
+    renderLoadFailure($('#source-list'), 'Data sources could not be loaded.', () => void loadFields());
     renderLoadFailure($('#field-list'), 'Fields could not be loaded.', () => void loadFields());
   }
 }
