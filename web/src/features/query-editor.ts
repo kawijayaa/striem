@@ -16,10 +16,10 @@ import { Vim, vim } from '@replit/codemirror-vim';
 import type { QueryError } from '../types';
 
 const keywords = new Set([
-  'let', 'where', 'search', 'project', 'project-away', 'project-rename', 'extend', 'parse',
-  'parse-where', 'evaluate', 'with', 'simple', 'summarize', 'distinct', 'order', 'sort',
-  'top', 'take', 'limit', 'count', 'mv-expand', 'mv-apply', 'union', 'join', 'kind', 'inner', 'leftouter',
-  'leftanti', 'on', 'by', 'asc', 'desc',
+  'let', 'where', 'search', 'project', 'project-away', 'project-rename', 'project-reorder', 'extend', 'parse',
+  'parse-where', 'parse-kv', 'evaluate', 'with', 'with_itemindex', 'simple', 'summarize', 'distinct', 'order', 'sort',
+  'top', 'take', 'limit', 'count', 'mv-expand', 'mv-apply', 'union', 'join', 'lookup', 'kind', 'inner', 'leftouter',
+  'leftanti', 'on', 'as', 'by', 'asc', 'desc',
 ]);
 const logicalOperators = new Set([
   'and', 'or', 'not', '=~', '!~', 'in', 'in~', '!in', '!in~', 'contains', 'contains_cs',
@@ -28,6 +28,8 @@ const logicalOperators = new Set([
 const functions = new Set([
   'now', 'ago', 'datetime', 'bin', 'tostring', 'toint', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'bag_keys', 'todatetime',
+  'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element',
+  'ipv4_is_private', 'ipv4_is_in_range',
   'bag_unpack', 'count', 'countif', 'iff', 'coalesce', 'strlen', 'substring',
   'strcat', 'dcount', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
   'arg_max', 'arg_min', 'make_set', 'make_list', 'take_any',
@@ -39,8 +41,10 @@ const operatorCompletions = createCompletions('keyword', [
   ['let', 'Declare a scalar or tabular value'],
   ['where', 'Filter rows'], ['search', 'Search all visible columns'],
   ['project', 'Select columns'], ['project-away', 'Remove columns'],
-  ['project-rename', 'Rename columns'], ['extend', 'Add a calculated column'],
+  ['project-rename', 'Rename columns'], ['project-reorder', 'Reorder matching columns'],
+  ['extend', 'Add a calculated column'],
   ['parse', 'Extract typed values from text'], ['parse-where', 'Parse text and keep matching rows'],
+  ['parse-kv', 'Extract typed key-value pairs'],
   ['evaluate bag_unpack', 'Expand dynamic object properties'],
   ['summarize', 'Aggregate rows'], ['distinct', 'Return unique rows'],
   ['order by', 'Sort rows'], ['sort by', 'Sort rows'], ['take', 'Limit rows'],
@@ -48,6 +52,7 @@ const operatorCompletions = createCompletions('keyword', [
   ['mv-expand', 'Expand a dynamic array into rows'],
   ['mv-apply', 'Aggregate a dynamic array per input row'],
   ['union', 'Combine compatible table rows'], ['join', 'Correlate rows by matching columns'],
+  ['lookup', 'Enrich rows by matching columns'],
 ], label => `${label} `);
 
 const functionCompletions = createCompletions('function', [
@@ -57,6 +62,10 @@ const functionCompletions = createCompletions('function', [
   ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'],
   ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
   ['array_length', 'Number of array elements'], ['bag_keys', 'Keys of a dynamic object'],
+  ['bag_has_key', 'Test for a dynamic object key'], ['set_has_element', 'Test dynamic array membership'],
+  ['base64_decode_tostring', 'Decode Base64 text'], ['url_decode', 'Decode URL-escaped text'],
+  ['ipv4_is_private', 'Test for an RFC1918 address'],
+  ['ipv4_is_in_range', 'Test an address against IPv4 ranges'],
   ['todatetime', 'Convert ISO text to UTC datetime'],
   ['iff', 'Conditional value'], ['coalesce', 'First non-null value'], ['strlen', 'String length'],
   ['substring', 'Extract text'], ['strcat', 'Concatenate values'],
@@ -205,7 +214,7 @@ function createLanguage(availableTables: Set<string>) {
       if (stream.match(/^\d+(?:\.\d+)?(?:ms|[smhdw])?/)) return 'number';
       if (stream.match(/^(?:==|!=|=~|!~|<=|>=|[+\-*/%<>=])/)) return 'operator';
       if (stream.match(/^(?:!in~?|in~)(?=\s|\()/)) return 'operator';
-      if (stream.match(/^(?:mv-(?:expand|apply)|parse-where|project-(?:away|rename))\b/)) return 'keyword';
+      if (stream.match(/^(?:mv-(?:expand|apply)|parse-(?:where|kv)|project-(?:away|rename|reorder))\b/)) return 'keyword';
       if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
         const word = stream.current();
         if (keywords.has(word)) return 'keyword';

@@ -116,8 +116,8 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		"challengeName": challengeName,
 		"tables":        tables,
 		"statements":    []string{"let"},
-		"operators":     []string{"where", "search", "project", "project-away", "project-rename", "extend", "parse", "parse-where", "evaluate bag_unpack", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "mv-expand", "mv-apply", "union", "join"},
-		"functions":     []string{"now", "ago", "datetime", "bin", "tostring", "toint", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "bag_keys", "iff", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "dcount", "sum", "min", "max", "avg", "arg_max", "arg_min", "make_set", "make_list", "take_any"},
+		"operators":     []string{"where", "search", "project", "project-away", "project-rename", "project-reorder", "extend", "parse", "parse-where", "parse-kv", "evaluate bag_unpack", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "mv-expand", "mv-apply", "union", "join", "lookup"},
+		"functions":     []string{"now", "ago", "datetime", "bin", "tostring", "toint", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "bag_keys", "bag_has_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "dcount", "sum", "min", "max", "avg", "arg_max", "arg_min", "make_set", "make_list", "take_any"},
 	})
 }
 

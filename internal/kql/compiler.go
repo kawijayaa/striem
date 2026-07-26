@@ -1,6 +1,7 @@
 package kql
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -192,6 +193,16 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), sqlText)
 			columns, dynamicColumns = nextColumns, nextDynamic
 			c.columns, c.dynamic = columnSet(columns), dynamicColumns
+		case ProjectReorderOperator:
+			if len(operator.Patterns) > maxProjectionItems {
+				return relation{}, errorAt(operator.At, "projection supports at most %d items", maxProjectionItems)
+			}
+			reordered, err := c.compileProjectReorder(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = reordered.SQL, reordered.Columns, reordered.DynamicColumns
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
 		case ProjectRenameOperator:
 			if len(operator.Items) > maxProjectionItems {
 				return relation{}, errorAt(operator.At, "projection supports at most %d items", maxProjectionItems)
@@ -311,6 +322,13 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			}
 			sqlText, columns, dynamicColumns = parsed.SQL, parsed.Columns, parsed.DynamicColumns
 			c.columns, c.dynamic = columnSet(columns), dynamicColumns
+		case ParseKVOperator:
+			parsed, err := c.compileParseKV(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = parsed.SQL, parsed.Columns, parsed.DynamicColumns
+			c.columns, c.dynamic = columnSet(columns), dynamicColumns
 		case BagUnpackOperator:
 			unpacked, err := c.compileBagUnpack(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
 			if err != nil {
@@ -319,9 +337,15 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			sqlText, columns, dynamicColumns = unpacked.SQL, unpacked.Columns, unpacked.DynamicColumns
 			c.columns, c.dynamic = columnSet(columns), dynamicColumns
 		case MVExpandOperator:
+			expressionDynamic := c.expressionIsDynamic(operator.Expression, dynamicColumns)
 			if _, collision := caseInsensitiveColumnSet(columns)[strings.ToLower(operator.Name)]; collision {
 				if _, replaces := c.columns[operator.Name]; !replaces {
 					return relation{}, errorAt(operator.At, "column %q conflicts with another output column", operator.Name)
+				}
+			}
+			if operator.ItemIndex != "" {
+				if _, collision := caseInsensitiveColumnSet(columns)[strings.ToLower(operator.ItemIndex)]; collision || strings.EqualFold(operator.ItemIndex, operator.Name) {
+					return relation{}, errorAt(operator.IndexAt, "column %q conflicts with another output column", operator.ItemIndex)
 				}
 			}
 			expression, err := c.compileExpression(operator.Expression, false)
@@ -335,11 +359,19 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			if limit > 128 {
 				return relation{}, errorAt(operator.At, "mv-expand limit cannot exceed 128")
 			}
-			selects := make([]string, 0, len(columns)+1)
+			expandedValue := "mv.value"
+			if expressionDynamic {
+				expandedValue = "CASE mv.type" +
+					" WHEN 'text' THEN json_quote(mv.value)" +
+					" WHEN 'true' THEN 'true'" +
+					" WHEN 'false' THEN 'false'" +
+					" ELSE mv.value END"
+			}
+			selects := make([]string, 0, len(columns)+2)
 			replaced := false
 			for _, column := range columns {
 				if column == operator.Name {
-					selects = append(selects, "mv.value AS "+quoteIdentifier(column))
+					selects = append(selects, expandedValue+" AS "+quoteIdentifier(column))
 					replaced = true
 				} else {
 					selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
@@ -347,12 +379,35 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			}
 			if !replaced {
 				columns = append(columns, operator.Name)
-				selects = append(selects, "mv.value AS "+quoteIdentifier(operator.Name))
+				selects = append(selects, expandedValue+" AS "+quoteIdentifier(operator.Name))
 			}
+			if operator.ItemIndex != "" {
+				columns = append(columns, operator.ItemIndex)
+			}
+			dynamicColumns = cloneSet(dynamicColumns)
 			delete(dynamicColumns, operator.Name)
+			if expressionDynamic {
+				dynamicColumns[operator.Name] = struct{}{}
+			}
 			c.dynamic = dynamicColumns
 			inputLimit, expansionLimit := c.bind(int64(1000)), c.bind(limit)
-			sqlText = fmt.Sprintf(`SELECT %s FROM (SELECT * FROM (%s) LIMIT %s) AS q JOIN json_each(CASE WHEN json_valid(%s) THEN %s ELSE json_array(%s) END) AS mv ON (mv.key IS NULL OR CAST(mv.key AS INTEGER) < %s)`, strings.Join(selects, ", "), sqlText, inputLimit, expression, expression, expression, expansionLimit)
+			internalNames := caseInsensitiveColumnSet(columns)
+			rowName := availableCaseInsensitiveColumnName("__kql_mv_row", internalNames)
+			internalNames[strings.ToLower(rowName)] = struct{}{}
+			indexName := availableCaseInsensitiveColumnName("__kql_mv_index", internalNames)
+			inputSQL := fmt.Sprintf("SELECT mv_input.*, ROW_NUMBER() OVER () AS %s FROM (%s) AS mv_input LIMIT %s", quoteIdentifier(rowName), sqlText, inputLimit)
+			index := "ROW_NUMBER() OVER (PARTITION BY q." + quoteIdentifier(rowName) + " ORDER BY mv.id) - 1"
+			expandedSelects := append(selects, index+" AS "+quoteIdentifier(indexName))
+			expandedSQL := fmt.Sprintf(`SELECT %s FROM (%s) AS q JOIN json_each(CASE WHEN json_valid(%s) THEN %s ELSE json_array(%s) END) AS mv ON 1`, strings.Join(expandedSelects, ", "), inputSQL, expression, expression, expression)
+			finalSelects := make([]string, len(columns))
+			for index, column := range columns {
+				source := column
+				if column == operator.ItemIndex {
+					source = indexName
+				}
+				finalSelects[index] = "expanded." + quoteIdentifier(source) + " AS " + quoteIdentifier(column)
+			}
+			sqlText = fmt.Sprintf("SELECT %s FROM (%s) AS expanded WHERE expanded.%s < %s", strings.Join(finalSelects, ", "), expandedSQL, quoteIdentifier(indexName), expansionLimit)
 			c.columns = columnSet(columns)
 			c.dynamic = dynamicColumns
 		case MVApplyOperator:
@@ -379,6 +434,14 @@ func (c *compiler) compileOperators(sqlText string, columns []string, dynamicCol
 			sqlText, columns, dynamicColumns = joined.SQL, joined.Columns, joined.DynamicColumns
 			c.columns = columnSet(columns)
 			c.dynamic = dynamicColumns
+		case LookupOperator:
+			lookedUp, err := c.compileLookup(relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, operator)
+			if err != nil {
+				return relation{}, err
+			}
+			sqlText, columns, dynamicColumns = lookedUp.SQL, lookedUp.Columns, lookedUp.DynamicColumns
+			c.columns = columnSet(columns)
+			c.dynamic = dynamicColumns
 		}
 	}
 	return relation{SQL: sqlText, Columns: columns, DynamicColumns: dynamicColumns}, nil
@@ -395,6 +458,34 @@ func columnPatternMatches(pattern ColumnPattern, column string) bool {
 		return strings.HasPrefix(column, pattern.Name)
 	}
 	return column == pattern.Name
+}
+
+func (c *compiler) compileProjectReorder(input relation, operator ProjectReorderOperator) (relation, error) {
+	selected := make(map[string]struct{}, len(input.Columns))
+	columns := make([]string, 0, len(input.Columns))
+	for _, pattern := range operator.Patterns {
+		matched := false
+		for _, column := range input.Columns {
+			if !columnPatternMatches(pattern, column) {
+				continue
+			}
+			matched = true
+			if _, exists := selected[column]; exists {
+				continue
+			}
+			selected[column] = struct{}{}
+			columns = append(columns, column)
+		}
+		if !matched && !pattern.PrefixWildcard && !pattern.SuffixWildcard {
+			return relation{}, errorAt(pattern.At, "unknown column %q", pattern.Name)
+		}
+	}
+	for _, column := range input.Columns {
+		if _, exists := selected[column]; !exists {
+			columns = append(columns, column)
+		}
+	}
+	return relation{SQL: projectRelation(input, columns, "q"), Columns: columns, DynamicColumns: cloneSet(input.DynamicColumns)}, nil
 }
 
 func (c *compiler) compileProjectRename(input relation, operator ProjectRenameOperator) (relation, error) {
@@ -514,6 +605,73 @@ func (c *compiler) compileParse(input relation, operator ParseOperator) (relatio
 		where = " WHERE q." + quoteIdentifier(internal) + " IS NOT NULL"
 	}
 	return relation{SQL: fmt.Sprintf("SELECT %s FROM (%s) AS q%s", strings.Join(selects, ", "), inner, where), Columns: columns, DynamicColumns: cloneSet(input.DynamicColumns)}, nil
+}
+
+func (c *compiler) compileParseKV(input relation, operator ParseKVOperator) (relation, error) {
+	if len(operator.Items) == 0 {
+		return relation{}, errorAt(operator.At, "parse-kv output schema cannot be empty")
+	}
+	if len(operator.Items) > maxParseKVOutputs {
+		return relation{}, errorAt(operator.At, "parse-kv supports at most %d output columns", maxParseKVOutputs)
+	}
+	if len(operator.PairDelimiter) < 1 || len(operator.PairDelimiter) > maxParseKVDelimiter {
+		return relation{}, errorAt(operator.At, "pair_delimiter must be between 1 and %d bytes", maxParseKVDelimiter)
+	}
+	if len(operator.KVDelimiter) < 1 || len(operator.KVDelimiter) > maxParseKVDelimiter {
+		return relation{}, errorAt(operator.At, "kv_delimiter must be between 1 and %d bytes", maxParseKVDelimiter)
+	}
+
+	seen := caseInsensitiveColumnSet(input.Columns)
+	schema := make([]struct {
+		Name string     `json:"name"`
+		Type ScalarType `json:"type"`
+	}, len(operator.Items))
+	for index, item := range operator.Items {
+		key := strings.ToLower(item.Name)
+		if _, collision := seen[key]; collision {
+			return relation{}, errorAt(item.At, "column %q conflicts with another output column", item.Name)
+		}
+		seen[key] = struct{}{}
+		schema[index].Name = item.Name
+		schema[index].Type = item.Type
+	}
+	schemaJSON, err := json.Marshal(schema)
+	if err != nil {
+		return relation{}, errorAt(operator.At, "could not encode parse-kv output schema")
+	}
+	if len(schemaJSON) > maxParseKVSchema {
+		return relation{}, errorAt(operator.At, "parse-kv output schema cannot exceed %d bytes", maxParseKVSchema)
+	}
+	source, err := c.compileExpression(operator.Expression, false)
+	if err != nil {
+		return relation{}, err
+	}
+	internal := availableCaseInsensitiveColumnName("__kql_parse_kv_result", seen)
+	parsed := "kql_parse_kv(" + c.bind(string(schemaJSON)) + ", " + c.bind(operator.PairDelimiter) + ", " + c.bind(operator.KVDelimiter) + ", CAST(" + source + " AS TEXT))"
+	inner := fmt.Sprintf("SELECT q.*, %s AS %s FROM (%s) AS q", parsed, quoteIdentifier(internal), input.SQL)
+	guarded := "CASE WHEN json_valid(q." + quoteIdentifier(internal) + ") THEN q." + quoteIdentifier(internal) + " ELSE NULL END"
+
+	selects := make([]string, 0, len(input.Columns)+len(operator.Items))
+	columns := append([]string(nil), input.Columns...)
+	for _, column := range input.Columns {
+		selects = append(selects, "q."+quoteIdentifier(column)+" AS "+quoteIdentifier(column))
+	}
+	for index, item := range operator.Items {
+		value := fmt.Sprintf("json_extract(%s, '$[%d]')", guarded, index)
+		switch item.Type {
+		case ScalarString:
+			value = "CAST(" + value + " AS TEXT)"
+		case ScalarLong:
+			value = "CAST(" + value + " AS INTEGER)"
+		case ScalarReal:
+			value = "CAST(" + value + " AS REAL)"
+		default:
+			return relation{}, errorAt(item.At, "parse-kv output type %q is not supported", item.Type)
+		}
+		selects = append(selects, value+" AS "+quoteIdentifier(item.Name))
+		columns = append(columns, item.Name)
+	}
+	return relation{SQL: fmt.Sprintf("SELECT %s FROM (%s) AS q", strings.Join(selects, ", "), inner), Columns: columns, DynamicColumns: cloneSet(input.DynamicColumns)}, nil
 }
 
 func (c *compiler) compileBagUnpack(input relation, operator BagUnpackOperator) (relation, error) {
@@ -734,23 +892,45 @@ func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, 
 	if err != nil {
 		return relation{}, err
 	}
+	return c.compileJoinedRelations(left, right, operator.Kind, operator.Keys, "join")
+}
+
+func (c *compiler) compileLookup(left relation, operator LookupOperator) (relation, error) {
+	if operator.Kind != JoinLeftOuter && operator.Kind != JoinInner {
+		return relation{}, errorAt(operator.At, "lookup kind %q is not supported", operator.Kind)
+	}
+	if len(operator.Keys) == 0 {
+		return relation{}, errorAt(operator.At, "lookup requires at least one key")
+	}
+	if len(operator.Keys) > maxLookupKeys {
+		return relation{}, errorAt(operator.At, "lookup supports at most %d keys", maxLookupKeys)
+	}
+	right, err := c.compilePipeline(operator.Right)
+	if err != nil {
+		return relation{}, err
+	}
+	right.SQL = fmt.Sprintf("SELECT * FROM (%s) AS lookup_right LIMIT %s", right.SQL, c.bind(int64(1000)))
+	return c.compileJoinedRelations(left, right, operator.Kind, operator.Keys, "lookup")
+}
+
+func (c *compiler) compileJoinedRelations(left, right relation, kind JoinKind, joinKeys []JoinKey, operatorName string) (relation, error) {
 	leftSet, rightSet := columnSet(left.Columns), columnSet(right.Columns)
-	keys := make(map[string]struct{}, len(operator.Keys))
-	conditions := make([]string, 0, len(operator.Keys))
-	for _, key := range operator.Keys {
+	keys := make(map[string]struct{}, len(joinKeys))
+	conditions := make([]string, 0, len(joinKeys))
+	for _, key := range joinKeys {
 		if _, duplicate := keys[key.Name]; duplicate {
-			return relation{}, errorAt(key.At, "join column %q is specified more than once", key.Name)
+			return relation{}, errorAt(key.At, "%s column %q is specified more than once", operatorName, key.Name)
 		}
 		keys[key.Name] = struct{}{}
 		if _, exists := leftSet[key.Name]; !exists {
-			return relation{}, errorAt(key.At, "join column %q does not exist on the left side", key.Name)
+			return relation{}, errorAt(key.At, "%s column %q does not exist on the left side", operatorName, key.Name)
 		}
 		if _, exists := rightSet[key.Name]; !exists {
-			return relation{}, errorAt(key.At, "join column %q does not exist on the right side", key.Name)
+			return relation{}, errorAt(key.At, "%s column %q does not exist on the right side", operatorName, key.Name)
 		}
 		conditions = append(conditions, "l."+quoteIdentifier(key.Name)+" = r."+quoteIdentifier(key.Name))
 	}
-	if operator.Kind == JoinLeftAnti {
+	if kind == JoinLeftAnti {
 		selects := make([]string, len(left.Columns))
 		for index, name := range left.Columns {
 			selects[index] = "l." + quoteIdentifier(name) + " AS " + quoteIdentifier(name)
@@ -778,7 +958,7 @@ func (c *compiler) compileJoin(left relation, operator JoinOperator) (relation, 
 		}
 	}
 	joinSQL := "INNER JOIN"
-	if operator.Kind == JoinLeftOuter {
+	if kind == JoinLeftOuter {
 		joinSQL = "LEFT OUTER JOIN"
 	}
 	sqlText := fmt.Sprintf("SELECT %s FROM (%s) AS l %s (%s) AS r ON %s", strings.Join(selects, ", "), left.SQL, joinSQL, right.SQL, strings.Join(conditions, " AND "))
@@ -1027,6 +1207,9 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 		if err != nil {
 			return "", err
 		}
+		if c.expressionIsEncodedDynamic(expr.Left, c.dynamic) {
+			left = dynamicScalarValue(left)
+		}
 		if expr.Operator == "in" || expr.Operator == "in~" || expr.Operator == "!in" || expr.Operator == "!in~" {
 			list := expr.Right.(ListExpression)
 			values := make([]string, 0, len(list.Items))
@@ -1069,6 +1252,9 @@ func (c *compiler) compileExpression(raw Expression, aggregate bool) (string, er
 		right, err := c.compileExpression(expr.Right, aggregate)
 		if err != nil {
 			return "", err
+		}
+		if c.expressionIsEncodedDynamic(expr.Right, c.dynamic) {
+			right = dynamicScalarValue(right)
 		}
 		switch expr.Operator {
 		case "and":
@@ -1176,7 +1362,7 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 		seconds := int64(duration.Value / time.Second)
 		first, second := c.bind(seconds), c.bind(seconds)
 		return "strftime('%Y-%m-%dT%H:%M:%SZ', (CAST(strftime('%s', " + value + ") AS INTEGER) / " + first + ") * " + second + ", 'unixepoch')", nil
-	case "tostring", "toint", "tolower", "toupper", "isnull", "isnotnull", "parse_json", "strlen", "array_length", "bag_keys", "isempty", "isnotempty", "todatetime":
+	case "tostring", "toint", "tolower", "toupper", "isnull", "isnotnull", "parse_json", "strlen", "array_length", "bag_keys", "isempty", "isnotempty", "todatetime", "base64_decode_tostring", "url_decode", "ipv4_is_private":
 		args, err := compileArgs(1)
 		if err != nil {
 			return "", err
@@ -1217,7 +1403,19 @@ func (c *compiler) compileFunction(expr FunctionExpression, aggregate bool) (str
 			return "(COALESCE(length(CAST(" + args[0] + " AS TEXT)), 0) > 0)", nil
 		case "todatetime":
 			return "kql_todatetime(" + args[0] + ")", nil
+		case "base64_decode_tostring":
+			return "kql_base64_decode_tostring(" + args[0] + ")", nil
+		case "url_decode":
+			return "kql_url_decode(" + args[0] + ")", nil
+		case "ipv4_is_private":
+			return "kql_ipv4_is_private(" + args[0] + ")", nil
 		}
+	case "bag_has_key", "set_has_element", "ipv4_is_in_range":
+		args, err := compileArgs(2)
+		if err != nil {
+			return "", err
+		}
+		return "kql_" + expr.Name + "(" + strings.Join(args, ", ") + ")", nil
 	case "iff":
 		args, err := compileArgs(3)
 		if err != nil {
@@ -1499,6 +1697,22 @@ func (c *compiler) expressionIsDynamic(expression Expression, dynamicColumns map
 		}
 	}
 	return false
+}
+
+func (c *compiler) expressionIsEncodedDynamic(expression Expression, dynamicColumns map[string]struct{}) bool {
+	switch expr := expression.(type) {
+	case IdentifierExpression:
+		_, exists := dynamicColumns[expr.Parts[0]]
+		return exists && len(expr.Parts) == 1
+	case FunctionExpression:
+		return c.expressionIsDynamic(expr, dynamicColumns)
+	default:
+		return false
+	}
+}
+
+func dynamicScalarValue(value string) string {
+	return "CASE WHEN json_valid(" + value + ") AND json_type(" + value + ") NOT IN ('object', 'array') THEN json_extract(" + value + ", '$') ELSE " + value + " END"
 }
 
 func quoteIdentifier(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }

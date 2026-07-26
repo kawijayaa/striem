@@ -9,7 +9,6 @@ import (
 	"time"
 
 	_ "github.com/kawijayaa/striem/internal/database"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestParseAndCompileHunt(t *testing.T) {
@@ -851,6 +850,38 @@ func TestExecuteNewScalarFunctions(t *testing.T) {
 	}
 }
 
+func TestCompileAndExecuteSecurityScalarFunctions(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO events(time_generated, source, event_type, host, username, message, raw_data, dataset_id)
+		VALUES ('2024-01-01T00:00:00Z', 'test', 'event', 'host', 'user', 'message', '{}', 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	query, err := Parse(`Events | extend Decoded=base64_decode_tostring("cG93ZXJzaGVsbA=="), URL=url_decode("a%2Fb+c"), Has=bag_has_key(parse_json('{"context":{"admin":true}}'), "$.context.admin"), Member=set_has_element(parse_json('["alpha",2]'), 2), Private=ipv4_is_private("10.1.2.3"), InRange=ipv4_is_in_range("192.168.1.2", "10.0.0.0/8,192.168.1.2") | project Decoded, URL, Has, Member, Private, InRange`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"kql_base64_decode_tostring", "kql_url_decode", "kql_bag_has_key", "kql_set_has_element", "kql_ipv4_is_private", "kql_ipv4_is_in_range"} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+
+	var decoded, decodedURL string
+	var has, member, private, inRange int64
+	if err = db.QueryRow(compiled.SQL, compiled.Args...).Scan(&decoded, &decodedURL, &has, &member, &private, &inRange); err != nil {
+		t.Fatalf("execute scalar helpers: %v\n%s", err, compiled.SQL)
+	}
+	if decoded != "powershell" || decodedURL != "a/b+c" || has != 1 || member != 1 || private != 1 || inRange != 1 {
+		t.Fatalf("scalar helper values = %q, %q, %d, %d, %d, %d", decoded, decodedURL, has, member, private, inRange)
+	}
+}
+
 func TestBoundedBatchLimits(t *testing.T) {
 	captures := make([]string, 17)
 	for index := range captures {
@@ -909,6 +940,293 @@ func TestBoundedBatchDiagnostics(t *testing.T) {
 		{query: `Events | evaluate bag_unpack(RawData) : (*, Host:string)`, message: "conflicts with another output"},
 		{query: `Events | evaluate bag_unpack(RawData, "bag_") : (*, Name:string)`, message: "must start with prefix"},
 		{query: `Events | evaluate bag_unpack(RawData) : (*, Value:bool)`, message: "not supported"},
+	}
+	for _, test := range tests {
+		t.Run(test.message+test.query, func(t *testing.T) {
+			query, err := Parse(test.query)
+			if err == nil {
+				_, err = Compile(query, time.Now())
+			}
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error = %v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestParseCompileAndExecuteLookup(t *testing.T) {
+	query, err := Parse(`UAL
+| project Host, Message
+| lookup (Sysmon | project Host, User, Message) on Host
+| order by Host`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup, ok := query.Operators[1].(LookupOperator)
+	if !ok || lookup.Kind != JoinLeftOuter || len(lookup.Keys) != 1 || lookup.Keys[0].Name != "Host" {
+		t.Fatalf("lookup = %#v", query.Operators[1])
+	}
+	compiled, err := Compile(query, time.Now(), TableCatalog{"UAL": 1, "Sysmon": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.SQL, "LEFT OUTER JOIN") || !strings.Contains(compiled.SQL, "AS lookup_right LIMIT") {
+		t.Fatalf("compiled lookup is not bounded left outer join: %s", compiled.SQL)
+	}
+	if got := strings.Join(compiled.Columns, ","); got != "Host,Message,User,Message1" {
+		t.Fatalf("columns = %q", got)
+	}
+
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	for _, row := range []struct {
+		dataset int
+		host    string
+		user    string
+		message string
+	}{
+		{dataset: 1, host: "a", message: "left-a"},
+		{dataset: 1, host: "b", message: "left-b"},
+		{dataset: 2, host: "a", user: "alice", message: "right-a"},
+	} {
+		if _, err = db.Exec(`INSERT INTO events (dataset_id, host, username, message) VALUES (?, ?, ?, ?)`, row.dataset, row.host, row.user, row.message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := db.Query(compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("execute lookup: %v\n%s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	want := []struct {
+		host, left  string
+		user, right sql.NullString
+	}{
+		{host: "a", left: "left-a", user: sql.NullString{String: "alice", Valid: true}, right: sql.NullString{String: "right-a", Valid: true}},
+		{host: "b", left: "left-b"},
+	}
+	for index, expected := range want {
+		if !rows.Next() {
+			t.Fatalf("missing lookup row %d", index)
+		}
+		var host, left string
+		var user, right sql.NullString
+		if err = rows.Scan(&host, &left, &user, &right); err != nil {
+			t.Fatal(err)
+		}
+		if host != expected.host || left != expected.left || user != expected.user || right != expected.right {
+			t.Fatalf("row %d = %q, %q, %#v, %#v", index, host, left, user, right)
+		}
+	}
+}
+
+func TestExecuteLookupBoundsRightSide(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO events (dataset_id, host) VALUES (1, 'same')`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 1001; index++ {
+		if _, err = tx.Exec(`INSERT INTO events (dataset_id, host, message) VALUES (2, 'same', ?)`, fmt.Sprintf("right-%d", index)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	query, err := Parse(`UAL | project Host | lookup kind=inner (Sysmon | project Host, Message) on Host | summarize Matches=count()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now(), TableCatalog{"UAL": 1, "Sysmon": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches int64
+	if err = db.QueryRow(compiled.SQL, compiled.Args...).Scan(&matches); err != nil {
+		t.Fatal(err)
+	}
+	if matches != 1000 {
+		t.Fatalf("lookup matches = %d, want bounded 1000", matches)
+	}
+}
+
+func TestExecuteMVExpandWithItemIndexAndDynamicMetadata(t *testing.T) {
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	for _, row := range []struct {
+		host string
+		data string
+	}{
+		{host: "array", data: `[{"x":1},[2],3,"true"]`},
+		{host: "object", data: `{"a":{"x":1},"b":[2],"c":4,"d":5}`},
+	} {
+		if _, err := db.Exec(`INSERT INTO events (host, raw_data) VALUES (?, ?)`, row.host, row.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query, err := Parse(`Events | mv-expand with_itemindex=Index Item=RawData limit 4 | where Item != "missing" | project Host, Item, Index | order by Host, Index`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, ok := query.Operators[0].(MVExpandOperator)
+	if !ok || operator.ItemIndex != "Index" || operator.Name != "Item" {
+		t.Fatalf("mv-expand = %#v", query.Operators[0])
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(compiled.Columns, ","); got != "Host,Item,Index" {
+		t.Fatalf("columns = %q", got)
+	}
+	if _, dynamic := compiled.DynamicColumns["Item"]; !dynamic {
+		t.Fatal("expanded dynamic value lost its metadata")
+	}
+	if _, dynamic := compiled.DynamicColumns["Index"]; dynamic {
+		t.Fatal("item index must be scalar")
+	}
+	rows, err := db.Query(compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("execute mv-expand: %v\n%s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	want := []struct {
+		host  string
+		value any
+		index int64
+	}{
+		{host: "array", value: `{"x":1}`, index: 0},
+		{host: "array", value: `[2]`, index: 1},
+		{host: "array", value: int64(3), index: 2},
+		{host: "array", value: `"true"`, index: 3},
+		{host: "object", value: `{"x":1}`, index: 0},
+		{host: "object", value: `[2]`, index: 1},
+		{host: "object", value: int64(4), index: 2},
+		{host: "object", value: int64(5), index: 3},
+	}
+	for index, expected := range want {
+		if !rows.Next() {
+			t.Fatalf("missing expanded row %d", index)
+		}
+		var host string
+		var value any
+		var itemIndex int64
+		if err = rows.Scan(&host, &value, &itemIndex); err != nil {
+			t.Fatal(err)
+		}
+		if bytes, ok := value.([]byte); ok {
+			value = string(bytes)
+		}
+		if host != expected.host || value != expected.value || itemIndex != expected.index {
+			t.Fatalf("expanded row %d = %q, %#v, %d", index, host, value, itemIndex)
+		}
+	}
+}
+
+func TestCompileAndExecuteProjectReorder(t *testing.T) {
+	query, err := Parse(`Events | project-reorder Host, *Type, Time*, Host`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Host,EventType,TimeGenerated,Source,User,Message,RawData"
+	if got := strings.Join(compiled.Columns, ","); got != want {
+		t.Fatalf("columns = %q, want %q", got, want)
+	}
+	if _, dynamic := compiled.DynamicColumns["RawData"]; !dynamic {
+		t.Fatal("project-reorder lost dynamic metadata")
+	}
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err = db.Exec(`INSERT INTO events (host) VALUES ('host-1')`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("execute project-reorder: %v\n%s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(columns, ","); got != want {
+		t.Fatalf("SQLite columns = %q, want %q", got, want)
+	}
+}
+
+func TestParseCompileAndExecuteParseKV(t *testing.T) {
+	query, err := Parse(`Events | parse-kv Message as (Name:string, Count:long, Ratio:real) with (pair_delimiter=";", kv_delimiter="=") | project Name, Count, Ratio`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, ok := query.Operators[0].(ParseKVOperator)
+	if !ok || len(operator.Items) != 3 || operator.PairDelimiter != ";" || operator.KVDelimiter != "=" {
+		t.Fatalf("parse-kv = %#v", query.Operators[0])
+	}
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.SQL, "kql_parse_kv(") || strings.Join(compiled.Columns, ",") != "Name,Count,Ratio" {
+		t.Fatalf("compiled parse-kv = %s, columns %v", compiled.SQL, compiled.Columns)
+	}
+	if got := compiled.Args[0]; got != `[{"name":"Name","type":"string"},{"name":"Count","type":"long"},{"name":"Ratio","type":"real"}]` {
+		t.Fatalf("schema JSON = %#v", got)
+	}
+
+	db := openKQLTestDatabase(t)
+	defer db.Close()
+	if _, err = db.Exec(`INSERT INTO events (message) VALUES ('Name=alice;Count=7;Ratio=2.5')`); err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	var count int64
+	var ratio float64
+	if err = db.QueryRow(compiled.SQL, compiled.Args...).Scan(&name, &count, &ratio); err != nil {
+		t.Fatalf("execute parse-kv: %v\n%s", err, compiled.SQL)
+	}
+	if name != "alice" || count != 7 || ratio != 2.5 {
+		t.Fatalf("parse-kv values = %q, %d, %v", name, count, ratio)
+	}
+}
+
+func TestBoundedTabularDiagnostics(t *testing.T) {
+	keys := make([]string, 17)
+	outputs := make([]string, 17)
+	patterns := make([]string, 33)
+	for index := range keys {
+		keys[index] = fmt.Sprintf("K%d", index)
+		outputs[index] = fmt.Sprintf("K%d:string", index)
+	}
+	for index := range patterns {
+		patterns[index] = fmt.Sprintf("K%d", index)
+	}
+	tests := []struct {
+		query   string
+		message string
+	}{
+		{query: `Events | lookup kind=leftanti (Events) on Host`, message: "lookup kind"},
+		{query: `Events | lookup (Events | project Host) on Missing`, message: "does not exist on the left"},
+		{query: `Events | lookup (Events | project Host) on Host, Host`, message: "specified more than once"},
+		{query: `Events | lookup (Events) on ` + strings.Join(keys, ", "), message: "at most 16"},
+		{query: `Events | mv-expand with_itemindex=Host Item=RawData`, message: "conflicts with another output"},
+		{query: `Events | mv-expand with_itemindex=Item Item=RawData`, message: "conflicts with another output"},
+		{query: `Events | parse-kv Message as (Host:string) with (pair_delimiter=";", kv_delimiter="=")`, message: "conflicts with another output"},
+		{query: `Events | parse-kv Message as (` + strings.Join(outputs, ", ") + `) with (pair_delimiter=";", kv_delimiter="=")`, message: "at most 16"},
+		{query: `Events | parse-kv Message as (Value:string) with (pair_delimiter="", kv_delimiter="=")`, message: "between 1 and 16 bytes"},
+		{query: `Events | parse-kv Message as (Value:string) with (pair_delimiter=";", kv_delimiter="12345678901234567")`, message: "between 1 and 16 bytes"},
+		{query: `Events | parse-kv Message as (` + strings.Repeat("K", maxParseKVSchema) + `:string) with (pair_delimiter=";", kv_delimiter="=")`, message: "schema cannot exceed"},
+		{query: `Events | project-reorder ` + strings.Join(patterns, ", "), message: "at most 32"},
+		{query: `Events | project-reorder Missing`, message: "unknown column"},
 	}
 	for _, test := range tests {
 		t.Run(test.message+test.query, func(t *testing.T) {

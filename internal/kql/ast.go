@@ -60,6 +60,13 @@ type ProjectAwayOperator struct {
 
 func (ProjectAwayOperator) operatorNode() {}
 
+type ProjectReorderOperator struct {
+	At       token
+	Patterns []ColumnPattern
+}
+
+func (ProjectReorderOperator) operatorNode() {}
+
 type ColumnRename struct {
 	At     token
 	Name   string
@@ -158,6 +165,22 @@ type ParseOperator struct {
 
 func (ParseOperator) operatorNode() {}
 
+type ParseKVItem struct {
+	At   token
+	Name string
+	Type ScalarType
+}
+
+type ParseKVOperator struct {
+	At            token
+	Expression    Expression
+	Items         []ParseKVItem
+	PairDelimiter string
+	KVDelimiter   string
+}
+
+func (ParseKVOperator) operatorNode() {}
+
 type BagUnpackItem struct {
 	At   token
 	Name string
@@ -178,6 +201,8 @@ type MVExpandOperator struct {
 	Name       string
 	Expression Expression
 	Limit      Expression
+	ItemIndex  string
+	IndexAt    token
 }
 
 func (MVExpandOperator) operatorNode() {}
@@ -221,6 +246,15 @@ type JoinOperator struct {
 }
 
 func (JoinOperator) operatorNode() {}
+
+type LookupOperator struct {
+	At    token
+	Kind  JoinKind
+	Right Query
+	Keys  []JoinKey
+}
+
+func (LookupOperator) operatorNode() {}
 
 type Expression interface {
 	expressionNode()

@@ -102,12 +102,12 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	if schema.Tables[0].EventCount != 2 || schema.Tables[0].Description != "All datasets" || schema.Tables[1].EventCount != 2 || schema.Tables[1].Description != "demo" {
 		t.Fatalf("schema table metadata = %#v", schema.Tables)
 	}
-	for _, operator := range []string{"parse", "parse-where", "project-away", "project-rename", "evaluate bag_unpack"} {
+	for _, operator := range []string{"parse", "parse-where", "parse-kv", "project-away", "project-rename", "project-reorder", "evaluate bag_unpack", "lookup"} {
 		if !slices.Contains(schema.Operators, operator) {
 			t.Fatalf("schema operators do not include %q: %v", operator, schema.Operators)
 		}
 	}
-	for _, function := range []string{"array_length", "bag_keys", "isempty", "isnotempty", "todatetime"} {
+	for _, function := range []string{"array_length", "bag_keys", "bag_has_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "isempty", "isnotempty", "todatetime"} {
 		if !slices.Contains(schema.Functions, function) {
 			t.Fatalf("schema functions do not include %q: %v", function, schema.Functions)
 		}
@@ -511,6 +511,18 @@ func TestDataShapingKQLFeaturesExecute(t *testing.T) {
 	if len(parsedWhere) != 1 || parsedWhere[0]["ParsedUser"] != "alice" || parsedWhere[0]["ParsedID"] != float64(42) {
 		t.Fatalf("parse-where rows = %#v", parsedWhere)
 	}
+	parsedKV := queryRows(t, server.URL, `Events | take 1 | parse-kv "ParsedUser=alice ParsedID=42" as (ParsedUser:string, ParsedID:long) with (pair_delimiter=" ", kv_delimiter="=") | project ParsedUser, ParsedID`)
+	if len(parsedKV) != 1 || parsedKV[0]["ParsedUser"] != "alice" || parsedKV[0]["ParsedID"] != float64(42) {
+		t.Fatalf("parse-kv rows = %#v", parsedKV)
+	}
+	indexed := queryRows(t, server.URL, `Events | where Host == "pc-1" | mv-expand with_itemindex=ItemIndex Item=RawData.items | project Item, ItemIndex | order by ItemIndex`)
+	if len(indexed) != 2 || indexed[0]["Item"] != float64(1) || indexed[0]["ItemIndex"] != float64(0) || indexed[1]["Item"] != float64(2) || indexed[1]["ItemIndex"] != float64(1) {
+		t.Fatalf("indexed expansion rows = %#v", indexed)
+	}
+	dynamicString := queryRows(t, server.URL, `Events | take 1 | mv-expand Item=parse_json('["true"]') | where Item == "true" | project Item`)
+	if len(dynamicString) != 1 || dynamicString[0]["Item"] != "true" {
+		t.Fatalf("dynamic string expansion rows = %#v", dynamicString)
+	}
 	projected := queryRows(t, server.URL, `Events | project-away Source, EventType, RawData | project-rename Computer=Host, Account=User | project Computer, Account | order by Computer`)
 	if len(projected) != 2 || projected[0]["Computer"] != "pc-1" {
 		t.Fatalf("projected rows = %#v", projected)
@@ -528,6 +540,10 @@ func TestDataShapingKQLFeaturesExecute(t *testing.T) {
 	}
 	if keys, ok := helpers[0]["Keys"].([]any); !ok || len(keys) != 4 {
 		t.Fatalf("bag keys = %#v", helpers[0]["Keys"])
+	}
+	securityHelpers := queryRows(t, server.URL, `Events | take 1 | extend Decoded=base64_decode_tostring("cG93ZXJzaGVsbA=="), URL=url_decode("a%2Fb+c"), Has=bag_has_key(RawData, "$.context.admin"), Member=set_has_element(RawData.items, 2), Private=ipv4_is_private("10.1.2.3"), InRange=ipv4_is_in_range("192.168.1.2", "10.0.0.0/8,192.168.1.2") | project Decoded, URL, Has, Member, Private, InRange`)
+	if len(securityHelpers) != 1 || securityHelpers[0]["Decoded"] != "powershell" || securityHelpers[0]["URL"] != "a/b+c" || securityHelpers[0]["Has"] != float64(1) || securityHelpers[0]["Member"] != float64(1) || securityHelpers[0]["Private"] != float64(1) || securityHelpers[0]["InRange"] != float64(1) {
+		t.Fatalf("security helper rows = %#v", securityHelpers)
 	}
 }
 
@@ -636,6 +652,12 @@ func TestUnionAndJoinTables(t *testing.T) {
 	antiRows := queryRows(t, server.URL, anti)
 	if len(antiRows) != 1 || antiRows[0]["User"] != "bob" {
 		t.Fatalf("leftanti join rows = %#v", antiRows)
+	}
+
+	lookup := `UAL | project User, Host | lookup (Sysmon | project User, Message) on User | order by User`
+	lookupRows := queryRows(t, server.URL, lookup)
+	if len(lookupRows) != 2 || lookupRows[0]["User"] != "alice" || lookupRows[0]["Message"] != "powershell" || lookupRows[1]["User"] != "bob" || lookupRows[1]["Message"] != nil {
+		t.Fatalf("lookup rows = %#v", lookupRows)
 	}
 }
 

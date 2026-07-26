@@ -13,10 +13,14 @@ type parser struct {
 }
 
 const (
-	maxParseCaptures   = 16
-	maxParsePattern    = 2 << 10
-	maxProjectionItems = 32
-	maxBagUnpackItems  = 32
+	maxParseCaptures    = 16
+	maxParsePattern     = 2 << 10
+	maxParseKVOutputs   = 16
+	maxParseKVDelimiter = 16
+	maxParseKVSchema    = 2 << 10
+	maxProjectionItems  = 32
+	maxBagUnpackItems   = 32
+	maxLookupKeys       = 16
 )
 
 func Parse(input string) (Query, error) {
@@ -102,6 +106,10 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			var patterns []ColumnPattern
 			patterns, err = p.parseColumnPatterns()
 			operator = ProjectAwayOperator{At: name, Patterns: patterns}
+		case "project-reorder":
+			var patterns []ColumnPattern
+			patterns, err = p.parseColumnPatterns()
+			operator = ProjectReorderOperator{At: name, Patterns: patterns}
 		case "project-rename":
 			var items []ColumnRename
 			items, err = p.parseColumnRenames()
@@ -154,17 +162,34 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			operator = CountOperator{At: name}
 		case "parse", "parse-where":
 			operator, err = p.parseParse(name, name.Text == "parse-where")
+		case "parse-kv":
+			operator, err = p.parseParseKV(name)
 		case "evaluate":
 			operator, err = p.parseEvaluate(name)
 		case "mv-expand":
+			itemIndex := ""
+			indexAt := token{}
+			if p.matchIdentifier("with_itemindex") {
+				indexAt = p.previous()
+				if _, err = p.expect(tokenAssign, "expected '=' after with_itemindex"); err == nil {
+					var index token
+					index, err = p.expect(tokenIdentifier, "expected index column name after with_itemindex=")
+					itemIndex = index.Text
+					if err == nil {
+						indexAt = index
+					}
+				}
+			}
 			start := p.peek()
 			columnName := ""
-			if p.check(tokenIdentifier) && p.peekNext().Kind == tokenAssign {
+			if err == nil && p.check(tokenIdentifier) && p.peekNext().Kind == tokenAssign {
 				columnName = p.advance().Text
 				p.advance()
 			}
 			var expression Expression
-			expression, err = p.parseExpression(0)
+			if err == nil {
+				expression, err = p.parseExpression(0)
+			}
 			if err == nil && columnName == "" {
 				columnName = expressionName(expression, 1)
 				if strings.HasPrefix(columnName, "Column") {
@@ -175,7 +200,7 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 			if err == nil && p.matchIdentifier("limit") {
 				limit, err = p.parseRowLimit()
 			}
-			operator = MVExpandOperator{At: name, Name: columnName, Expression: expression, Limit: limit}
+			operator = MVExpandOperator{At: name, Name: columnName, Expression: expression, Limit: limit, ItemIndex: itemIndex, IndexAt: indexAt}
 		case "mv-apply":
 			operator, err = p.parseMVApply(name)
 		case "union":
@@ -248,6 +273,8 @@ func (p *parser) parsePipeline(stop tokenKind) (Query, error) {
 				}
 			}
 			operator = JoinOperator{At: name, Kind: kind, Right: right, Keys: keys}
+		case "lookup":
+			operator, err = p.parseLookup(name)
 		default:
 			return Query{}, errorAt(name, "operator %q is not supported", name.Text)
 		}
@@ -264,6 +291,55 @@ func (p *parser) parseRowLimit() (Expression, error) {
 		return nil, errorAt(p.peek(), "expected integer row limit")
 	}
 	return p.parseExpression(0)
+}
+
+func (p *parser) parseLookup(at token) (Operator, error) {
+	kind := JoinLeftOuter
+	if p.matchIdentifier("kind") {
+		if _, err := p.expect(tokenAssign, "expected '=' after lookup kind"); err != nil {
+			return nil, err
+		}
+		kindToken, err := p.expect(tokenIdentifier, "expected lookup kind")
+		if err != nil {
+			return nil, err
+		}
+		switch kindToken.Text {
+		case string(JoinLeftOuter):
+			kind = JoinLeftOuter
+		case string(JoinInner):
+			kind = JoinInner
+		default:
+			return nil, errorAt(kindToken, "lookup kind %q is not supported", kindToken.Text)
+		}
+	}
+	if _, err := p.expect(tokenLeftParen, "expected '(' before lookup query"); err != nil {
+		return nil, err
+	}
+	right, err := p.parsePipeline(tokenRightParen)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after lookup query"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expectIdentifier("on", "expected 'on' after lookup query"); err != nil {
+		return nil, err
+	}
+	keys := make([]JoinKey, 0, 2)
+	for {
+		key, keyErr := p.expect(tokenIdentifier, "expected lookup column after 'on'")
+		if keyErr != nil {
+			return nil, keyErr
+		}
+		keys = append(keys, JoinKey{Name: key.Text, At: key})
+		if len(keys) > maxLookupKeys {
+			return nil, errorAt(key, "lookup supports at most %d keys", maxLookupKeys)
+		}
+		if !p.match(tokenComma) {
+			break
+		}
+	}
+	return LookupOperator{At: at, Kind: kind, Right: right, Keys: keys}, nil
 }
 
 func (p *parser) parseMVApply(at token) (Operator, error) {
@@ -474,6 +550,81 @@ func (p *parser) parseParse(at token, where bool) (Operator, error) {
 		}
 	}
 	return ParseOperator{At: at, Expression: expression, Pattern: pattern, Where: where}, nil
+}
+
+func (p *parser) parseParseKV(at token) (Operator, error) {
+	expression, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expectIdentifier("as", "expected 'as' before parse-kv output schema"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenLeftParen, "expected '(' before parse-kv output schema"); err != nil {
+		return nil, err
+	}
+	items := make([]ParseKVItem, 0, 4)
+	for {
+		name, itemErr := p.expect(tokenIdentifier, "expected parse-kv output column")
+		if itemErr != nil {
+			return nil, itemErr
+		}
+		if _, itemErr = p.expect(tokenColon, "parse-kv output columns require an explicit type"); itemErr != nil {
+			return nil, itemErr
+		}
+		valueType, typeErr := p.parseScalarType(false, "parse-kv output")
+		if typeErr != nil {
+			return nil, typeErr
+		}
+		items = append(items, ParseKVItem{At: name, Name: name.Text, Type: valueType})
+		if len(items) > maxParseKVOutputs {
+			return nil, errorAt(name, "parse-kv supports at most %d output columns", maxParseKVOutputs)
+		}
+		if !p.match(tokenComma) {
+			break
+		}
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after parse-kv output schema"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expectIdentifier("with", "expected 'with' before parse-kv delimiters"); err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenLeftParen, "expected '(' before parse-kv delimiters"); err != nil {
+		return nil, err
+	}
+	pairDelimiter, err := p.parseParseKVDelimiter("pair_delimiter")
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenComma, "expected ',' between parse-kv delimiters"); err != nil {
+		return nil, err
+	}
+	kvDelimiter, err := p.parseParseKVDelimiter("kv_delimiter")
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.expect(tokenRightParen, "expected ')' after parse-kv delimiters"); err != nil {
+		return nil, err
+	}
+	return ParseKVOperator{At: at, Expression: expression, Items: items, PairDelimiter: pairDelimiter, KVDelimiter: kvDelimiter}, nil
+}
+
+func (p *parser) parseParseKVDelimiter(name string) (string, error) {
+	if _, err := p.expectIdentifier(name, "expected '"+name+"' in parse-kv delimiters"); err != nil {
+		return "", err
+	}
+	if _, err := p.expect(tokenAssign, "expected '=' after "+name); err != nil {
+		return "", err
+	}
+	value, err := p.expect(tokenString, name+" must be a string literal")
+	if err != nil {
+		return "", err
+	}
+	if len(value.Text) < 1 || len(value.Text) > maxParseKVDelimiter {
+		return "", errorAt(value, "%s must be between 1 and %d bytes", name, maxParseKVDelimiter)
+	}
+	return value.Text, nil
 }
 
 func (p *parser) parseEvaluate(at token) (Operator, error) {
