@@ -165,140 +165,38 @@ Events
 
 The navigation bar shows the project and challenge names. Help reopens the onboarding guide. The browser keeps onboarding state, recent queries, named saved queries, bookmarked result rows, and bookmark notes in local storage. Share creates a URL containing the current query. Results that include `TimeGenerated` display a selectable histogram of the visible rows.
 
-Supported tabular operators:
+KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) v0.3.0. Supported tabular operators are:
 
 ```text
-where, search, project, project-away, project-rename, project-reorder,
-extend, parse, parse-where, parse-kv, evaluate bag_unpack, summarize, distinct,
-order by, sort by, top, take, limit, count, mv-expand, mv-apply,
-union, join, lookup
+where, filter, search, project, project-away, project-keep, project-rename,
+project-reorder, extend, summarize, distinct, count, serialize,
+order by, sort by, top, take, limit, sample, sample-distinct, as,
+mv-expand, mv-apply, union, join, lookup
 ```
 
-`search` performs case-insensitive whole-token matching across every currently visible column, including `RawData`:
+`join` supports `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`. Specify `kind=inner` when an inner join is intended because KQL's default `innerunique` behavior is not yet supported. `lookup` supports `inner` and `leftouter`. SQL unions align columns by position, so union inputs must project the same columns in the same order.
+
+Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or`, membership with `in`, `!in`, `in~`, and `!in~`, ranges with `between`, and `contains`, `startswith`, and `endswith` string matching. Striem's bounded SQLite regular-expression adapter also supports literal alphanumeric terms with `has`, `has_cs`, `hasprefix`, `hassuffix`, their negated forms, `has_any`, and `has_all`.
+
+The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, and `take_any`.
+
+Dynamic object properties can use dot or bracket access, and arrays support zero-based bracket indexing:
 
 ```kusto
 Events
-| search "powershell"
+| project Command=tostring(RawData.process.name), FirstTag=RawData.tags[0]
 ```
 
-`union` appends rows from tables or parenthesized pipelines with the same column names. Columns are aligned by name:
-
-```kusto
-UAL
-| project TimeGenerated, User, Host
-| union (Sysmon | project Host, User, TimeGenerated)
-| order by TimeGenerated desc
-```
-
-`join` correlates parenthesized pipelines on one or more same-name columns. It defaults to `inner` and also supports `leftouter` and `leftanti`. `leftanti` returns left-side rows with no matching right-side row. Right-side key columns are omitted, while other duplicate names receive numeric suffixes such as `Host1`:
-
-```kusto
-UAL
-| project User, TimeGenerated
-| join kind=inner (
-    Sysmon
-    | project User, Host, Message
-  ) on User
-```
-
-`lookup` enriches rows from a parenthesized pipeline using up to 16 same-name keys. It defaults to `leftouter`, also supports `inner`, and limits the right side to 1,000 rows:
-
-```kusto
-UAL
-| lookup kind=leftouter (
-    Sysmon
-    | project Host, Process=Message
-  ) on Host
-```
-
-`project-away` removes exact columns or columns matched by an edge wildcard. `project-rename` performs simultaneous column renames:
+`mv-expand` supports one dynamic array, an explicit output alias, `with_itemindex`, `limit`, and `to typeof(...)`. `mv-apply` supports one dynamic array and row-wise `where`, `extend`, and `serialize` operators. Its inner pipeline does not yet support row-reducing operators such as `summarize`, `top`, or `take`:
 
 ```kusto
 Events
-| project-away Source, Raw*
-| project-rename Computer=Host, Account=User
-```
-
-`project-reorder` moves exact columns or edge-wildcard matches to the front. The first matching pattern wins; unspecified columns retain source order:
-
-```kusto
-Events
-| project-reorder TimeGenerated, *Type, Host
-```
-
-`parse` appends typed captures and keeps unmatched rows with null captures. `parse-where` keeps only matching rows. This bounded implementation supports `kind=simple`, quoted literal delimiters, `*`, and captures explicitly typed as `string`, `long`, or `real`:
-
-```kusto
-Events
-| parse-where Message with "user=" ParsedUser:string " id=" ParsedID:long
-| project TimeGenerated, ParsedUser, ParsedID
-```
-
-`parse-kv` extracts up to 16 explicitly typed key-value fields. Pair and key-value delimiters are required and limited to 16 bytes. The first duplicate key wins; absent strings are empty and absent or invalid numeric values are null:
-
-```kusto
-Events
-| parse-kv Message as (ParsedUser:string, ParsedID:long) with (pair_delimiter=" ", kv_delimiter="=")
-```
-
-`evaluate bag_unpack()` expands selected properties from a dynamic object. An explicit output schema is required so result columns remain static and bounded. The schema must begin with `*`, supports at most 32 outputs, and accepts `string`, `long`, `real`, and `dynamic` types:
-
-```kusto
-Events
-| evaluate bag_unpack(RawData) : (*, command:string, score:long, context:dynamic)
-| project TimeGenerated, Host, command, score, context
-```
-
-An optional prefix maps prefixed output names back to unprefixed JSON keys:
-
-```kusto
-Events
-| evaluate bag_unpack(RawData, "raw_") : (*, raw_command:string, raw_score:long)
-```
-
-Supported scalar operations:
-
-```text
-==, !=, =~, !~, <, <=, >, >=, +, -, *, /, %, and, or, not,
-in, in~, !in, !in~, contains, contains_cs, startswith, startswith_cs,
-endswith, endswith_cs, has, has_cs, has_any, has_all
-now(), ago(), datetime(), bin(), tostring(), toint(), tolower(),
-toupper(), todatetime(), isnull(), isnotnull(), isempty(), isnotempty(),
-parse_json(), array_length(), bag_keys(), iff(), coalesce(), strlen(),
-bag_has_key(), set_has_element(), base64_decode_tostring(), url_decode(),
-ipv4_is_private(), ipv4_is_in_range(), substring(), strcat(), split(),
-extract(), trim(), replace_string()
-```
-
-Dynamic arrays support zero-based indexing such as `RawData.tags[0]`. `mv-expand [with_itemindex=Index] Name=Expression [limit N]` expands an array or object into rows and can append its zero-based item index. Expansion defaults to 128 values per input row, cannot exceed 128, and considers at most 1,000 input rows per expansion stage:
-
-```kusto
-Events
-| extend Recipients=RawData.AuditData.Recipients
-| mv-expand with_itemindex=RecipientIndex Recipient=Recipients limit 32
-| where tostring(Recipient) has "example.com"
-```
-
-`mv-apply Name=Expression [limit N] on (where ... | summarize ...)` filters and aggregates an array independently for each input row. The subquery supports zero or more `where` operators followed by one `summarize` without `by`; `arg_min` and `arg_max` are not supported inside `mv-apply`. The same 128-value and 1,000-input-row bounds apply:
-
-```kusto
-Events
-| mv-apply Tag=RawData.tags on (
-    where Tag in~ ("suspicious", "admin")
-    | summarize Matches=make_list(Tag), MatchCount=count()
+| mv-apply Item=RawData.items on (
+    where Item > 1
+    | extend Doubled=Item * 2
   )
-| where MatchCount > 0
+| project Host, Item, Doubled
 ```
-
-`has` performs case-insensitive whole-token matching; `_cs` variants are case-sensitive and `in~` performs case-insensitive membership. `extract()` uses Go's bounded RE2 regular-expression syntax and accepts a pattern, capture-group index, and source string.
-
-`array_length()` returns the number of elements in a valid dynamic array. `bag_keys()` returns the sorted root keys of a valid dynamic object. Both return null for malformed or mismatched dynamic input. `isempty()` tests for null or empty text, while `isnotempty()` is its complement. `todatetime()` accepts bounded ISO date/time text, interprets timezone-less values as UTC, and normalizes valid values to UTC; invalid input returns null.
-
-`base64_decode_tostring()` requires canonical padded Base64 and valid UTF-8. `url_decode()` decodes one path-escape pass and preserves `+`. `bag_has_key()` checks a root key or a bounded property path, and `set_has_element()` tests scalar membership in a dynamic array. `ipv4_is_private()` recognizes RFC1918 addresses; `ipv4_is_in_range()` accepts one exact IPv4 address, CIDR, or a comma-separated list. These bounded helpers return null for malformed, mismatched, or oversized input.
-
-Supported aggregation functions are `count`, `countif`, `dcount`, `sum`, `min`, `max`, `avg`, `make_set`, `make_list`, and `take_any`. `make_set` and `make_list` return dynamic arrays, omit null values, and retain at most 1,000 values or 1 MiB of encoded data per group. `arg_max(Value, *)` and `arg_min(Value, *)` return the complete row containing the extreme value; they must be the only aggregation in that `summarize`. Duration literals support milliseconds, seconds, minutes, hours, days, and weeks, such as `500ms`, `15m`, `2d`, or `1w`.
-
-`top N by Expression [asc|desc]` sorts and limits in one operator, defaulting to descending order. Comparisons to `null` use null semantics, so both `Value == null` and `Value != null` are supported alongside `isnull()` and `isnotnull()`.
 
 Scalar variables and reusable tabular pipelines can be declared before the main query:
 
@@ -310,9 +208,9 @@ selectedEvents
 | top threshold by TimeGenerated
 ```
 
-Bindings are case-sensitive, must be declared before use, and cannot use the same name as an `Events` column. Tabular bindings require a pipeline on the right side and can be reused as the main source or inside `union` and `join` pipelines.
+Bindings are resolved case-insensitively and can be reused as the main source or inside relational pipelines.
 
-This is a KQL subset, not a complete Kusto engine. Unsupported syntax is rejected with a line and column diagnostic. Query source is limited to 32 KiB, execution to five seconds, and results to 1,000 rows unless a smaller explicit limit is used. Parse patterns support at most 16 captures; projection lists, `bag_unpack` schemas, and `mv-apply` aggregate lists are bounded to prevent compilation amplification.
+This is a relational KQL subset, not a complete Kusto engine. Recognized features without a safe SQLite lowering return a line and column diagnostic rather than being passed through as unchecked SQL. Query source is limited to 32 KiB, execution to five seconds, and returned results to 1,000 rows.
 
 ## API
 

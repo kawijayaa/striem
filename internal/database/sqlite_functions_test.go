@@ -18,6 +18,21 @@ func querySQLiteFunction(t *testing.T, db *sql.DB, query string, arguments ...an
 	return value
 }
 
+func TestKQLRegex(t *testing.T) {
+	store, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if got := querySQLiteFunction(t, store.DB(), `SELECT kql_regex(?, ?)`, `(^|[^[:alnum:]])powershell([^[:alnum:]]|$)`, "powershell admin"); got != int64(1) {
+		t.Fatalf("match = %#v", got)
+	}
+	if got := querySQLiteFunction(t, store.DB(), `SELECT kql_regex(?, ?)`, `(^|[^[:alnum:]])powershell([^[:alnum:]]|$)`, "PowerShell admin"); got != int64(0) {
+		t.Fatalf("case-sensitive match = %#v", got)
+	}
+}
+
 func TestKQLParse(t *testing.T) {
 	store, err := Open(t.TempDir() + "/test.db")
 	if err != nil {

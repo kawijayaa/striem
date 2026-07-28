@@ -27,6 +27,9 @@ func init() {
 		if err := connection.RegisterFunc("kql_has", kqlHas, true); err != nil {
 			return err
 		}
+		if err := connection.RegisterFunc("kql_regex", kqlRegex, true); err != nil {
+			return err
+		}
 		if err := connection.RegisterFunc("kql_split", kqlSplit, true); err != nil {
 			return err
 		}
@@ -75,6 +78,11 @@ func init() {
 		if err := connection.RegisterAggregator("kql_make_set", func() *kqlCollection { return &kqlCollection{distinct: true, seen: make(map[string]struct{})} }, true); err != nil {
 			return err
 		}
+		if err := connection.RegisterAggregator("kql_make_set_value", func() *kqlValueCollection {
+			return &kqlValueCollection{collection: kqlCollection{distinct: true, seen: make(map[string]struct{})}}
+		}, true); err != nil {
+			return err
+		}
 		return nil
 	}})
 }
@@ -112,6 +120,25 @@ type kqlCollection struct {
 	seen     map[string]struct{}
 	distinct bool
 	bytes    int
+}
+
+type kqlValueCollection struct {
+	collection kqlCollection
+}
+
+func (collection *kqlValueCollection) Step(value any) error {
+	dynamic := int64(0)
+	if text, ok := value.(string); ok {
+		trimmed := strings.TrimSpace(text)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, `"`) {
+			dynamic = 1
+		}
+	}
+	return collection.collection.Step(value, dynamic)
+}
+
+func (collection *kqlValueCollection) Done() (string, error) {
+	return collection.collection.Done()
 }
 
 func (collection *kqlCollection) Step(value any, dynamic int64) error {
@@ -179,6 +206,28 @@ func kqlHas(value, term string, caseSensitive int64) bool {
 		offset = start + 1
 	}
 	return false
+}
+
+func kqlRegex(patternValue, valueValue any) (bool, error) {
+	pattern, patternOK := patternValue.(string)
+	value, valueOK := valueValue.(string)
+	if bytes, ok := patternValue.([]byte); ok {
+		pattern, patternOK = string(bytes), true
+	}
+	if bytes, ok := valueValue.([]byte); ok {
+		value, valueOK = string(bytes), true
+	}
+	if !patternOK || !valueOK {
+		return false, nil
+	}
+	if len(pattern) > 512 {
+		return false, fmt.Errorf("regular expression exceeds 512 characters")
+	}
+	expression, err := regexp.Compile(pattern)
+	if err != nil {
+		return false, err
+	}
+	return expression.MatchString(value), nil
 }
 
 func tokenBoundary(value string, offset, direction int) bool {

@@ -16,48 +16,51 @@ import { Vim, vim } from '@replit/codemirror-vim';
 import type { QueryError } from '../types';
 
 const keywords = new Set([
-  'let', 'where', 'search', 'project', 'project-away', 'project-rename', 'project-reorder', 'extend', 'parse',
-  'parse-where', 'parse-kv', 'evaluate', 'with', 'with_itemindex', 'simple', 'summarize', 'distinct', 'order', 'sort',
-  'top', 'take', 'limit', 'count', 'mv-expand', 'mv-apply', 'union', 'join', 'lookup', 'kind', 'inner', 'leftouter',
-  'leftanti', 'on', 'as', 'by', 'asc', 'desc',
+  'let', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
+  'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
+  'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
+  'lookup', 'kind', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
+  'on', 'by', 'of', 'asc', 'desc',
 ]);
 const logicalOperators = new Set([
-  'and', 'or', 'not', '=~', '!~', 'in', 'in~', '!in', '!in~', 'contains', 'contains_cs',
-  'startswith', 'startswith_cs', 'endswith', 'endswith_cs', 'has', 'has_cs', 'has_any', 'has_all',
+  'and', 'or', 'not', '=~', '!~', 'in', 'in~', '!in', '!in~', 'between', '!between', 'contains', 'contains_cs',
+  'startswith', 'startswith_cs', 'endswith', 'endswith_cs', 'has', 'has_cs', 'hasprefix', 'hasprefix_cs',
+  'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'bin', 'tostring', 'toint', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element',
   'ipv4_is_private', 'ipv4_is_in_range',
-  'bag_unpack', 'count', 'countif', 'iff', 'coalesce', 'strlen', 'substring',
-  'strcat', 'dcount', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
-  'arg_max', 'arg_min', 'make_set', 'make_list', 'take_any',
+  'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring',
+  'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
+  'make_set', 'make_list', 'take_any',
 ]);
 const literals = new Set(['true', 'false', 'null']);
 const types = new Set(['string', 'long', 'real', 'dynamic']);
 
 const operatorCompletions = createCompletions('keyword', [
   ['let', 'Declare a scalar or tabular value'],
-  ['where', 'Filter rows'], ['search', 'Search all visible columns'],
-  ['project', 'Select columns'], ['project-away', 'Remove columns'],
-  ['project-rename', 'Rename columns'], ['project-reorder', 'Reorder matching columns'],
+  ['where', 'Filter rows'], ['filter', 'Filter rows'], ['search', 'Search visible columns'],
+  ['project', 'Select columns'], ['project-away', 'Remove columns'], ['project-keep', 'Keep columns'],
+  ['project-rename', 'Rename columns'], ['project-reorder', 'Reorder columns'],
   ['extend', 'Add a calculated column'],
-  ['parse', 'Extract typed values from text'], ['parse-where', 'Parse text and keep matching rows'],
-  ['parse-kv', 'Extract typed key-value pairs'],
-  ['evaluate bag_unpack', 'Expand dynamic object properties'],
   ['summarize', 'Aggregate rows'], ['distinct', 'Return unique rows'],
   ['order by', 'Sort rows'], ['sort by', 'Sort rows'], ['take', 'Limit rows'],
   ['top', 'Rank and limit rows'], ['limit', 'Limit rows'], ['count', 'Count rows'],
-  ['mv-expand', 'Expand a dynamic array into rows'],
-  ['mv-apply', 'Aggregate a dynamic array per input row'],
+  ['sample', 'Select random rows'], ['sample-distinct', 'Select random distinct values'],
+  ['serialize', 'Preserve pipeline order metadata'],
+  ['as', 'Alias a reusable pipeline'],
+  ['mv-expand', 'Expand one dynamic array'],
+  ['mv-apply', 'Apply row-wise operators to one dynamic array'],
   ['union', 'Combine compatible table rows'], ['join', 'Correlate rows by matching columns'],
   ['lookup', 'Enrich rows by matching columns'],
 ], label => `${label} `);
 
 const functionCompletions = createCompletions('function', [
   ['now', 'Current UTC time'], ['ago', 'Relative UTC time'], ['datetime', 'Datetime literal'],
-  ['bin', 'Bucket a value'], ['tostring', 'Convert to string'], ['toint', 'Convert to integer'],
+  ['tostring', 'Convert to string'], ['toint', 'Convert to integer'], ['tolong', 'Convert to long'],
+  ['toreal', 'Convert to real'], ['todouble', 'Convert to double'],
   ['tolower', 'Lowercase text'], ['toupper', 'Uppercase text'], ['isnull', 'Test for null'],
   ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'],
   ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
@@ -67,13 +70,12 @@ const functionCompletions = createCompletions('function', [
   ['ipv4_is_private', 'Test for an RFC1918 address'],
   ['ipv4_is_in_range', 'Test an address against IPv4 ranges'],
   ['todatetime', 'Convert ISO text to UTC datetime'],
-  ['iff', 'Conditional value'], ['coalesce', 'First non-null value'], ['strlen', 'String length'],
+  ['iff', 'Conditional value'], ['case', 'Conditional branches'], ['coalesce', 'First non-null value'], ['strlen', 'String length'],
   ['substring', 'Extract text'], ['strcat', 'Concatenate values'],
   ['split', 'Split text into a dynamic array'], ['extract', 'Extract a regular expression group'],
   ['trim', 'Trim a regular expression'], ['replace_string', 'Replace literal text'],
-  ['count', 'Count rows'], ['countif', 'Conditional count'], ['dcount', 'Distinct count'],
+  ['count', 'Count rows'], ['countif', 'Conditional count'], ['sumif', 'Conditional sum'],
   ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
-  ['arg_max', 'Row with the maximum value'], ['arg_min', 'Row with the minimum value'],
   ['make_set', 'Collect distinct values'], ['make_list', 'Collect values'],
   ['take_any', 'Select a group value'],
 ], label => `${label}()`);

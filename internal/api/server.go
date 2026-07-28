@@ -116,8 +116,8 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		"challengeName": challengeName,
 		"tables":        tables,
 		"statements":    []string{"let"},
-		"operators":     []string{"where", "search", "project", "project-away", "project-rename", "project-reorder", "extend", "parse", "parse-where", "parse-kv", "evaluate bag_unpack", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "count", "mv-expand", "mv-apply", "union", "join", "lookup"},
-		"functions":     []string{"now", "ago", "datetime", "bin", "tostring", "toint", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "bag_keys", "bag_has_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "dcount", "sum", "min", "max", "avg", "arg_max", "arg_min", "make_set", "make_list", "take_any"},
+		"operators":     []string{"where", "filter", "search", "project", "project-away", "project-keep", "project-rename", "project-reorder", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "sample", "sample-distinct", "count", "serialize", "as", "mv-expand", "mv-apply", "union", "join", "lookup"},
+		"functions":     []string{"now", "ago", "datetime", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "bag_keys", "bag_has_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "max", "avg", "make_set", "make_list", "take_any"},
 	})
 }
 
@@ -200,14 +200,14 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	results, err := scanRows(rows, compiled.DynamicColumns)
+	columns, results, err := scanRows(rows, compiled.DynamicColumns)
 	if err != nil {
 		s.logger.Error("query result failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read query result", nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"columns":    compiled.Columns,
+		"columns":    columns,
 		"rows":       results,
 		"rowCount":   len(results),
 		"durationMs": time.Since(started).Milliseconds(),
@@ -244,11 +244,6 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request) (kql.Compi
 		return kql.CompiledQuery{}, false
 	}
 
-	parsed, err := kql.Parse(request.Query)
-	if err != nil {
-		writeQueryError(w, err)
-		return kql.CompiledQuery{}, false
-	}
 	datasets, err := s.store.ListDatasets(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not resolve query tables", nil)
@@ -260,11 +255,17 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request) (kql.Compi
 			catalog[dataset.Table] = dataset.ID
 		}
 	}
-	compiled, err := kql.Compile(parsed, time.Now(), catalog)
+	compiled, err := kql.Compile(request.Query, time.Now(), catalog)
 	if err != nil {
 		writeQueryError(w, err)
 		return kql.CompiledQuery{}, false
 	}
+	statement, err := s.store.DB().PrepareContext(r.Context(), compiled.SQL)
+	if err != nil {
+		writeQueryError(w, &kql.Error{Message: "query contains an invalid column or expression", Line: 1, Column: 1})
+		return kql.CompiledQuery{}, false
+	}
+	statement.Close()
 	return compiled, true
 }
 
@@ -289,10 +290,10 @@ func requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]map[string]any, error) {
+func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	results := make([]map[string]any, 0)
 	for rows.Next() {
@@ -302,7 +303,7 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]map[string]
 			pointers[index] = &values[index]
 		}
 		if err := rows.Scan(pointers...); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row := make(map[string]any, len(columns))
 		for index, column := range columns {
@@ -310,11 +311,15 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]map[string]
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
 			}
-			_, dynamic := dynamicColumns[column]
-			if dynamic || strings.TrimRight(column, "0123456789") == "RawData" {
-				if text, ok := value.(string); ok {
+			if text, ok := value.(string); ok {
+				if _, dynamic := dynamicColumns[column]; !dynamic {
+					row[column] = value
+					continue
+				}
+				trimmed := strings.TrimSpace(text)
+				if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 					var raw any
-					if json.Unmarshal([]byte(text), &raw) == nil {
+					if json.Unmarshal([]byte(trimmed), &raw) == nil {
 						value = raw
 					}
 				}
@@ -323,7 +328,7 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]map[string]
 		}
 		results = append(results, row)
 	}
-	return results, rows.Err()
+	return columns, results, rows.Err()
 }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
