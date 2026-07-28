@@ -1,6 +1,6 @@
 # Striem
 
-Striem is a per-team CTF log investigation application. Challenge operators provision prepared JSON or CSV telemetry and investigation questions at deployment time. Players query the telemetry with a bounded Kusto Query Language (KQL) subset, inspect event JSON, bookmark evidence, and solve tasks to unlock the challenge flag.
+Striem is a per-team CTF log investigation application. Challenge operators provision prepared JSON, CSV, or Windows EVTX telemetry and investigation questions at deployment time. Players query the telemetry with a bounded Kusto Query Language (KQL) subset, inspect event JSON, bookmark evidence, and solve tasks to unlock the challenge flag.
 
 The current interface includes first-run onboarding, live preflight query diagnostics, table and field completion, sortable and resizable results, CSV export, an event timeline, mobile result cards, saved queries, query history, bookmarks, and shared task progress. Correctly submitted answers remain visible after a task is solved.
 
@@ -96,11 +96,13 @@ datasets:
       Message: RecordType
 ```
 
-`challengeName` is optional, limited to 120 characters, and displayed in the navigation bar. Each dataset requires a unique `table` name. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, and gzip-compressed variants. The optional `format` is `auto`, `json`, or `csv`; auto-detection selects CSV for `.csv` and `.csv.gz` paths and JSON otherwise. Explicit `format` can override the extension.
+`challengeName` is optional, limited to 120 characters, and displayed in the navigation bar. Each dataset requires a unique `table` name. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, Windows EVTX, and gzip-compressed variants. The optional `format` is `auto`, `json`, `csv`, or `evtx`; auto-detection selects CSV for `.csv` and `.csv.gz`, EVTX for `.evtx` and `.evtx.gz`, and JSON otherwise. Explicit `format` can override the extension.
 
 Investigation questions are optional and share progress across everyone using the deployment. Question IDs must be unique lowercase identifiers. Answers are trimmed and matched case-insensitively by default; `acceptedAnswers` can contain aliases. Incorrect submissions are tracked and limited by `submissionCooldown`, which defaults to three seconds. The final `flag` is returned only after every configured question is solved. Increment a question's `revision` when changing its accepted answers to reset that question's progress. The successfully submitted answer is persisted with shared progress and shown after a task is solved. Configured accepted answers and the flag remain in process memory, so the YAML manifest must be supplied on every startup and kept inaccessible to players.
 
 CSV headers become top-level `RawData` fields and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) in mappings, such as `host\.name`.
+
+EVTX records become top-level JSON objects containing `System`, `EventData`, and any `UserData`. Common mappings include `System.TimeCreated.SystemTime` for `timestampPath`, `System.Provider.Name` for `sourcePath`, `System.EventID.Value` for `EventType`, and `System.Computer` for `Host`. Human-readable Windows messages are not embedded in most EVTX files and are therefore not rendered during ingestion.
 
 Mappings use GJSON paths for every format. JSON objects or arrays encoded inside string fields are parsed automatically, including JSON stored in CSV cells, so fields such as `RawData.AuditData.ClientIP` can be queried directly. Changed datasets atomically replace previous datasets with the same name, while unchanged files and mappings reuse their existing imported data. Datasets absent from the manifest are removed. Timestamps are normalized to UTC but are not rebased. Expanded inputs are limited to 1 GiB and each event to 2 MiB.
 

@@ -218,6 +218,95 @@ func TestImportCSVRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestImportEVTXMapsFields(t *testing.T) {
+	store := openTestStore(t)
+	input, err := os.Open(filepath.Join("testdata", "security-one-record.evtx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+
+	result, err := New(store).Import(t.Context(), input, false, Mapping{
+		Name: "security", Table: "Security", Format: FormatEVTX,
+		SourcePath: "System.Provider.Name", TimestampPath: "System.TimeCreated.SystemTime",
+		FieldPaths: map[string]string{
+			"EventType": "System.EventID.Value",
+			"Host":      "System.Computer",
+			"User":      "UserData.LogFileCleared.SubjectUserName",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Dataset.EventCount == 0 {
+		t.Fatal("EVTX import contained no events")
+	}
+
+	var timestamp, source, eventType, host, user, provider string
+	if err := store.DB().QueryRow(`
+SELECT time_generated, source, event_type, host, username,
+       json_extract(raw_data, '$.System.Provider.Name')
+FROM events ORDER BY id LIMIT 1`).Scan(&timestamp, &source, &eventType, &host, &user, &provider); err != nil {
+		t.Fatal(err)
+	}
+	if timestamp == "" || source != "Microsoft-Windows-Eventlog" || eventType != "1102" || host != "TestComputer" || user != "test" || provider != source {
+		t.Fatalf("stored EVTX values = %q, %q, %q, %q, %q, %q", timestamp, source, eventType, host, user, provider)
+	}
+}
+
+func TestImportGzipEVTX(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("testdata", "security-one-record.evtx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	temporaryDirectory := t.TempDir()
+	t.Setenv("STRIEM_DATA_DIR", temporaryDirectory)
+
+	result, err := New(openTestStore(t)).Import(t.Context(), &compressed, true, Mapping{
+		Name: "compressed-evtx", Table: "CompressedEVTX", Format: FormatEVTX,
+		Source: "windows", TimestampPath: "System.TimeCreated.SystemTime",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Dataset.EventCount == 0 {
+		t.Fatal("compressed EVTX import contained no events")
+	}
+	entries, err := os.ReadDir(temporaryDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("EVTX import left temporary files: %v", entries)
+	}
+}
+
+func TestImportEVTXRejectsInvalidInput(t *testing.T) {
+	store := openTestStore(t)
+	_, err := New(store).Import(t.Context(), strings.NewReader("not an EVTX file"), false, Mapping{
+		Name: "invalid-evtx", Table: "InvalidEVTX", Format: FormatEVTX,
+		Source: "windows", TimestampPath: "System.TimeCreated.SystemTime",
+	})
+	if err == nil || !strings.Contains(err.Error(), "EVTX header") {
+		t.Fatalf("Import() error = %v, want EVTX header error", err)
+	}
+	var datasets int
+	if err := store.DB().QueryRow("SELECT COUNT(*) FROM datasets").Scan(&datasets); err != nil {
+		t.Fatal(err)
+	}
+	if datasets != 0 {
+		t.Fatalf("failed EVTX import left %d dataset(s)", datasets)
+	}
+}
+
 func BenchmarkImportNDJSON(b *testing.B) {
 	const eventCount = 20_000
 	var input strings.Builder

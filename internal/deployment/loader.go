@@ -287,10 +287,13 @@ func datasetFormat(path, configured string) (string, error) {
 		if strings.EqualFold(filepath.Ext(basePath), ".csv") {
 			return ingest.FormatCSV, nil
 		}
+		if strings.EqualFold(filepath.Ext(basePath), ".evtx") {
+			return ingest.FormatEVTX, nil
+		}
 		return ingest.FormatJSON, nil
 	}
-	if format != ingest.FormatJSON && format != ingest.FormatCSV {
-		return "", fmt.Errorf("unsupported format %q; expected auto, json, or csv", configured)
+	if format != ingest.FormatJSON && format != ingest.FormatCSV && format != ingest.FormatEVTX {
+		return "", fmt.Errorf("unsupported format %q; expected auto, json, csv, or evtx", configured)
 	}
 	return format, nil
 }

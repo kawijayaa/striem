@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/eventtime"
 	"github.com/tidwall/gjson"
+	"www.velocidex.com/golang/evtx"
 )
 
 const maxEventSize = 2 << 20
@@ -26,6 +28,7 @@ const eventInsertBatchSize = 128
 const (
 	FormatJSON = "json"
 	FormatCSV  = "csv"
+	FormatEVTX = "evtx"
 )
 
 type Mapping struct {
@@ -70,8 +73,8 @@ func (s *Service) Import(ctx context.Context, input io.Reader, compressed bool, 
 	if format == "" {
 		format = FormatJSON
 	}
-	if format != FormatJSON && format != FormatCSV {
-		return Result{}, fmt.Errorf("unsupported input format %q; expected json or csv", mapping.Format)
+	if format != FormatJSON && format != FormatCSV && format != FormatEVTX {
+		return Result{}, fmt.Errorf("unsupported input format %q; expected json, csv, or evtx", mapping.Format)
 	}
 
 	if compressed {
@@ -82,7 +85,9 @@ func (s *Service) Import(ctx context.Context, input io.Reader, compressed bool, 
 		defer reader.Close()
 		input = reader
 	}
-	input = &boundedReader{reader: input, remaining: maxExpandedSize}
+	if format != FormatEVTX {
+		input = &boundedReader{reader: input, remaining: maxExpandedSize}
+	}
 
 	tx, err := s.store.DB().BeginTx(ctx, nil)
 	if err != nil {
@@ -138,7 +143,7 @@ VALUES (?, ?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Signature, mapp
 		pendingRecords = 0
 		return nil
 	}
-	count, err := decodeRecords(input, format, func(index int, raw json.RawMessage) error {
+	count, err := decodeRecords(ctx, input, format, func(index int, raw json.RawMessage) error {
 		values, err := prepareEvent(raw, index, mapping, discoveredFields)
 		if err != nil {
 			return err
@@ -443,11 +448,102 @@ func (r *boundedReader) Read(buffer []byte) (int, error) {
 	return 0, err
 }
 
-func decodeRecords(input io.Reader, format string, consume func(int, json.RawMessage) error) (int, error) {
-	if format == FormatCSV {
+func decodeRecords(ctx context.Context, input io.Reader, format string, consume func(int, json.RawMessage) error) (int, error) {
+	switch format {
+	case FormatCSV:
 		return decodeCSVRecords(input, consume)
+	case FormatEVTX:
+		return decodeEVTXRecords(ctx, input, consume)
+	default:
+		return decodeJSONRecords(input, consume)
 	}
-	return decodeJSONRecords(input, consume)
+}
+
+func decodeEVTXRecords(ctx context.Context, input io.Reader, consume func(int, json.RawMessage) error) (count int, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			count = 0
+			err = fmt.Errorf("decode EVTX input: %v", recovered)
+		}
+	}()
+
+	seeker, cleanup, err := evtxReadSeeker(input)
+	if err != nil {
+		return 0, err
+	}
+	defer cleanup()
+
+	chunks, err := evtx.GetChunks(seeker)
+	if err != nil {
+		return 0, fmt.Errorf("decode EVTX header: %w", err)
+	}
+	for _, chunk := range chunks {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		if chunk.Header.LastEventRecNumber < chunk.Header.FirstEventRecNumber ||
+			chunk.Header.LastEventRecNumber-chunk.Header.FirstEventRecNumber >= evtx.EVTX_CHUNK_SIZE/evtx.EVTX_EVENT_RECORD_SIZE {
+			return 0, fmt.Errorf("decode EVTX chunk at offset %d: invalid record range", chunk.Offset)
+		}
+		records, err := chunk.Parse(0)
+		if err != nil {
+			return 0, fmt.Errorf("decode EVTX chunk at offset %d: %w", chunk.Offset, err)
+		}
+		for _, record := range records {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			encoded, err := json.Marshal(record.Event)
+			if err != nil {
+				return 0, fmt.Errorf("encode EVTX record %d: %w", count+1, err)
+			}
+			event := gjson.GetBytes(encoded, "Event")
+			if !event.IsObject() {
+				return 0, fmt.Errorf("decode EVTX record %d: event payload is not an object", count+1)
+			}
+			count++
+			if err := consume(count, json.RawMessage(event.Raw)); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return count, nil
+}
+
+func evtxReadSeeker(input io.Reader) (io.ReadSeeker, func(), error) {
+	if seeker, ok := input.(io.ReadSeeker); ok {
+		size, err := seeker.Seek(0, io.SeekEnd)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("measure EVTX input: %w", err)
+		}
+		if size > maxExpandedSize {
+			return nil, func() {}, fmt.Errorf("expanded input exceeds the %d MiB limit", maxExpandedSize>>20)
+		}
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return nil, func() {}, fmt.Errorf("rewind EVTX input: %w", err)
+		}
+		return seeker, func() {}, nil
+	}
+
+	temporary, err := os.CreateTemp(strings.TrimSpace(os.Getenv("STRIEM_DATA_DIR")), ".striem-evtx-*")
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("create EVTX temporary file: %w", err)
+	}
+	cleanup := func() {
+		name := temporary.Name()
+		_ = temporary.Close()
+		_ = os.Remove(name)
+	}
+	limited := &boundedReader{reader: input, remaining: maxExpandedSize}
+	if _, err := io.Copy(temporary, limited); err != nil {
+		cleanup()
+		return nil, func() {}, fmt.Errorf("buffer EVTX input: %w", err)
+	}
+	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, func() {}, fmt.Errorf("rewind EVTX temporary file: %w", err)
+	}
+	return temporary, cleanup, nil
 }
 
 func decodeCSVRecords(input io.Reader, consume func(int, json.RawMessage) error) (int, error) {

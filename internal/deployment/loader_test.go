@@ -199,6 +199,30 @@ func TestLoadRejectsUnsupportedFormat(t *testing.T) {
 	}
 }
 
+func TestDatasetFormatDetectsEVTX(t *testing.T) {
+	for _, test := range []struct {
+		path       string
+		configured string
+		want       string
+	}{
+		{path: "security.evtx", want: "evtx"},
+		{path: "security.EVTX", configured: "auto", want: "evtx"},
+		{path: "security.evtx.gz", want: "evtx"},
+		{path: "security.EVTX.GZ", want: "evtx"},
+		{path: "security.bin", configured: "EVTX", want: "evtx"},
+	} {
+		t.Run(test.path+test.configured, func(t *testing.T) {
+			got, err := datasetFormat(test.path, test.configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("datasetFormat(%q, %q) = %q, want %q", test.path, test.configured, got, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsDuplicateTables(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "datasets.yaml")
