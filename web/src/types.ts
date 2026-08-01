@@ -57,16 +57,6 @@ export interface QueryHistoryItem {
   runAt: string;
 }
 
-export interface Bookmark {
-  id: string;
-  rowKey: string;
-  row: EventRow;
-  query: string;
-  table: string;
-  note: string;
-  createdAt: string;
-}
-
 export interface InvestigationQuestion {
   id: string;
   title: string;

@@ -16,19 +16,19 @@ import { createTimeline } from './features/timeline';
 import { addTimeRangeFilter, addValueFilter, querySource, replaceQuerySource } from './kql/query';
 import {
   createBrowserStorage,
-  readBookmarks,
+  readQuestionDrafts,
   readQueryHistory,
   readSavedQueries,
   storageKeys,
 } from './storage';
 import type {
   AnswerResponse,
-  Bookmark,
   ChallengeState,
   EventRow,
   FieldGroup,
   FieldMetadata,
   FieldsResponse,
+  InvestigationQuestion,
   QueryError,
   QueryHistoryItem,
   QueryResult,
@@ -60,7 +60,6 @@ const ui = {
   questionCard: 'question-card',
   questionHead: 'question-card-head',
   questionPrompt: 'question-prompt',
-  questionForm: 'question-form',
   muted: 'muted',
 } as const;
 const toast = createToast($('#toast'), $('#toast-message'), $('#toast-action'));
@@ -69,14 +68,6 @@ const browserStorage = createBrowserStorage(() => {
   showToast('Browser storage is unavailable. Changes will not persist.');
 });
 const writeStored = <T>(key: string, value: T) => browserStorage.write(key, value);
-const onboardingDialog = $<HTMLDialogElement>('#onboarding-dialog');
-let onboardingSeen = browserStorage.readBoolean(storageKeys.onboarding);
-$('#show-onboarding').addEventListener('click', () => onboardingDialog.showModal());
-onboardingDialog.addEventListener('close', () => {
-  if (onboardingSeen) return;
-  onboardingSeen = true;
-  writeStored(storageKeys.onboarding, true);
-});
 const eventDialog = createEventDialog(document, showToast);
 const showRaw = (value: unknown) => eventDialog.show(value);
 const mobileWorkspace = createMobileWorkspace(document, () => runQuery());
@@ -97,29 +88,36 @@ let activeTable = 'Events';
 
 let queryHistory = readQueryHistory(browserStorage);
 let savedQueries = readSavedQueries(browserStorage);
-let bookmarks = readBookmarks(browserStorage);
 let queryLibraryView: 'saved' | 'history' = 'saved';
-let resultsPanelView: 'results' | 'queries' = 'results';
-let sidePanelView: 'fields' | 'questions' | 'bookmarks' = 'fields';
+let sidePanelView: 'fields' | 'questions' | 'hunts' = 'fields';
 let lastResult: QueryResult | null = null;
 let resultSort: ResultSort = { column: null, direction: 'asc' };
 const resultColumnWidths = new Map<string, number>();
 let selectedResultKey: string | null = null;
+let selectedResultValue: { column: string; value: unknown } | null = null;
 let queryRunning = false;
 let queryController: AbortController | null = null;
 let validationTimer: number | undefined;
 let validationController: AbortController | null = null;
 let validationGeneration = 0;
-let activeBookmarkId: string | null = null;
 let challengeState: ChallengeState = { questions: [], solvedQuestions: 0, totalQuestions: 0, completed: false };
 const questionFeedback = new Map<string, string>();
-const questionDrafts = new Map<string, string>();
+const questionDrafts = readQuestionDrafts(browserStorage);
 const questionCooldowns = new Map<string, number>();
 const questionCooldownTimers = new Map<string, number>();
+let activeQuestionId: string | null = null;
 let questionRequestGeneration = 0;
 let questionsLoaded = false;
 let questionSubmitting = false;
 const sharedQuery = new URL(window.location.href).searchParams.get('q');
+
+function persistQuestionDrafts(): void {
+  writeStored(storageKeys.questionDrafts, Array.from(questionDrafts, ([id, value]) => ({ id, value })));
+}
+
+function activeQuestion(): InvestigationQuestion | undefined {
+  return challengeState.questions.find(question => question.id === activeQuestionId);
+}
 
 const queryEditor = createQueryEditor({
   parent: $('#query'),
@@ -207,16 +205,14 @@ async function runQuery() {
   mobileRunButton.setAttribute('aria-label', 'Cancel running query');
   $('#run-label').textContent = 'Cancel';
   $('#mobile-run-label').textContent = 'Cancel';
-  $('#query-stats').textContent = 'Running query';
+  $('#query-stats').textContent = 'Running KQL query';
   $('#results-content').classList.toggle('query-stale', lastResult !== null);
   $('#results-content').setAttribute('aria-busy', 'true');
-  resultsPanelView = 'results';
-  renderResultsPanelView();
   recordQuery(query);
   const started = performance.now();
   const elapsedTimer = window.setInterval(() => {
     const elapsed = Math.max(1, Math.floor((performance.now() - started) / 1000));
-    $('#query-stats').textContent = `Running query · ${elapsed} s`;
+    $('#query-stats').textContent = `Running KQL query · ${elapsed} s`;
   }, 1000);
   try {
     const result = await request<QueryResult>('/api/query', {
@@ -229,7 +225,7 @@ async function runQuery() {
     if (window.matchMedia('(max-width: 900px)').matches) {
       mobileWorkspace.show('results');
     }
-    $('#query-stats').textContent = `${result.rowCount} rows · ${result.durationMs} ms`;
+    $('#query-stats').textContent = `${formatCount(result.rowCount, 'row')} · ${result.durationMs} ms`;
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       $('#query-stats').textContent = 'Query canceled';
@@ -239,7 +235,7 @@ async function runQuery() {
     const position = queryError.position ? `Line ${queryError.position.line}, column ${queryError.position.column}: ` : '';
     const serverMessage = queryError.error || queryError.message;
     const message = !serverMessage || /failed to fetch|invalid server response/i.test(serverMessage)
-      ? 'The query service did not respond. Your query is unchanged. Try again.'
+      ? 'The query service did not respond. Your query is unchanged. Run it again.'
       : serverMessage;
     errorBox.textContent = position + message;
     errorBox.classList.remove('hidden');
@@ -262,6 +258,10 @@ async function runQuery() {
 
 function sortedResultRows(result: QueryResult): EventRow[] {
   return sortResultRows(result, resultSort);
+}
+
+function formatCount(count: number, noun: string): string {
+  return `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 function sortResults(column: string): void {
@@ -337,6 +337,30 @@ function createRowAction(
   return button;
 }
 
+function selectResultValue(element: HTMLElement, column: string, value: unknown): void {
+  selectedResultValue = { column, value };
+  document.querySelectorAll('.result-value-selected').forEach(candidate => candidate.classList.remove('result-value-selected'));
+  element.classList.add('result-value-selected');
+  const displayValue = resultValue(value);
+  $('#result-value-label').textContent = `${column}: ${displayValue}`;
+  $('#result-value-label').setAttribute('title', `${column}: ${displayValue}`);
+  $('#result-value-actions').classList.remove('hidden');
+}
+
+function clearSelectedResultValue(): void {
+  selectedResultValue = null;
+  $('#result-value-actions').classList.add('hidden');
+  document.querySelectorAll('.result-value-selected').forEach(candidate => candidate.classList.remove('result-value-selected'));
+}
+
+function focusResultCell(row: number, column: number): void {
+  const cell = document.querySelector<HTMLTableCellElement>(`.result-value-cell[data-result-row="${row}"][data-result-column-index="${column}"]`);
+  if (!cell) return;
+  document.querySelectorAll<HTMLTableCellElement>('.result-value-cell').forEach(candidate => { candidate.tabIndex = -1; });
+  cell.tabIndex = 0;
+  cell.focus();
+}
+
 function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): HTMLElement {
   const card = document.createElement('article');
   card.className = 'mobile-result-card';
@@ -360,67 +384,74 @@ function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): H
     open.append(time);
   }
   const standardColumns = new Set(['TimeGenerated', 'Source', 'EventType', 'Host', 'User', 'Message', 'RawData']);
+  let detailList: HTMLDListElement | undefined;
   const details = columns.filter(column => !standardColumns.has(column)
     && row[column] !== null && row[column] !== undefined && typeof row[column] !== 'object').slice(0, 3);
   if (details.length) {
-    const detailList = document.createElement('dl');
-    detailList.className = 'mobile-result-details';
+    const list = document.createElement('dl');
+    list.className = 'mobile-result-details';
     details.forEach(column => {
       const item = document.createElement('div');
       const term = document.createElement('dt');
       term.textContent = column;
       const value = document.createElement('dd');
-      value.textContent = resultValue(row[column]);
-      value.title = value.textContent;
+      const valueButton = document.createElement('button');
+      valueButton.className = 'mobile-result-value';
+      valueButton.type = 'button';
+      valueButton.textContent = resultValue(row[column]);
+      valueButton.title = `Select ${column} value`;
+      valueButton.addEventListener('click', () => selectResultValue(valueButton, column, row[column]));
+      value.append(valueButton);
       item.append(term, value);
-      detailList.append(item);
+      list.append(item);
     });
-    open.append(detailList);
+    detailList = list;
   }
   open.addEventListener('click', () => showRaw(row));
   const actions = document.createElement('div');
   actions.className = 'mobile-result-card-actions';
-  const saved = bookmarks.some(item => item.rowKey === rowKey);
-  const bookmark = createRowAction(saved ? 'Remove bookmark' : 'Bookmark event', 'M4 2.5h8v11L8 10.8 4 13.5z', button => toggleBookmark(row, rowKey, button), saved) as HTMLButtonElement & { rowKey: string };
-  bookmark.classList.add('bookmark-toggle');
-  bookmark.rowKey = rowKey;
-  actions.append(bookmark);
-  card.append(open, actions);
+  const pivotColumn = ['EventType', 'Source', 'Host', 'User'].find(column => row[column] !== null && row[column] !== undefined);
+  if (pivotColumn) {
+    const filter = document.createElement('button');
+    filter.className = 'mobile-pivot-action';
+    filter.type = 'button';
+    filter.textContent = 'Filter';
+    filter.setAttribute('aria-label', `Filter to ${pivotColumn} ${resultValue(row[pivotColumn])}`);
+    filter.addEventListener('click', () => pivotOnValue(pivotColumn, row[pivotColumn], false));
+    const exclude = document.createElement('button');
+    exclude.className = 'mobile-pivot-action';
+    exclude.type = 'button';
+    exclude.textContent = 'Exclude';
+    exclude.setAttribute('aria-label', `Exclude ${pivotColumn} ${resultValue(row[pivotColumn])}`);
+    exclude.addEventListener('click', () => pivotOnValue(pivotColumn, row[pivotColumn], true));
+    actions.append(filter, exclude);
+  }
+  card.append(open);
+  if (detailList) card.append(detailList);
+  card.append(actions);
   return card;
-}
-
-function migrateLegacyBookmarkKeys(result: QueryResult): void {
-  const claimed = new Set<number>();
-  let changed = false;
-  bookmarks.forEach(bookmark => {
-    if (bookmark.rowKey.startsWith('v2:') || bookmark.query !== editor.state.doc.toString()) return;
-    const index = result.rows.findIndex((row, candidate) => !claimed.has(candidate)
-      && JSON.stringify(row) === bookmark.rowKey);
-    if (index < 0) return;
-    claimed.add(index);
-    bookmark.rowKey = `v2:${index}:${bookmark.rowKey}`;
-    changed = true;
-  });
-  if (changed) writeStored(storageKeys.bookmarks, bookmarks);
 }
 
 function renderResults(result: QueryResult, resetSort = true): void {
   lastResult = result;
-  migrateLegacyBookmarkKeys(result);
+  clearSelectedResultValue();
   if (resetSort) resultSort = { column: null, direction: 'asc' };
   const head = $('#result-head');
   const body = $('#result-body');
   const mobileList = $('#mobile-result-list');
+  let firstFocusableValue = true;
   head.replaceChildren();
   body.replaceChildren();
   mobileList.replaceChildren();
   const headerRow = document.createElement('tr');
   const actionHeader = document.createElement('th');
   actionHeader.className = 'row-action';
+  actionHeader.scope = 'col';
   actionHeader.setAttribute('aria-label', 'Row actions');
   headerRow.append(actionHeader);
   result.columns.forEach(column => {
     const th = document.createElement('th');
+    th.scope = 'col';
     const sort = document.createElement('button');
     sort.className = ui.columnSort;
     sort.dataset.column = column;
@@ -445,30 +476,22 @@ function renderResults(result: QueryResult, resetSort = true): void {
     tr.style.setProperty('--row', String(Math.min(rowIndex, 16)));
     const rowKey = resultRowKey(result, row);
     tr.classList.toggle('selected', rowKey === selectedResultKey);
-    tr.setAttribute('aria-selected', String(rowKey === selectedResultKey));
     const selectRow = () => {
       selectedResultKey = rowKey;
       body.querySelectorAll('tr').forEach(candidate => {
         const selected = candidate === tr;
         candidate.classList.toggle('selected', selected);
-        candidate.setAttribute('aria-selected', String(selected));
       });
     };
     tr.addEventListener('click', selectRow);
     const action = document.createElement('td');
     action.className = 'row-action';
-    const saved = bookmarks.some(item => item.rowKey === rowKey);
     const view = createRowAction('View event details', 'M2.5 3.5h11v9h-11zM5 6h6M5 8.5h6M5 11h3', () => showRaw(row));
-    const bookmark = createRowAction(saved ? 'Remove bookmark' : 'Bookmark event', 'M4 2.5h8v11L8 10.8 4 13.5z', button => toggleBookmark(row, rowKey, button), saved) as HTMLButtonElement & { rowKey: string };
     view.classList.add('result-row-action');
-    bookmark.classList.add('result-row-action');
     view.tabIndex = rowIndex === 0 ? 0 : -1;
-    bookmark.tabIndex = -1;
-    bookmark.classList.add('bookmark-toggle');
-    bookmark.rowKey = rowKey;
-    action.append(view, bookmark);
+    action.append(view);
     tr.append(action);
-    result.columns.forEach(column => {
+    result.columns.forEach((column, columnIndex) => {
       const td = document.createElement('td');
       const value = row[column];
       if (value !== null && typeof value === 'object') {
@@ -483,6 +506,28 @@ function renderResults(result: QueryResult, resetSort = true): void {
         else if (column === 'TimeGenerated') td.className = 'time';
         td.textContent = value === null || value === undefined ? '—' : String(value);
         td.title = value === null || value === undefined ? 'null' : String(value);
+        td.classList.add('result-value-cell');
+        td.dataset.resultRow = String(rowIndex);
+        td.dataset.resultColumnIndex = String(columnIndex);
+        td.tabIndex = firstFocusableValue ? 0 : -1;
+        firstFocusableValue = false;
+        td.setAttribute('aria-label', `${column}: ${resultValue(value)}. Press Enter to filter or Shift+Enter to exclude.`);
+        td.addEventListener('focus', () => selectResultValue(td, column, value));
+        td.addEventListener('click', () => selectResultValue(td, column, value));
+        td.addEventListener('keydown', event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            pivotOnValue(column, value, event.shiftKey);
+            return;
+          }
+          const rowDirection = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+          const columnDirection = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+          if (!rowDirection && !columnDirection && event.key !== 'Home' && event.key !== 'End') return;
+          event.preventDefault();
+          const nextRow = event.key === 'Home' ? 0 : event.key === 'End' ? result.rows.length - 1 : rowIndex + rowDirection;
+          const nextColumn = columnIndex + columnDirection;
+          focusResultCell(nextRow, nextColumn);
+        });
         td.addEventListener('dblclick', event => {
           event.preventDefault();
           pivotOnValue(column, value, event.altKey);
@@ -495,7 +540,13 @@ function renderResults(result: QueryResult, resetSort = true): void {
   });
   const emptyState = $('#empty-results');
   emptyState.classList.toggle('hidden', result.rows.length > 0);
-  $('#empty-results-title').textContent = result.rows.length ? '' : 'No events matched';
+  $('#empty-results-title').textContent = result.rows.length ? '' : 'No events matched this query';
+  $('#empty-results-detail').textContent = result.rows.length
+    ? ''
+    : 'Remove a filter or widen the time range, then run the query again.';
+  const emptyAction = $<HTMLButtonElement>('#empty-results-action');
+  emptyAction.textContent = 'Edit query';
+  emptyAction.dataset.action = 'edit';
   $('#table-wrap').classList.toggle('hidden', result.rows.length === 0);
   mobileList.classList.toggle('hidden', result.rows.length === 0);
   $('#mobile-result-count').textContent = result.rowCount.toLocaleString();
@@ -513,32 +564,36 @@ function exportResults() {
   link.download = `striem-results-${new Date().toISOString().replaceAll(':', '-')}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
-  showToast(`Exported ${rows.length.toLocaleString()} rows`);
+  showToast(`Exported ${formatCount(rows.length, 'row')}`);
 }
 
 function addTimelineFilter(start: Date, end: Date): void {
   replaceQuery(addTimeRangeFilter(editor.state.doc.toString(), start, end));
   mobileWorkspace.show('query');
-  showToast('Time range added to the query', {
-    label: 'Run',
+  showToast('Time filter added to the query', {
+    label: 'Run query',
     handler: () => void runQuery(),
   });
 }
 
 function pivotOnValue(column: string, value: unknown, negate: boolean): void {
   const previous = editor.state.doc.toString();
+  if (window.matchMedia('(max-width: 900px)').matches) mobileWorkspace.show('query');
   replaceQuery(addValueFilter(previous, column, value, negate));
-  showToast(`Filter added: ${column} ${negate ? '!=' : '=='} ${String(value).slice(0, 40)}`, {
+  showToast(`${negate ? 'Excluded' : 'Included'} ${column}: ${String(value).slice(0, 40)}`, {
     label: 'Undo',
     handler: () => replaceQuery(previous),
   });
 }
 
-function renderResultsPanelView() {
-  renderTabSelection(resultsPanelView, [
-    { name: 'results', tab: $('#results-view'), panel: $('#results-content') },
-    { name: 'queries', tab: $('#queries-view'), panel: $('#queries-pane') },
-  ]);
+async function copySelectedResultValue(): Promise<void> {
+  if (!selectedResultValue) return;
+  try {
+    await navigator.clipboard.writeText(resultValue(selectedResultValue.value));
+    showToast(`Copied ${selectedResultValue.column} value`);
+  } catch {
+    showToast('Could not copy the value. Select it and copy it manually.');
+  }
 }
 
 function queryLabel(query: string): string {
@@ -567,7 +622,11 @@ function recordQuery(query: string): void {
 
 function saveCurrentQuery() {
   const query = editor.state.doc.toString().trim();
-  if (!query) return;
+  if (!query) {
+    showToast('Enter a query before saving a hunt.');
+    editor.focus();
+    return;
+  }
   $<HTMLInputElement>('#save-query-name').value = queryLabel(query);
   $<HTMLDialogElement>('#save-query-dialog').showModal();
   $<HTMLInputElement>('#save-query-name').select();
@@ -584,22 +643,22 @@ function saveNamedQuery(name: string): void {
   }, ...savedQueries];
   const persisted = writeStored(storageKeys.saved, savedQueries);
   renderQueryLibrary();
-  if (persisted) showToast('Query saved to this browser');
+  if (persisted) showToast('Hunt saved to this browser');
 }
 
 async function shareCurrentQuery() {
   const url = new URL(window.location.href);
   url.searchParams.set('q', editor.state.doc.toString());
   if (url.toString().length > 7000) {
-    showToast('This query is too long to share as a link');
+    showToast('This query is too long for a share link.');
     return;
   }
   window.history.replaceState(null, '', url);
   try {
     await navigator.clipboard.writeText(url.toString());
-    showToast('Share link copied');
+    showToast('Share link copied to the clipboard');
   } catch {
-    showToast('Share link added to the address bar');
+    showToast('Share link added to the address bar. Copy it from there.');
   }
 }
 
@@ -615,7 +674,10 @@ function createQueryListItem(item: SavedQuery | QueryHistoryItem): HTMLElement {
   detail.className = 'query-preview';
   detail.textContent = item.query;
   open.append(title, detail);
-  open.addEventListener('click', () => replaceQuery(item.query));
+  open.addEventListener('click', () => {
+    replaceQuery(item.query);
+    mobileWorkspace.show('query');
+  });
   container.append(open);
   if (saved) {
     const remove = document.createElement('button');
@@ -627,7 +689,7 @@ function createQueryListItem(item: SavedQuery | QueryHistoryItem): HTMLElement {
       const persisted = writeStored(storageKeys.saved, savedQueries);
       renderQueryLibrary();
       if (persisted) {
-        showToast('Saved query removed', { label: 'Undo', handler: () => {
+        showToast('Saved hunt removed', { label: 'Undo', handler: () => {
           savedQueries = previous;
           writeStored(storageKeys.saved, savedQueries);
           renderQueryLibrary();
@@ -654,118 +716,36 @@ function renderQueryLibrary() {
     { name: 'history', tab: $('#history-view'), panel: historyList },
   ]);
   $('#clear-history').classList.toggle('hidden', !showingHistory || queryHistory.length === 0);
-  if (!savedQueries.length) savedList.innerHTML = '<span class="muted">No saved queries.</span>';
-  if (!queryHistory.length) historyList.innerHTML = '<span class="muted">No query history.</span>';
+  if (!savedQueries.length) savedList.append(createHuntEmpty(
+    'No saved hunts yet',
+    'Save a useful query to keep a proven investigation path in this browser.',
+    'Save current query',
+    saveCurrentQuery,
+  ));
+  if (!queryHistory.length) historyList.append(createHuntEmpty(
+    'No recent hunts yet',
+    'Queries appear here after they run, so you can retrace an investigation quickly.',
+    'Run current query',
+    () => void runQuery(),
+  ));
   savedQueries.forEach(item => savedList.append(createQueryListItem(item)));
   queryHistory.forEach(item => historyList.append(createQueryListItem(item)));
 }
 
-function toggleBookmark(row: EventRow, rowKey: string, button: HTMLButtonElement): void {
-  const existing = bookmarks.find(item => item.rowKey === rowKey);
-  if (existing) {
-    const previous = [...bookmarks];
-    bookmarks = bookmarks.filter(item => item.rowKey !== rowKey);
-    button.classList.remove('active');
-    button.setAttribute('aria-label', 'Bookmark event');
-    button.title = 'Bookmark event';
-    const persisted = writeStored(storageKeys.bookmarks, bookmarks);
-    if (persisted) {
-      showToast('Bookmark removed', { label: 'Undo', handler: () => {
-        bookmarks = previous;
-        writeStored(storageKeys.bookmarks, bookmarks);
-        renderBookmarks();
-        refreshBookmarkButtons();
-      } });
-    }
-  } else {
-    bookmarks = [{
-      id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
-      rowKey,
-      row,
-      query: editor.state.doc.toString(),
-      table: activeTable,
-      note: '',
-      createdAt: new Date().toISOString(),
-    }, ...bookmarks];
-    button.classList.add('active');
-    button.setAttribute('aria-label', 'Remove bookmark');
-    button.title = 'Remove bookmark';
-    writeStored(storageKeys.bookmarks, bookmarks);
-  }
-  renderBookmarks();
-  refreshBookmarkButtons();
-}
-
-function refreshBookmarkButtons() {
-  document.querySelectorAll<HTMLButtonElement & { rowKey: string }>('.bookmark-toggle').forEach(button => {
-    const saved = bookmarks.some(item => item.rowKey === button.rowKey);
-    button.classList.toggle('active', saved);
-    button.setAttribute('aria-label', saved ? 'Remove bookmark' : 'Bookmark event');
-    button.title = saved ? 'Remove bookmark' : 'Bookmark event';
-  });
-}
-
-function bookmarkLabel(bookmark: Bookmark): string {
-  const row = bookmark.row;
-  return String(row.EventType || row.Message || row.User || row.Host || 'Bookmarked event');
-}
-
-function renderBookmarks() {
-  const list = $('#bookmark-list');
-  list.replaceChildren();
-  $('#bookmark-tab-count').textContent = String(bookmarks.length);
-  if (!bookmarks.length) {
-    list.innerHTML = '<span class="muted">No bookmarked events.</span>';
-    return;
-  }
-  bookmarks.forEach(bookmark => {
-    const container = document.createElement('div');
-    container.className = `${ui.compactRow} bookmark-row`;
-    const open = document.createElement('button');
-    open.className = ui.compactMain;
-    const title = document.createElement('strong');
-    title.textContent = bookmarkLabel(bookmark);
-    open.append(title);
-    const detailValue = bookmark.note || bookmark.row.TimeGenerated;
-    if (detailValue) {
-      const detail = document.createElement('small');
-      detail.textContent = String(detailValue);
-      open.append(detail);
-    }
-    open.addEventListener('click', () => showRaw(bookmark.row));
-    const actions = document.createElement('span');
-    actions.className = 'bookmark-actions';
-    const note = document.createElement('button');
-    note.className = ui.compactAction;
-    note.textContent = bookmark.note ? 'Edit note' : 'Add note';
-    note.addEventListener('click', () => {
-      activeBookmarkId = bookmark.id;
-      $<HTMLTextAreaElement>('#bookmark-note').value = bookmark.note || '';
-      $<HTMLDialogElement>('#bookmark-note-dialog').showModal();
-      $<HTMLTextAreaElement>('#bookmark-note').focus();
-    });
-    const remove = document.createElement('button');
-    remove.className = ui.compactAction;
-    remove.textContent = 'Remove';
-    remove.addEventListener('click', () => {
-      const previous = [...bookmarks];
-      bookmarks = bookmarks.filter(item => item.id !== bookmark.id);
-      const persisted = writeStored(storageKeys.bookmarks, bookmarks);
-      renderBookmarks();
-      refreshBookmarkButtons();
-      if (persisted) {
-        showToast('Bookmark removed', { label: 'Undo', handler: () => {
-          bookmarks = previous;
-          writeStored(storageKeys.bookmarks, bookmarks);
-          renderBookmarks();
-          refreshBookmarkButtons();
-        } });
-      }
-    });
-    actions.append(note, remove);
-    container.append(open, actions);
-    list.append(container);
-  });
+function createHuntEmpty(title: string, detail: string, action: string, handler: () => void): HTMLElement {
+  const empty = document.createElement('div');
+  empty.className = 'hunt-empty';
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  const copy = document.createElement('p');
+  copy.textContent = detail;
+  const button = document.createElement('button');
+  button.className = 'secondary';
+  button.type = 'button';
+  button.textContent = action;
+  button.addEventListener('click', handler);
+  empty.append(heading, copy, button);
+  return empty;
 }
 
 function replaceQuery(query: string): void {
@@ -795,12 +775,21 @@ function insertField(path: string): void {
 }
 
 function renderSidePanelView() {
-  const views = ['fields', 'questions', 'bookmarks'] as const;
+  const views = ['fields', 'questions', 'hunts'] as const;
   renderTabSelection(sidePanelView, views.map(name => ({
     name,
     tab: $<HTMLButtonElement>(`[data-side-view="${name}"]`),
     panel: $(`#${name}-pane`),
   })));
+}
+
+function showInvestigationPanel(view: 'questions' | 'hunts'): void {
+  sidePanelView = view;
+  renderSidePanelView();
+  mobileWorkspace.show('investigate');
+  window.requestAnimationFrame(() => {
+    $<HTMLButtonElement>(`[data-side-view="${view}"]`).focus();
+  });
 }
 
 function renderDataSources(): void {
@@ -810,7 +799,7 @@ function renderDataSources(): void {
   if (!dataSources.length) {
     const empty = document.createElement('span');
     empty.className = ui.muted;
-    empty.textContent = 'No data sources available.';
+    empty.textContent = 'No data sources are configured for this challenge.';
     list.append(empty);
     return;
   }
@@ -839,9 +828,188 @@ function renderDataSources(): void {
   });
 }
 
-function renderQuestions() {
+function setActiveQuestion(questionId: string): void {
+  if (!challengeState.questions.some(question => question.id === questionId)) return;
+  activeQuestionId = questionId;
+  renderActiveTask();
+  renderQuestions();
+}
+
+function updateActiveTaskCooldown(question: InvestigationQuestion): void {
+  const deadline = questionCooldowns.get(question.id) || 0;
+  const remaining = deadline - Date.now();
+  const input = $<HTMLInputElement>('#active-task-answer');
+  const submit = $<HTMLButtonElement>('#active-task-submit');
+  const status = $('#active-task-cooldown');
+  if (remaining <= 0) {
+    questionCooldowns.delete(question.id);
+    status.classList.add('hidden');
+    status.textContent = '';
+    input.disabled = questionSubmitting;
+    submit.disabled = questionSubmitting;
+    return;
+  }
+  const seconds = Math.max(1, Math.ceil(remaining / 1000));
+  status.textContent = `Wait ${seconds} second${seconds === 1 ? '' : 's'} before trying again.`;
+  status.classList.remove('hidden');
+  input.disabled = false;
+  submit.disabled = true;
+}
+
+function renderActiveTask(): void {
   questionCooldownTimers.forEach(timer => window.clearInterval(timer));
   questionCooldownTimers.clear();
+  const bar = $('#active-task-bar');
+  const progress = $('#active-task-progress');
+  const title = $('#active-task-title');
+  const prompt = $('#active-task-prompt');
+  const form = $('#active-task-form');
+  const input = $<HTMLInputElement>('#active-task-answer');
+  const submit = $<HTMLButtonElement>('#active-task-submit');
+  const resolution = $('#active-task-resolution');
+  const answerValue = $<HTMLInputElement>('#active-task-answer-value');
+  const next = $<HTMLButtonElement>('#active-task-next');
+  const feedback = $('#active-task-feedback');
+  bar.setAttribute('aria-busy', String(!questionsLoaded));
+  form.classList.add('hidden');
+  resolution.classList.add('hidden');
+  feedback.classList.add('hidden');
+  $('#active-task-cooldown').classList.add('hidden');
+
+  if (!questionsLoaded) return;
+  if (!challengeState.totalQuestions) {
+    progress.textContent = 'No challenge tasks';
+    title.textContent = 'Explore the telemetry';
+    prompt.textContent = 'Run queries and inspect events. There is no task to answer for this challenge.';
+    return;
+  }
+
+  if (!activeQuestionId || !challengeState.questions.some(question => question.id === activeQuestionId)) {
+    activeQuestionId = challengeState.questions.find(question => !question.solved)?.id
+      || challengeState.questions[0]?.id
+      || null;
+  }
+  const question = activeQuestion();
+  if (!question) return;
+  const questionIndex = challengeState.questions.findIndex(candidate => candidate.id === question.id);
+  progress.textContent = `Task ${questionIndex + 1} of ${challengeState.totalQuestions} · ${challengeState.solvedQuestions} solved`;
+  title.textContent = challengeState.completed ? 'Challenge complete' : question.title;
+  prompt.textContent = challengeState.completed
+    ? 'Every task is solved. Copy the flag and submit it to the CTF platform.'
+    : question.prompt;
+  if (!lastResult) {
+    $('#empty-results-title').textContent = `Run a query for “${question.title}”`;
+    $('#empty-results-detail').textContent = 'Start with the prepared query, then use Fields to add the evidence you need. Press Ctrl/Cmd+Enter to run.';
+    const emptyAction = $<HTMLButtonElement>('#empty-results-action');
+    emptyAction.textContent = 'Run current query';
+    emptyAction.dataset.action = 'run';
+  }
+
+  if (challengeState.completed && challengeState.flag) {
+    answerValue.value = challengeState.flag;
+    answerValue.setAttribute('aria-label', `Unlocked flag: ${challengeState.flag}`);
+    answerValue.setAttribute('title', challengeState.flag);
+    next.textContent = 'Copy flag';
+    next.dataset.action = 'copy-flag';
+    resolution.classList.remove('hidden');
+    return;
+  }
+
+  if (question.solved && question.answer) {
+    answerValue.value = question.answer;
+    answerValue.setAttribute('aria-label', `Correct answer: ${question.answer}`);
+    answerValue.removeAttribute('title');
+    const nextQuestion = challengeState.questions.find(candidate => !candidate.solved);
+    next.textContent = nextQuestion ? 'Next task' : 'View tasks';
+    next.dataset.action = nextQuestion ? 'next-task' : 'all-tasks';
+    next.dataset.questionId = nextQuestion?.id || '';
+    resolution.classList.remove('hidden');
+    return;
+  }
+
+  input.value = questionDrafts.get(question.id) || '';
+  input.setAttribute('aria-label', `Answer for ${question.title}`);
+  input.dataset.questionId = question.id;
+  submit.textContent = questionSubmitting ? 'Checking answer' : 'Check answer';
+  form.classList.remove('hidden');
+  const feedbackMessage = questionFeedback.get(question.id);
+  if (feedbackMessage) {
+    feedback.textContent = feedbackMessage;
+    feedback.classList.remove('hidden');
+  }
+  updateActiveTaskCooldown(question);
+  const deadline = questionCooldowns.get(question.id) || 0;
+  if (deadline > Date.now()) {
+    const timer = window.setInterval(() => {
+      if (!form.isConnected || activeQuestionId !== question.id) {
+        window.clearInterval(timer);
+        questionCooldownTimers.delete(question.id);
+        return;
+      }
+      updateActiveTaskCooldown(question);
+      if ((questionCooldowns.get(question.id) || 0) <= Date.now()) {
+        window.clearInterval(timer);
+        questionCooldownTimers.delete(question.id);
+      }
+    }, 250);
+    questionCooldownTimers.set(question.id, timer);
+  }
+}
+
+async function submitActiveQuestion(): Promise<void> {
+  const question = activeQuestion();
+  const input = $<HTMLInputElement>('#active-task-answer');
+  if (!question || questionSubmitting) return;
+  const answer = input.value.trim();
+  if (!answer) return;
+  let correct = false;
+  questionSubmitting = true;
+  questionRequestGeneration++;
+  questionDrafts.set(question.id, input.value);
+  persistQuestionDrafts();
+  renderActiveTask();
+  try {
+    const result = await request<AnswerResponse>(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    });
+    questionRequestGeneration++;
+    challengeState = result.state;
+    correct = result.correct;
+    if (correct) {
+      questionFeedback.delete(question.id);
+      questionDrafts.delete(question.id);
+      persistQuestionDrafts();
+      questionCooldowns.delete(question.id);
+      const message = result.alreadySolved
+        ? 'Answer saved'
+        : challengeState.completed ? 'Challenge complete. Flag unlocked.' : 'Task solved';
+      showToast(message);
+    } else {
+      questionFeedback.set(question.id, 'That answer does not match. Check the requested format and your evidence, then try again.');
+    }
+  } catch (error) {
+    questionRequestGeneration++;
+    const queryError = asQueryError(error);
+    const retry = Number(queryError.retryAfterMs);
+    if (retry > 0) questionCooldowns.set(question.id, Date.now() + retry);
+    const message = retry > 0
+      ? 'Too many attempts. Your answer was not submitted; wait for the retry timer, then try again.'
+      : (queryError.error || queryError.message || 'The answer could not be submitted. Your draft is saved in this browser; try again.');
+    questionFeedback.set(question.id, message);
+  } finally {
+    questionSubmitting = false;
+    renderQuestions();
+    renderActiveTask();
+    window.requestAnimationFrame(() => {
+      if (correct) $<HTMLButtonElement>('#active-task-next').focus();
+      else $<HTMLInputElement>('#active-task-answer').focus();
+    });
+  }
+}
+
+function renderQuestions() {
   const list = $('#question-list');
   list.replaceChildren();
   const solved = challengeState.solvedQuestions || 0;
@@ -850,188 +1018,44 @@ function renderQuestions() {
   if (!total) {
     const empty = document.createElement('span');
     empty.className = ui.muted;
-    empty.textContent = 'No investigation tasks.';
+    empty.textContent = 'No tasks are configured for this challenge.';
     list.append(empty);
     return;
-  }
-
-  if (challengeState.completed && challengeState.flag) {
-    const flagValue = challengeState.flag;
-    const completion = document.createElement('div');
-    completion.className = 'completion-card';
-    const title = document.createElement('strong');
-    title.textContent = 'Case closed';
-    const detail = document.createElement('p');
-    detail.textContent = 'Every task is solved. Submit this flag to the CTF platform.';
-    const flagRow = document.createElement('div');
-    flagRow.className = 'flag-value';
-    const flag = document.createElement('code');
-    flag.textContent = flagValue;
-    flag.title = flagValue;
-    const copy = document.createElement('button');
-    copy.className = 'secondary';
-    copy.textContent = 'Copy';
-    copy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(flagValue);
-        showToast('Flag copied');
-      } catch {
-        showToast('Could not copy the flag');
-      }
-    });
-    flagRow.append(flag, copy);
-    completion.append(title, detail, flagRow);
-    list.append(completion);
   }
 
   challengeState.questions.forEach(question => {
     const card = document.createElement('article');
     card.className = ui.questionCard;
     card.classList.toggle('solved', question.solved);
-    const heading = document.createElement('div');
+    card.classList.toggle('active', question.id === activeQuestionId);
+    const select = document.createElement('button');
+    select.className = 'question-select';
+    select.type = 'button';
+    select.setAttribute('aria-current', question.id === activeQuestionId ? 'true' : 'false');
+    const heading = document.createElement('span');
     heading.className = ui.questionHead;
     const title = document.createElement('strong');
     title.textContent = question.title;
     heading.append(title);
-    if (question.solved) {
-      const state = document.createElement('span');
-      state.className = 'question-state';
-      state.textContent = 'Solved';
-      heading.append(state);
-    }
-    const prompt = document.createElement('p');
+    const state = document.createElement('span');
+    state.className = 'question-state';
+    state.textContent = question.solved ? 'Solved' : question.id === activeQuestionId ? 'Active' : 'Open';
+    heading.append(state);
+    const prompt = document.createElement('span');
     prompt.className = ui.questionPrompt;
     prompt.textContent = question.prompt;
-    card.append(heading, prompt);
+    select.append(heading, prompt);
+    select.addEventListener('click', () => setActiveQuestion(question.id));
+    card.append(select);
 
     if (question.solved && question.answer) {
       const answer = document.createElement('output');
-      answer.className = 'mt-3 block overflow-x-auto break-all whitespace-pre-wrap rounded-sm border border-[var(--rule)] bg-[var(--ink-000)] px-3 py-2 font-mono text-xs text-[var(--paper)]';
-      answer.setAttribute('aria-label', 'Accepted answer');
-      answer.dataset.questionAnswer = question.id;
-      answer.tabIndex = -1;
+      answer.className = 'question-answer';
+      answer.setAttribute('aria-label', 'Correct answer');
       answer.textContent = question.answer;
       card.append(answer);
     }
-
-    let submitButton: HTMLButtonElement | undefined;
-    if (!question.solved || !question.answer) {
-      const form = document.createElement('form');
-      form.className = ui.questionForm;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.name = 'answer';
-      input.maxLength = 512;
-      input.autocomplete = 'off';
-      input.required = true;
-      input.placeholder = 'Answer';
-      input.value = questionDrafts.get(question.id) || '';
-      input.setAttribute('aria-label', `Answer for ${question.title}`);
-      input.dataset.questionId = question.id;
-      input.addEventListener('input', () => {
-        questionDrafts.set(question.id, input.value);
-        questionFeedback.delete(question.id);
-        card.querySelector('.question-feedback')?.remove();
-      });
-      const submit = document.createElement('button');
-      submitButton = submit;
-      submit.className = 'primary';
-      submit.type = 'submit';
-      submit.textContent = 'Check answer';
-      const cooldown = (questionCooldowns.get(question.id) || 0) - Date.now();
-      if (cooldown > 0) {
-        submit.disabled = true;
-        submit.textContent = `Try again in ${Math.ceil(cooldown / 1000)} s`;
-      }
-      form.append(input, submit);
-      form.addEventListener('submit', async event => {
-        event.preventDefault();
-        if (questionSubmitting) return;
-        const answer = input.value.trim();
-        if (!answer) return;
-        questionSubmitting = true;
-        questionRequestGeneration++;
-        questionDrafts.set(question.id, input.value);
-        input.disabled = true;
-        submit.disabled = true;
-        submit.textContent = 'Checking';
-        try {
-          const result = await request<AnswerResponse>(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ answer }),
-          });
-          questionRequestGeneration++;
-          challengeState = result.state;
-          if (!result.correct) questionFeedback.set(question.id, 'No match.');
-          if (result.correct) {
-            questionDrafts.delete(question.id);
-            questionCooldowns.delete(question.id);
-          }
-          renderQuestions();
-          if (!result.correct) window.requestAnimationFrame(() => {
-            document.querySelector<HTMLInputElement>(`input[data-question-id="${CSS.escape(question.id)}"]`)?.focus();
-          });
-          if (result.correct) {
-            const message = result.alreadySolved
-              ? 'Answer saved'
-              : challengeState.completed ? 'Case closed — flag unlocked' : 'Task solved';
-            showToast(message);
-            window.requestAnimationFrame(() => {
-              document.querySelector<HTMLOutputElement>(`output[data-question-answer="${CSS.escape(question.id)}"]`)?.focus();
-            });
-          }
-        } catch (error) {
-          questionRequestGeneration++;
-          const queryError = asQueryError(error);
-          const retry = Number(queryError.retryAfterMs);
-          if (retry > 0) questionCooldowns.set(question.id, Date.now() + retry);
-          const message = retry > 0
-            ? `Too many attempts. Try again in ${Math.max(1, Math.ceil(retry / 1000))} seconds; your answer was not submitted.`
-            : (queryError.error || queryError.message || 'Could not submit the answer.');
-          questionFeedback.set(question.id, message);
-          renderQuestions();
-          window.requestAnimationFrame(() => {
-            document.querySelector<HTMLInputElement>(`input[data-question-id="${CSS.escape(question.id)}"]`)?.focus();
-          });
-        } finally {
-          questionSubmitting = false;
-        }
-      });
-      card.append(form);
-    }
-    const feedbackMessage = questionFeedback.get(question.id);
-    if (feedbackMessage && (!question.solved || !question.answer)) {
-      const feedback = document.createElement('div');
-      feedback.className = 'question-feedback incorrect';
-      feedback.setAttribute('role', 'status');
-      feedback.textContent = feedbackMessage;
-      card.append(feedback);
-    }
     list.append(card);
-    const deadline = questionCooldowns.get(question.id) || 0;
-    if (submitButton && deadline > Date.now()) {
-      const timer = window.setInterval(() => {
-        if (!card.isConnected || !submitButton) {
-          window.clearInterval(timer);
-          questionCooldownTimers.delete(question.id);
-          return;
-        }
-        const remaining = deadline - Date.now();
-        if (remaining > 0) {
-          submitButton.textContent = `Try again in ${Math.ceil(remaining / 1000)} s`;
-          return;
-        }
-        window.clearInterval(timer);
-        questionCooldownTimers.delete(question.id);
-        questionCooldowns.delete(question.id);
-        questionFeedback.delete(question.id);
-        submitButton.disabled = false;
-        submitButton.textContent = 'Check answer';
-        card.querySelector('.question-feedback')?.remove();
-      }, 250);
-      questionCooldownTimers.set(question.id, timer);
-    }
   });
 }
 
@@ -1043,14 +1067,36 @@ function renderLoadFailure(target: HTMLElement, message: string, retry: () => vo
   const button = document.createElement('button');
   button.className = 'secondary';
   button.type = 'button';
-  button.textContent = 'Retry';
+  button.textContent = 'Try again';
   button.addEventListener('click', retry);
   container.append(detail, button);
   target.replaceChildren(container);
 }
 
+function renderActiveTaskFailure(): void {
+  $('#active-task-bar').setAttribute('aria-busy', 'false');
+  $('#active-task-progress').textContent = 'Tasks unavailable';
+  $('#active-task-title').textContent = 'Could not load investigation tasks';
+  $('#active-task-prompt').textContent = 'The query editor is still available. Try loading the tasks again.';
+  $('#active-task-form').classList.add('hidden');
+  $('#active-task-feedback').classList.add('hidden');
+  $<HTMLInputElement>('#active-task-answer-value').value = '';
+  const resolution = $('#active-task-resolution');
+  const retry = $<HTMLButtonElement>('#active-task-next');
+  retry.textContent = 'Retry tasks';
+  retry.dataset.action = 'retry-tasks';
+  resolution.classList.remove('hidden');
+}
+
 async function loadQuestions(backgroundRefresh = false) {
-  const initialLoad = !questionsLoaded;
+  if (!backgroundRefresh) {
+    $('#active-task-bar').setAttribute('aria-busy', 'true');
+    $('#active-task-progress').textContent = 'Loading investigation tasks';
+    $('#active-task-title').textContent = 'Preparing workspace';
+    $('#active-task-prompt').textContent = 'Loading the active task. You can query the prepared telemetry while this completes.';
+    $('#active-task-form').classList.add('hidden');
+    $('#active-task-resolution').classList.add('hidden');
+  }
   const generation = ++questionRequestGeneration;
   try {
     const nextState = await request<ChallengeState>('/api/questions');
@@ -1058,15 +1104,18 @@ async function loadQuestions(backgroundRefresh = false) {
     if (backgroundRefresh && JSON.stringify(nextState) === JSON.stringify(challengeState)) return;
     challengeState = nextState;
     questionsLoaded = true;
-    renderQuestions();
-    if (initialLoad && challengeState.totalQuestions > 0 && sidePanelView === 'fields') {
-      sidePanelView = 'questions';
-      renderSidePanelView();
+    if (!activeQuestionId || !challengeState.questions.some(question => question.id === activeQuestionId)) {
+      activeQuestionId = challengeState.questions.find(question => !question.solved)?.id
+        || challengeState.questions[0]?.id
+        || null;
     }
+    renderActiveTask();
+    renderQuestions();
   } catch {
     if (generation !== questionRequestGeneration) return;
     if (backgroundRefresh && questionsLoaded) return;
-    renderLoadFailure($('#question-list'), 'Tasks could not be loaded.', () => void loadQuestions());
+    renderLoadFailure($('#question-list'), 'Could not load tasks.', () => void loadQuestions());
+    renderActiveTaskFailure();
   }
 }
 
@@ -1087,7 +1136,7 @@ function renderFields(filter = ''): void {
   if (!groups.length) {
     const empty = document.createElement('span');
     empty.className = ui.muted;
-    empty.textContent = 'No matching fields.';
+    empty.textContent = normalized ? `No fields match “${filter.trim()}”.` : 'No fields are available for this data source.';
     list.append(empty);
     return;
   }
@@ -1145,8 +1194,8 @@ async function loadFields() {
     renderDataSources();
     renderFields();
   } catch {
-    renderLoadFailure($('#source-list'), 'Data sources could not be loaded.', () => void loadFields());
-    renderLoadFailure($('#field-list'), 'Fields could not be loaded.', () => void loadFields());
+    renderLoadFailure($('#source-list'), 'Could not load data sources.', () => void loadFields());
+    renderLoadFailure($('#field-list'), 'Could not load fields.', () => void loadFields());
   }
 }
 
@@ -1162,18 +1211,6 @@ $('#save-query-form').addEventListener('submit', event => {
   $<HTMLDialogElement>('#save-query-dialog').close();
 });
 
-$('#bookmark-note-form').addEventListener('submit', event => {
-  event.preventDefault();
-  const bookmark = bookmarks.find(item => item.id === activeBookmarkId);
-  if (bookmark) {
-    bookmark.note = $<HTMLTextAreaElement>('#bookmark-note').value.trim();
-    writeStored(storageKeys.bookmarks, bookmarks);
-    renderBookmarks();
-  }
-  activeBookmarkId = null;
-  $<HTMLDialogElement>('#bookmark-note-dialog').close();
-});
-
 $('#confirm-form').addEventListener('submit', event => {
   event.preventDefault();
   const previous = [...queryHistory];
@@ -1182,7 +1219,7 @@ $('#confirm-form').addEventListener('submit', event => {
   renderQueryLibrary();
   $<HTMLDialogElement>('#confirm-dialog').close();
   if (persisted) {
-    showToast('Query history cleared', { label: 'Undo', handler: () => {
+    showToast('Recent hunts cleared', { label: 'Undo', handler: () => {
       queryHistory = previous;
       writeStored(storageKeys.history, queryHistory);
       renderQueryLibrary();
@@ -1205,6 +1242,53 @@ document.addEventListener('keydown', event => {
   runQuery();
 });
 $('#run-query').addEventListener('click', runQuery);
+$('#active-task-form').addEventListener('submit', event => {
+  event.preventDefault();
+  void submitActiveQuestion();
+});
+$('#active-task-answer').addEventListener('input', event => {
+  const question = activeQuestion();
+  if (!question || !(event.target instanceof HTMLInputElement)) return;
+  questionDrafts.set(question.id, event.target.value);
+  persistQuestionDrafts();
+  questionFeedback.delete(question.id);
+  $('#active-task-feedback').classList.add('hidden');
+});
+$('#show-all-tasks').addEventListener('click', () => showInvestigationPanel('questions'));
+$('#active-task-next').addEventListener('click', async event => {
+  if (!(event.currentTarget instanceof HTMLButtonElement)) return;
+  const action = event.currentTarget.dataset.action;
+  if (action === 'next-task' && event.currentTarget.dataset.questionId) {
+    setActiveQuestion(event.currentTarget.dataset.questionId);
+    $<HTMLInputElement>('#active-task-answer').focus();
+  }
+  if (action === 'all-tasks') showInvestigationPanel('questions');
+  if (action === 'retry-tasks') void loadQuestions();
+  if (action === 'copy-flag' && challengeState.flag) {
+    try {
+      await navigator.clipboard.writeText(challengeState.flag);
+      showToast('Flag copied');
+    } catch {
+      showToast('Could not copy the flag. Select it and copy manually.');
+    }
+  }
+});
+$('#filter-result-value').addEventListener('click', () => {
+  if (selectedResultValue) pivotOnValue(selectedResultValue.column, selectedResultValue.value, false);
+});
+$('#exclude-result-value').addEventListener('click', () => {
+  if (selectedResultValue) pivotOnValue(selectedResultValue.column, selectedResultValue.value, true);
+});
+$('#copy-result-value').addEventListener('click', () => void copySelectedResultValue());
+$('#empty-results-action').addEventListener('click', event => {
+  const button = event.currentTarget as HTMLButtonElement;
+  if (button.dataset.action === 'edit') {
+    mobileWorkspace.show('query');
+    editor.focus();
+    return;
+  }
+  void runQuery();
+});
 $('#result-body').addEventListener('keydown', event => {
   if (!(event.target instanceof HTMLButtonElement) || !event.target.classList.contains('result-row-action')) return;
   const row = event.target.closest('tr');
@@ -1233,14 +1317,6 @@ $('#share-query').addEventListener('click', shareCurrentQuery);
 const vimToggle = $<HTMLButtonElement>('#vim-toggle');
 vimToggle.addEventListener('click', () => queryEditor.toggleVim(vimToggle));
 $('#export-results').addEventListener('click', exportResults);
-$('#results-view').addEventListener('click', () => {
-  resultsPanelView = 'results';
-  renderResultsPanelView();
-});
-$('#queries-view').addEventListener('click', () => {
-  resultsPanelView = 'queries';
-  renderResultsPanelView();
-});
 $('#saved-view').addEventListener('click', () => {
   queryLibraryView = 'saved';
   renderQueryLibrary();
@@ -1257,23 +1333,20 @@ fieldSearch.addEventListener('input', () => renderFields(fieldSearch.value));
 document.querySelectorAll<HTMLButtonElement>('.side-tab').forEach(button => {
   button.addEventListener('click', () => {
     const view = button.dataset.sideView;
-    if (view !== 'fields' && view !== 'questions' && view !== 'bookmarks') return;
+    if (view !== 'fields' && view !== 'questions' && view !== 'hunts') return;
     sidePanelView = view;
     renderSidePanelView();
   });
 });
-enableTabKeyboardNavigation($('.results-view-tabs'), '.results-view-tab');
 enableTabKeyboardNavigation($('.query-view-tabs'), '.query-view-tab');
 enableTabKeyboardNavigation($('.side-tabs'), '.side-tab');
 
 renderQueryLibrary();
-renderBookmarks();
-renderResultsPanelView();
+renderActiveTask();
 renderSidePanelView();
 loadFields();
 loadQuestions();
 scheduleQueryValidation(editor.state.doc.toString());
-if (!onboardingSeen) onboardingDialog.showModal();
 let timelineResizeTimer: number | undefined;
 window.addEventListener('resize', () => {
   window.clearTimeout(timelineResizeTimer);
@@ -1282,6 +1355,6 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 window.setInterval(() => {
-  if (document.hidden || document.activeElement?.matches('.question-form input')) return;
+  if (document.hidden || document.activeElement?.matches('#active-task-answer')) return;
   void loadQuestions(true);
 }, 15_000);

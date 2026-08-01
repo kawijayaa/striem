@@ -5,106 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Striem</title>
-  <link rel="preload" href="/fonts/instrument-sans-var.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
+  <!--
+    THESIS: A Sentinel-native KQL hunting workbench that refuses decorative SOC cockpit styling and disconnected card stacks.
+    OWN-WORLD: Cloud-gray canvas, white work planes, Defender blue commands, compact Segoe UI, square controls, and one-pixel neutral dividers.
+    STORY: Read the task hypothesis, inspect schema, write and run KQL, examine events, preserve evidence, and answer without leaving the hunting surface.
+    FIRST VIEWPORT: Dark enterprise header above a task strip; persistent schema rail at left; query command bar, editor, and results fill the primary plane with Run first.
+    FORM: User-pinned category canon, Microsoft Sentinel Advanced Hunting; seed key canon-sentinel-kql-2026.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
 
   <div class="app-shell">
     <div class="workspace-shell">
 
-  <nav class="sticky top-0 z-10 flex h-11 items-center gap-3 border-b border-[var(--rule)] bg-[var(--ink-050)] px-3 sm:px-4" aria-label="Application">
-    <strong class="shrink-0 font-mono text-sm text-[var(--paper)]">Striem</strong>
-    <span class="text-[var(--paper-4)]" aria-hidden="true">/</span>
-    <span id="challenge-name" class="min-w-0 flex-1 truncate text-sm text-[var(--paper-2)]">Investigation workspace</span>
-    <button id="show-onboarding" class="secondary shrink-0" type="button" aria-haspopup="dialog" aria-controls="onboarding-dialog">Help</button>
+  <nav class="app-nav" aria-label="Application">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 2.25 16 4.5v4.7c0 3.8-2.35 6.95-6 8.55-3.65-1.6-6-4.75-6-8.55V4.5z"/><path d="m7 10 2 2 4-4"/></svg></span>
+    <strong class="brand-name">Striem</strong>
+    <span class="nav-divider" aria-hidden="true"></span>
+    <span class="surface-name">Advanced hunting</span>
+    <span id="challenge-name" class="challenge-name">Investigation workspace</span>
   </nav>
 
-  <nav class="mobile-workspace-nav tabs" aria-label="Workspace views">
-    <button class="tab mobile-workspace-tab selected" data-mobile-view="query" aria-pressed="true">Query</button>
-    <button class="tab mobile-workspace-tab" data-mobile-view="results" aria-pressed="false">Results <span class="count" id="mobile-result-count">0</span></button>
-    <button class="tab mobile-workspace-tab" data-mobile-view="investigate" aria-pressed="false">Investigate</button>
-  </nav>
+  <div class="workspace-context-stack">
+    <section id="active-task-bar" class="active-task-bar" aria-labelledby="active-task-title" aria-busy="true">
+      <div class="active-task-copy">
+        <span id="active-task-progress" class="active-task-progress">Loading investigation tasks</span>
+        <h2 id="active-task-title">Preparing workspace</h2>
+        <p id="active-task-prompt">Loading the active task. You can query the prepared telemetry while this completes.</p>
+      </div>
+      <div class="active-task-links">
+        <button id="show-all-tasks" class="secondary" type="button">View all tasks</button>
+      </div>
+      <form id="active-task-form" class="active-task-form hidden">
+        <label class="sr-only" for="active-task-answer">Answer for the active task</label>
+        <input id="active-task-answer" name="answer" type="text" maxlength="512" autocomplete="off" placeholder="Enter answer" required>
+        <button id="active-task-submit" class="primary" type="submit">Check answer</button>
+        <span id="active-task-cooldown" class="active-task-cooldown hidden" aria-live="polite"></span>
+      </form>
+      <div id="active-task-resolution" class="active-task-resolution hidden">
+        <input id="active-task-answer-value" type="text" readonly aria-label="Correct answer">
+        <button id="active-task-next" class="secondary" type="button">Next task</button>
+      </div>
+      <p id="active-task-feedback" class="active-task-feedback hidden" role="alert"></p>
+    </section>
+
+    <nav class="mobile-workspace-nav tabs" role="tablist" aria-label="Workspace views">
+      <button id="mobile-query-tab" class="tab mobile-workspace-tab selected" data-mobile-view="query" role="tab" aria-selected="true" aria-controls="query-panel" tabindex="0">Query</button>
+      <button id="mobile-results-tab" class="tab mobile-workspace-tab" data-mobile-view="results" role="tab" aria-selected="false" aria-controls="results-panel" tabindex="-1">Results <span class="count" id="mobile-result-count">0</span></button>
+      <button id="mobile-investigate-tab" class="tab mobile-workspace-tab" data-mobile-view="investigate" role="tab" aria-selected="false" aria-controls="investigate-panel" tabindex="-1">Investigate</button>
+    </nav>
+  </div>
 
   <main class="console-layout">
 
-    <section class="panel query-panel" data-workspace-view="query" aria-label="Query editor">
-      <div class="panel-toolbar">
-        <div class="toolbar-actions">
-          <button id="save-query" class="secondary" type="button">Save</button>
-          <button id="share-query" class="secondary" type="button">Share</button>
-          <button id="vim-toggle" class="secondary vim-toggle" type="button" title="Toggle Vim keybindings" aria-pressed="false">Vim: Off</button>
-          <button id="run-query" class="primary" type="button">
-            <span id="run-label">Run query</span>
-          </button>
-        </div>
-      </div>
-
-      <div id="query" class="editor-shell" aria-label="KQL query editor"></div>
-      <div id="query-error" class="error hidden" role="alert"></div>
-
-      <div class="query-footer">
-        <span id="query-stats" role="status" aria-live="polite">Ready to run</span>
-      </div>
-    </section>
-
-    <section class="panel results-panel" data-workspace-view="results">
-      <div class="panel-toolbar results-toolbar">
-        <div class="tabs results-view-tabs" role="tablist" aria-label="Results view">
-          <button id="results-view" class="tab results-view-tab selected" role="tab" aria-selected="true" aria-controls="results-content" tabindex="0">Results</button>
-          <button id="queries-view" class="tab results-view-tab" role="tab" aria-selected="false" aria-controls="queries-pane" tabindex="-1">Query library</button>
-        </div>
-        <div class="results-actions">
-          <button id="export-results" class="secondary" type="button" disabled>CSV</button>
-        </div>
-      </div>
-
-      <div id="results-content" class="results-content" role="tabpanel" aria-labelledby="results-view" tabindex="0">
-        <div id="result-timeline" class="timeline hidden">
-          <div class="timeline-heading">
-            <strong>Events over time</strong>
-          </div>
-          <div id="timeline-bars" class="timeline-bars" role="group" aria-label="Event timeline. Select a bucket to add a time filter."></div>
-          <div class="timeline-range">
-            <span id="timeline-start"></span>
-            <span id="timeline-end"></span>
-          </div>
-        </div>
-
-        <div id="empty-results" class="empty">
-          <strong id="empty-results-title">No query executed</strong>
-        </div>
-
-        <div id="mobile-result-list" class="mobile-result-list hidden" aria-label="Query results"></div>
-
-        <div class="table-wrap hidden" id="table-wrap">
-          <table>
-            <caption class="sr-only">Query results. Use arrow keys to move between row actions.</caption>
-            <thead id="result-head"></thead>
-            <tbody id="result-body"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="queries-pane" class="queries-pane hidden" role="tabpanel" aria-labelledby="queries-view" tabindex="0">
-        <div class="queries-pane-head">
-          <div class="tabs query-view-tabs" role="tablist" aria-label="Query library view">
-            <button id="saved-view" class="tab query-view-tab selected" role="tab" aria-selected="true" aria-controls="saved-query-list" tabindex="0">Saved <span class="count" id="saved-count">0</span></button>
-            <button id="history-view" class="tab query-view-tab" role="tab" aria-selected="false" aria-controls="query-history" tabindex="-1">Recent <span class="count" id="history-count">0</span></button>
-          </div>
-          <button id="clear-history" class="text-action hidden" type="button">Clear</button>
-        </div>
-        <div id="saved-query-list" class="compact-list" role="tabpanel" aria-labelledby="saved-view"></div>
-        <div id="query-history" class="compact-list hidden" role="tabpanel" aria-labelledby="history-view"></div>
-      </div>
-    </section>
-
-    <aside class="side-panel" data-workspace-view="investigate">
+    <aside id="investigate-panel" class="side-panel" data-workspace-view="investigate" aria-label="Investigation resources">
       <div class="tabs side-tabs" role="tablist" aria-label="Investigation resources">
         <button id="fields-tab" class="tab side-tab selected" data-side-view="fields" role="tab" aria-selected="true" aria-controls="fields-pane" tabindex="0">Fields</button>
         <button id="questions-tab" class="tab side-tab" data-side-view="questions" role="tab" aria-selected="false" aria-controls="questions-pane" tabindex="-1">Tasks <span class="count" id="question-tab-count">0/0</span></button>
-        <button id="bookmarks-tab" class="tab side-tab" data-side-view="bookmarks" role="tab" aria-selected="false" aria-controls="bookmarks-pane" tabindex="-1">Bookmarks <span class="count" id="bookmark-tab-count">0</span></button>
+        <button id="hunts-tab" class="tab side-tab" data-side-view="hunts" role="tab" aria-selected="false" aria-controls="hunts-pane" tabindex="-1">Hunts</button>
       </div>
 
       <section id="fields-pane" class="side-section side-workspace field-section" role="tabpanel" aria-labelledby="fields-tab">
@@ -124,11 +85,96 @@
         <div id="question-list" class="question-list"><span class="muted">Loading tasks…</span></div>
       </section>
 
-      <section id="bookmarks-pane" class="side-section side-workspace bookmark-section hidden" role="tabpanel" aria-labelledby="bookmarks-tab">
-        <div id="bookmark-list" class="compact-list"></div>
+      <section id="hunts-pane" class="side-section side-workspace hunts-section hidden" role="tabpanel" aria-labelledby="hunts-tab">
+        <div class="queries-pane-head">
+          <div class="tabs query-view-tabs" role="tablist" aria-label="Hunts view">
+            <button id="saved-view" class="tab query-view-tab selected" role="tab" aria-selected="true" aria-controls="saved-query-list" tabindex="0">Saved <span class="count" id="saved-count">0</span></button>
+            <button id="history-view" class="tab query-view-tab" role="tab" aria-selected="false" aria-controls="query-history" tabindex="-1">Recent <span class="count" id="history-count">0</span></button>
+          </div>
+          <button id="clear-history" class="text-action hidden" type="button">Clear recent</button>
+        </div>
+        <div id="saved-query-list" class="compact-list" role="tabpanel" aria-labelledby="saved-view"></div>
+        <div id="query-history" class="compact-list hidden" role="tabpanel" aria-labelledby="history-view"></div>
       </section>
-
     </aside>
+
+    <section id="query-panel" class="panel query-panel" data-workspace-view="query" aria-label="Query editor">
+      <div class="panel-toolbar">
+        <div class="query-toolbar-title"><strong>Query</strong><span>KQL</span></div>
+        <div class="toolbar-actions">
+          <button id="run-query" class="primary" type="button">
+            <span id="run-label">Run query</span>
+          </button>
+          <button id="save-query" class="secondary" type="button">Save hunt</button>
+          <button id="share-query" class="secondary" type="button">Copy link</button>
+          <button id="vim-toggle" class="secondary vim-toggle" type="button" title="Turn Vim keybindings on or off" aria-pressed="false">Vim: Off</button>
+        </div>
+      </div>
+
+      <div id="query" class="editor-shell" aria-label="KQL query editor"></div>
+      <div id="query-error" class="error hidden" role="alert"></div>
+
+      <div class="query-footer">
+        <span id="query-stats" role="status" aria-live="polite">Ready to run</span>
+      </div>
+    </section>
+
+    <section id="results-panel" class="panel results-panel" data-workspace-view="results" aria-label="Query results">
+      <div class="panel-toolbar results-toolbar">
+        <strong class="results-title">Results</strong>
+        <div class="results-actions">
+          <button id="export-results" class="secondary" type="button" disabled>Export CSV</button>
+        </div>
+      </div>
+
+      <div id="results-content" class="results-content" tabindex="0">
+        <div id="result-timeline" class="timeline hidden">
+          <div class="timeline-heading">
+            <strong>Events over time</strong>
+          </div>
+          <div id="timeline-bars" class="timeline-bars" role="group" aria-label="Event timeline. Select a bucket to add a time filter."></div>
+          <div class="timeline-range">
+            <span id="timeline-start"></span>
+            <span id="timeline-end"></span>
+          </div>
+        </div>
+
+        <div id="result-value-actions" class="result-value-actions hidden" role="toolbar" aria-label="Selected result value actions">
+          <span id="result-value-label" aria-live="polite">Select a result value</span>
+          <div class="result-value-buttons">
+            <button id="filter-result-value" class="secondary" type="button">Filter to value</button>
+            <button id="exclude-result-value" class="secondary" type="button">Exclude value</button>
+            <button id="copy-result-value" class="secondary" type="button">Copy value</button>
+          </div>
+        </div>
+
+        <div id="empty-results" class="empty">
+          <svg class="empty-signal" viewBox="0 0 96 72" aria-hidden="true">
+            <path d="M8 17h25M8 28h17M8 39h29"/>
+            <path d="m43 20 10 8-10 8"/>
+            <rect x="58" y="11" width="30" height="42" rx="2"/>
+            <path d="M65 21h16M65 29h11M65 37h14M65 45h8"/>
+            <path d="M31 59h34"/>
+          </svg>
+          <strong id="empty-results-title">Run a query to begin</strong>
+          <p id="empty-results-detail">Use the prepared query or choose fields from the investigation dock.</p>
+          <div class="empty-actions">
+            <button id="empty-results-action" class="primary" type="button">Run current query</button>
+          </div>
+        </div>
+
+        <div id="mobile-result-list" class="mobile-result-list hidden" aria-label="Query results"></div>
+
+        <div class="table-wrap hidden" id="table-wrap">
+          <table>
+            <caption class="sr-only">Query results. Use arrow keys to move between row actions or result values. Press Enter on a value to filter and Shift+Enter to exclude it.</caption>
+            <thead id="result-head"></thead>
+            <tbody id="result-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
   </main>
 
   <button id="mobile-run-query" class="primary mobile-run-query" type="button" aria-label="Run query">
@@ -137,32 +183,10 @@
     </div>
   </div>
 
-  <dialog id="onboarding-dialog" class="w-[min(34rem,calc(100vw-2rem))]" aria-labelledby="onboarding-title" aria-describedby="onboarding-summary">
-    <form method="dialog" class="m-0">
-      <div class="border-b border-[var(--rule)] bg-[var(--ink-150)] px-5 py-4">
-        <h2 id="onboarding-title" class="text-base font-semibold text-[var(--paper)]">Welcome to Striem</h2>
-      </div>
-      <div class="max-h-[min(60dvh,30rem)] overflow-y-auto px-5 py-4">
-        <p id="onboarding-summary" class="text-sm text-[var(--paper-2)]">Investigate events and complete the challenge tasks.</p>
-        <dl class="mt-4 grid gap-3 text-sm">
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Query</dt><dd class="m-0 text-[var(--paper-2)]">Write KQL and run it with Ctrl/Cmd+Enter.</dd></div>
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Results</dt><dd class="m-0 text-[var(--paper-2)]">Inspect events, filter by values, and export CSV.</dd></div>
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Sources</dt><dd class="m-0 text-[var(--paper-2)]">Choose from the available datasets and update the current query.</dd></div>
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Fields</dt><dd class="m-0 text-[var(--paper-2)]">Select a field to insert it into the query.</dd></div>
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Tasks</dt><dd class="m-0 text-[var(--paper-2)]">Answer prompts to unlock the challenge flag.</dd></div>
-          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt class="font-semibold text-[var(--paper)]">Bookmarks</dt><dd class="m-0 text-[var(--paper-2)]">Save events and notes in this browser.</dd></div>
-        </dl>
-      </div>
-      <div class="flex justify-end border-t border-[var(--rule)] bg-[var(--ink-050)] px-5 py-3">
-        <button class="primary" type="submit" autofocus>Continue</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="raw-dialog" class="event-dialog" aria-labelledby="raw-dialog-title">
     <div class="dialog-head">
       <h2 id="raw-dialog-title">Raw event</h2>
-      <button id="close-dialog" type="button" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
+      <button id="close-dialog" type="button" aria-label="Close raw event"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
     </div>
     <div class="dialog-toolbar">
       <label class="dialog-search">
@@ -178,34 +202,17 @@
   <dialog id="save-query-dialog" class="form-dialog" aria-labelledby="save-query-title">
     <form id="save-query-form">
       <div class="dialog-head">
-        <h2 id="save-query-title">Save query</h2>
-        <button type="button" class="dialog-close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
+        <h2 id="save-query-title">Save hunt</h2>
+        <button type="button" class="dialog-close" aria-label="Close save hunt dialog"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
       </div>
       <div class="dialog-form-body">
-        <label for="save-query-name">Name</label>
+        <label for="save-query-name">Hunt name</label>
         <input id="save-query-name" maxlength="80" required autocomplete="off">
-        <span class="field-help">Stored in this browser only.</span>
+        <span class="field-help">This hunt is saved only in this browser.</span>
       </div>
       <div class="dialog-actions">
         <button type="button" class="secondary dialog-cancel">Cancel</button>
-        <button type="submit" class="primary">Save query</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="bookmark-note-dialog" class="form-dialog" aria-labelledby="bookmark-note-title">
-    <form id="bookmark-note-form">
-      <div class="dialog-head">
-        <h2 id="bookmark-note-title">Add note</h2>
-        <button type="button" class="dialog-close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
-      </div>
-      <div class="dialog-form-body">
-        <label for="bookmark-note">Note</label>
-        <textarea id="bookmark-note" rows="4" maxlength="500"></textarea>
-      </div>
-      <div class="dialog-actions">
-        <button type="button" class="secondary dialog-cancel">Cancel</button>
-        <button type="submit" class="primary">Save note</button>
+        <button type="submit" class="primary">Save hunt</button>
       </div>
     </form>
   </dialog>
@@ -213,15 +220,15 @@
   <dialog id="confirm-dialog" class="form-dialog confirm-dialog" aria-labelledby="confirm-title">
     <form id="confirm-form">
       <div class="dialog-head">
-        <h2 id="confirm-title">Clear recent queries?</h2>
-        <button type="button" class="dialog-close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
+        <h2 id="confirm-title">Clear recent hunts?</h2>
+        <button type="button" class="dialog-close" aria-label="Close clear recent hunts dialog"><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></button>
       </div>
       <div class="dialog-form-body">
-        <p id="confirm-message">Saved queries and bookmarks are not removed.</p>
+        <p id="confirm-message">This removes recent hunts from this browser. Saved hunts remain available.</p>
       </div>
       <div class="dialog-actions">
         <button type="button" class="secondary dialog-cancel">Cancel</button>
-        <button type="submit" class="danger">Clear</button>
+        <button type="submit" class="danger">Clear recent hunts</button>
       </div>
     </form>
   </dialog>

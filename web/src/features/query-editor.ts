@@ -234,31 +234,31 @@ function createLanguage(availableTables: Set<string>) {
 }
 
 const highlightStyle = HighlightStyle.define([
-  { tag: tags.keyword, color: '#6ea8fe', fontWeight: '500' },
-  { tag: tags.operatorKeyword, color: '#9ac3ff' },
-  { tag: tags.operator, color: '#aab5c2' },
-  { tag: tags.string, color: '#9ed7ae' },
-  { tag: tags.number, color: '#e8a87c' },
-  { tag: tags.bool, color: '#e8a87c' },
-  { tag: tags.typeName, color: '#72d6ca' },
-  { tag: tags.className, color: '#f3f6fa', fontWeight: '600' },
-  { tag: tags.variableName, color: '#d1d8e1' },
-  { tag: tags.comment, color: '#657386', fontStyle: 'italic' },
+  { tag: tags.keyword, color: '#75baf2', fontWeight: '600' },
+  { tag: tags.operatorKeyword, color: '#c9a7eb', fontWeight: '500' },
+  { tag: tags.operator, color: '#c9a7eb' },
+  { tag: tags.string, color: '#8fd18f' },
+  { tag: tags.number, color: '#f5b383' },
+  { tag: tags.bool, color: '#f5b383' },
+  { tag: tags.typeName, color: '#6fd3d6' },
+  { tag: tags.className, color: '#f3f2f1', fontWeight: '600' },
+  { tag: tags.variableName, color: '#d2d0ce' },
+  { tag: tags.comment, color: '#a19f9d', fontStyle: 'italic' },
 ]);
 
 const editorTheme = EditorView.theme({
-  '&': { color: '#dfe5ec', backgroundColor: 'transparent' },
-  '.cm-content': { caretColor: '#6ea8fe' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#6ea8fe' },
+  '&': { color: '#f3f2f1', backgroundColor: 'transparent' },
+  '.cm-content': { caretColor: '#75baf2' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#75baf2' },
   '.cm-gutters': {
-    color: '#657386',
-    backgroundColor: '#0a0d12',
-    borderRight: '1px solid #252d39',
+    color: '#a19f9d',
+    backgroundColor: '#252423',
+    borderRight: '1px solid #484644',
   },
-  '.cm-activeLine': { backgroundColor: 'rgba(110, 168, 254, .045)' },
-  '.cm-activeLineGutter': { color: '#6ea8fe', backgroundColor: 'rgba(110, 168, 254, .06)' },
+  '.cm-activeLine': { backgroundColor: '#263746' },
+  '.cm-activeLineGutter': { color: '#75baf2', backgroundColor: '#203242' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: '#303d4d',
+    backgroundColor: '#384b5e',
   },
-  '.cm-tooltip': { color: '#f3f6fa', backgroundColor: '#171d27', border: '1px solid #354254' },
+  '.cm-tooltip': { color: '#f3f2f1', backgroundColor: '#323130', border: '1px solid #5a5856' },
 }, { dark: true });
