@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/kql"
 )
 
 func TestLoadUsesRelativePathsAndReplacesDataset(t *testing.T) {
@@ -279,5 +281,112 @@ datasets:
 	defer store.Close()
 	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "flag is required") {
 		t.Fatalf("Load() error = %v, want required flag", err)
+	}
+}
+
+func TestLoadUnionsIndexedPathsAndQueryUsesExpressionIndex(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "one.json"), []byte(`{"ts":"2024-01-01T00:00:00Z","src_ip":"198.51.100.77","alert":{"signature_id":42}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "two.json"), []byte(`{"ts":"2024-01-01T00:00:00Z","dest_ip":"192.0.2.4"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `datasets:
+  - name: one
+    table: One
+    path: one.json
+    source: fixture
+    timestampPath: ts
+    indexedPaths: [src_ip, alert.signature_id]
+  - name: two
+    table: Two
+    path: two.json
+    source: fixture
+    timestampPath: ts
+    indexedPaths: [dest_ip, src_ip]
+`
+	manifestPath := filepath.Join(directory, "datasets.yaml")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.Open(filepath.Join(directory, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	loaded, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var indexCount int
+	if err := store.DB().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name GLOB 'idx_events_json_*'`).Scan(&indexCount); err != nil {
+		t.Fatal(err)
+	}
+	if indexCount != 3 {
+		t.Fatalf("expression index count = %d, want 3", indexCount)
+	}
+
+	compiled, err := kql.Compile(`One | where RawData.src_ip == "198.51.100.77" | project RawData`, time.Now(), kql.TableCatalog{"One": loaded[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.DB().QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("explain query: %v\nSQL: %s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "USING INDEX idx_events_json_2") {
+		t.Fatalf("query plan does not use src_ip expression index:\n%s\nSQL: %s", joined, compiled.SQL)
+	}
+	if strings.Contains(joined, "SCAN events") {
+		t.Fatalf("query plan scans events:\n%s", joined)
+	}
+}
+
+func TestLoadRejectsInvalidIndexedPathBeforeImport(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "events.json"), []byte(`{"ts":"2024-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "datasets.yaml")
+	manifest := `datasets:
+  - name: invalid
+    table: Invalid
+    path: events.json
+    source: fixture
+    timestampPath: ts
+    indexedPaths: [alert.signature-id]
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.Open(filepath.Join(directory, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "not a KQL identifier") {
+		t.Fatalf("Load() error = %v, want indexed path validation", err)
+	}
+	var datasets int
+	if err := store.DB().QueryRow(`SELECT count(*) FROM datasets`).Scan(&datasets); err != nil {
+		t.Fatal(err)
+	}
+	if datasets != 0 {
+		t.Fatalf("datasets imported before validation = %d", datasets)
 	}
 }

@@ -14,7 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/striem ./cmd/striem
+RUN CGO_ENABLED=1 go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /out/striem ./cmd/striem
 
 FROM alpine:3.22
 RUN addgroup -S striem && adduser -S -G striem striem

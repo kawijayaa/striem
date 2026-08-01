@@ -42,6 +42,10 @@ func main() {
 	} else {
 		logger.Warn("STRIEM_CONFIG is not set; starting without events")
 	}
+	if _, err := store.DB().ExecContext(context.Background(), "PRAGMA analysis_limit = 400; PRAGMA optimize;"); err != nil {
+		logger.Error("optimize database", "error", err)
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              envOrDefault("STRIEM_ADDR", ":8080"),

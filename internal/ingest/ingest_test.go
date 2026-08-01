@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Velocidex/ordereddict"
 	"github.com/kawijayaa/striem/internal/database"
 )
 
@@ -87,9 +90,10 @@ func TestImportNormalizesEmbeddedJSONAndCatalogsFields(t *testing.T) {
 	}
 }
 
-func TestImportFastPathPreservesRawJSONAndCatalogsFields(t *testing.T) {
+func TestImportMinifiesRawJSONAndCatalogsFields(t *testing.T) {
 	store := openTestStore(t)
-	raw := `{"ts":"2024-01-01T00:00:00Z","count":1,"score":1.5,"nested":{"enabled":true},"items":[1,2]}`
+	raw := `{ "ts": "2024-01-01T00:00:00Z", "count": 1, "score": 1.5, "nested": { "enabled": true }, "items": [1, 2] }`
+	wantRaw := `{"ts":"2024-01-01T00:00:00Z","count":1,"score":1.5,"nested":{"enabled":true},"items":[1,2]}`
 	if _, err := New(store).Import(t.Context(), strings.NewReader(raw), false, Mapping{
 		Name: "raw", Table: "Raw", Source: "test", TimestampPath: "ts",
 	}); err != nil {
@@ -99,8 +103,8 @@ func TestImportFastPathPreservesRawJSONAndCatalogsFields(t *testing.T) {
 	if err := store.DB().QueryRow("SELECT raw_data FROM events").Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored != raw {
-		t.Fatalf("stored raw data changed:\n got %s\nwant %s", stored, raw)
+	if stored != wantRaw {
+		t.Fatalf("stored raw data = %s, want minified %s", stored, wantRaw)
 	}
 	fields, err := store.ListFields(t.Context())
 	if err != nil {
@@ -304,6 +308,222 @@ func TestImportEVTXRejectsInvalidInput(t *testing.T) {
 	}
 	if datasets != 0 {
 		t.Fatalf("failed EVTX import left %d dataset(s)", datasets)
+	}
+}
+
+func TestFieldDiscoverySampleCutoffAndUnseenKeySets(t *testing.T) {
+	store := openTestStore(t)
+	var input strings.Builder
+	for index := 0; index < fieldDiscoverySampleRecords; index++ {
+		fmt.Fprintf(&input, `{"ts":"2024-01-01T00:00:00Z","nested":{"sample":%d}}`+"\n", index)
+	}
+	input.WriteString(`{"ts":"2024-01-01T00:00:00Z","nested":{"lateKnown":true}}` + "\n")
+	input.WriteString(`{"ts":"2024-01-01T00:00:00Z","nested":{"lateUnseen":true},"variant":"new-key-set"}` + "\n")
+	if _, err := New(store).Import(t.Context(), strings.NewReader(input.String()), false, Mapping{
+		Name: "sampling", Table: "Sampling", Source: "test", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fields, err := store.ListFields(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		found[field.Path] = true
+	}
+	if found["RawData.nested.lateKnown"] {
+		t.Fatal("record 5001 with a known top-level key set was fully discovered")
+	}
+	if !found["RawData.nested.lateUnseen"] || !found["RawData.variant"] {
+		t.Fatalf("unseen key-set fields were not discovered: %#v", fields)
+	}
+}
+
+func TestFieldPathCacheReusesParentKeyEntry(t *testing.T) {
+	discovery := newFieldDiscovery()
+	first := discovery.cachedFieldPath("RawData.parent", "field.with.dot")
+	second := discovery.cachedFieldPath("RawData.parent", "field.with.dot")
+	if first != second || len(discovery.pathCache["RawData.parent"]) != 1 {
+		t.Fatalf("cached paths = %q, %q, %#v", first, second, discovery.pathCache)
+	}
+}
+
+func TestImportNormalizesKnownEmbeddedPathAfterSample(t *testing.T) {
+	store := openTestStore(t)
+	var input strings.Builder
+	input.WriteString(`{ "ts": "2024-01-01T00:00:00Z", "payload": "{\"nested\":\"{\\\"seed\\\":true}\"}" }` + "\n")
+	for index := 1; index < fieldDiscoverySampleRecords; index++ {
+		input.WriteString(`{"ts":"2024-01-01T00:00:00Z","payload":"plain"}` + "\n")
+	}
+	input.WriteString(`{ "ts": "2024-01-01T00:00:00Z", "payload": "{ \"precise\": 123456789012345678901234567890, \"nested\": \"{\\\"ok\\\":true}\" }" }` + "\n")
+	if _, err := New(store).Import(t.Context(), strings.NewReader(input.String()), false, Mapping{
+		Name: "known-embedded", Table: "KnownEmbedded", Source: "test", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := store.DB().QueryRow("SELECT raw_data FROM events ORDER BY id DESC LIMIT 1").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"payload":{"nested":{"ok":true},"precise":123456789012345678901234567890},"ts":"2024-01-01T00:00:00Z"}`
+	if raw != want {
+		t.Fatalf("normalized raw data = %s, want %s", raw, want)
+	}
+}
+
+func TestConfiguredMaxInputBytes(t *testing.T) {
+	t.Setenv("STRIEM_MAX_INPUT_BYTES", "")
+	if limit, err := configuredMaxInputBytes(); err != nil || limit != defaultMaxExpandedSize {
+		t.Fatalf("default limit = %d, %v", limit, err)
+	}
+	t.Setenv("STRIEM_MAX_INPUT_BYTES", " 12345 ")
+	if limit, err := configuredMaxInputBytes(); err != nil || limit != 12345 {
+		t.Fatalf("configured limit = %d, %v", limit, err)
+	}
+	for _, value := range []string{"0", "-1", "1MiB", "9223372036854775808"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("STRIEM_MAX_INPUT_BYTES", value)
+			if _, err := configuredMaxInputBytes(); err == nil || !strings.Contains(err.Error(), "positive integer number of bytes") {
+				t.Fatalf("configuredMaxInputBytes() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestImportEnforcesInputLimitAndRestoresSynchronous(t *testing.T) {
+	store := openTestStore(t)
+	store.DB().SetMaxOpenConns(1)
+	t.Setenv("STRIEM_MAX_INPUT_BYTES", "32")
+	_, err := New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z","padding":"too long"}`), false, Mapping{
+		Name: "limited", Table: "Limited", Source: "test", TimestampPath: "ts",
+	})
+	if err == nil || !strings.Contains(err.Error(), "32 byte limit") {
+		t.Fatalf("Import() error = %v, want input limit error", err)
+	}
+	var synchronous int
+	if err := store.DB().QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatal(err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("PRAGMA synchronous = %d, want NORMAL (1)", synchronous)
+	}
+	t.Setenv("STRIEM_MAX_INPUT_BYTES", "1024")
+	if _, err := New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z"}`), false, Mapping{
+		Name: "successful", Table: "Successful", Source: "test", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB().QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatal(err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("PRAGMA synchronous after success = %d, want NORMAL (1)", synchronous)
+	}
+}
+
+func TestImportRestoresPreviousSynchronousSetting(t *testing.T) {
+	store := openTestStore(t)
+	store.DB().SetMaxOpenConns(1)
+	store.DB().SetMaxIdleConns(1)
+	if _, err := store.DB().Exec("PRAGMA synchronous = FULL"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z"}`), false, Mapping{
+		Name: "synchronous", Table: "Synchronous", Source: "test", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var synchronous int
+	if err := store.DB().QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatal(err)
+	}
+	if synchronous != 2 {
+		t.Fatalf("PRAGMA synchronous = %d, want FULL (2)", synchronous)
+	}
+}
+
+func TestDecodeCSVPreservesHeaderOrderAndJSONEscaping(t *testing.T) {
+	input := "z,\"a\"\"b\",line\n\"<tag>&\",\"quote\"\"\\path\",\"first\nsecond\"\n"
+	var raw string
+	count, err := decodeCSVRecords(t.Context(), strings.NewReader(input), func(_ int, record json.RawMessage) error {
+		raw = string(record)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"z":"\u003ctag\u003e\u0026","a\"b":"quote\"\\path","line":"first\nsecond"}`
+	if count != 1 || raw != want {
+		t.Fatalf("decoded CSV = %d, %s, want 1, %s", count, raw, want)
+	}
+}
+
+func TestMarshalEVTXEventUsesInnerOrderedDict(t *testing.T) {
+	inner := ordereddict.NewDict().Set("System", ordereddict.NewDict().Set("Computer", "host")).Set("EventData", "value")
+	wrapper := ordereddict.NewDict().Set("Event", inner)
+	raw, err := marshalEVTXEvent(wrapper, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"System":{"Computer":"host"},"EventData":"value"}`
+	if string(raw) != want {
+		t.Fatalf("marshaled EVTX event = %s, want %s", raw, want)
+	}
+}
+
+func TestImportParallelPreparationPreservesRecordOrder(t *testing.T) {
+	store := openTestStore(t)
+	const count = fieldDiscoverySampleRecords + 250
+	var input strings.Builder
+	for index := 1; index <= count; index++ {
+		fmt.Fprintf(&input, `{"ts":"2024-01-01T00:00:00Z","sequence":%d}`+"\n", index)
+	}
+	if _, err := New(store).Import(t.Context(), strings.NewReader(input.String()), false, Mapping{
+		Name: "ordered", Table: "Ordered", Source: "test", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.DB().Query("SELECT json_extract(raw_data, '$.sequence') FROM events ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	index := 0
+	for rows.Next() {
+		index++
+		var sequence int
+		if err := rows.Scan(&sequence); err != nil {
+			t.Fatal(err)
+		}
+		if sequence != index {
+			t.Fatalf("record %d stored sequence %d", index, sequence)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if index != count {
+		t.Fatalf("stored %d records, want %d", index, count)
+	}
+}
+
+func TestImportReportsLowestIndexedParallelError(t *testing.T) {
+	store := openTestStore(t)
+	var input strings.Builder
+	input.WriteString(`{"ts":"2024-01-01T00:00:00Z","payload":"{\"seed\":true}"}` + "\n")
+	for index := 1; index < fieldDiscoverySampleRecords; index++ {
+		input.WriteString(`{"ts":"2024-01-01T00:00:00Z","payload":"plain"}` + "\n")
+	}
+	slowPayload := `{"padding":` + strconv.Quote(strings.Repeat("x", 512<<10)) + `}`
+	fmt.Fprintf(&input, `{"ts":"invalid","payload":%s}`+"\n", strconv.Quote(slowPayload))
+	input.WriteString(`{"ts":"invalid","payload":"{}"}` + "\n")
+	_, err := New(store).Import(t.Context(), strings.NewReader(input.String()), false, Mapping{
+		Name: "lowest-error", Table: "LowestError", Source: "test", TimestampPath: "ts",
+	})
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("record %d timestamp", fieldDiscoverySampleRecords+1)) {
+		t.Fatalf("Import() error = %v, want lowest indexed record", err)
 	}
 }
 

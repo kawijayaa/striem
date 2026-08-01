@@ -20,12 +20,29 @@ import (
 )
 
 type Server struct {
-	store  *database.Store
-	logger *slog.Logger
+	store        *database.Store
+	logger       *slog.Logger
+	tableCatalog kql.TableCatalog
+	prepareQuery func(context.Context, string) (*sql.Stmt, error)
 }
 
 func New(store *database.Store, logger *slog.Logger) *Server {
-	return &Server{store: store, logger: logger}
+	datasets, err := store.ListDatasets(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	tableCatalog := make(kql.TableCatalog, len(datasets))
+	for _, dataset := range datasets {
+		if dataset.Table != "" {
+			tableCatalog[dataset.Table] = dataset.ID
+		}
+	}
+	return &Server{
+		store:        store,
+		logger:       logger,
+		tableCatalog: tableCatalog,
+		prepareQuery: store.DB().PrepareContext,
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -184,7 +201,7 @@ func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) query(w http.ResponseWriter, r *http.Request) {
-	compiled, ok := s.compileQuery(w, r)
+	compiled, ok := s.compileQuery(w, r, false)
 	if !ok {
 		return
 	}
@@ -195,7 +212,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.store.DB().QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
 		s.logger.Error("query execution failed", "error", err)
-		writeError(w, http.StatusBadRequest, "query could not be executed", nil)
+		writeQueryError(w, invalidSQLExpressionError())
 		return
 	}
 	defer rows.Close()
@@ -215,14 +232,14 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateQuery(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.compileQuery(w, r); !ok {
+	if _, ok := s.compileQuery(w, r, true); !ok {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request) (kql.CompiledQuery, bool) {
+func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bool) (kql.CompiledQuery, bool) {
 	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
 		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
 		return kql.CompiledQuery{}, false
@@ -244,25 +261,20 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request) (kql.Compi
 		return kql.CompiledQuery{}, false
 	}
 
-	datasets, err := s.store.ListDatasets(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not resolve query tables", nil)
-		return kql.CompiledQuery{}, false
-	}
-	catalog := make(kql.TableCatalog, len(datasets))
-	for _, dataset := range datasets {
-		if dataset.Table != "" {
-			catalog[dataset.Table] = dataset.ID
-		}
-	}
-	compiled, err := kql.Compile(request.Query, time.Now(), catalog)
+	compiled, err := kql.Compile(request.Query, time.Now(), kql.CompileConfig{
+		Tables:        s.tableCatalog,
+		FullTextIndex: s.store.FullTextIndexEnabled(),
+	})
 	if err != nil {
 		writeQueryError(w, err)
 		return kql.CompiledQuery{}, false
 	}
-	statement, err := s.store.DB().PrepareContext(r.Context(), compiled.SQL)
+	if !prepare {
+		return compiled, true
+	}
+	statement, err := s.prepareQuery(r.Context(), compiled.SQL)
 	if err != nil {
-		writeQueryError(w, &kql.Error{Message: "query contains an invalid column or expression", Line: 1, Column: 1})
+		writeQueryError(w, invalidSQLExpressionError())
 		return kql.CompiledQuery{}, false
 	}
 	statement.Close()
@@ -318,8 +330,8 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []m
 				}
 				trimmed := strings.TrimSpace(text)
 				if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-					var raw any
-					if json.Unmarshal([]byte(trimmed), &raw) == nil {
+					raw := json.RawMessage(trimmed)
+					if json.Valid(raw) {
 						value = raw
 					}
 				}
@@ -346,6 +358,10 @@ func writeQueryError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadRequest, "query could not be executed", nil)
+}
+
+func invalidSQLExpressionError() *kql.Error {
+	return &kql.Error{Message: "query contains an invalid column or expression", Line: 1, Column: 1}
 }
 
 func writeError(w http.ResponseWriter, status int, message string, position map[string]int) {

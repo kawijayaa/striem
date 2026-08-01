@@ -4,17 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {
-	db          *sql.DB
-	challengeMu sync.RWMutex
-	challenge   ChallengeDefinition
+	db             *sql.DB
+	challengeMu    sync.RWMutex
+	challenge      ChallengeDefinition
+	eventStorageMu sync.RWMutex
+	indexedPaths   []string
+	fullTextIndex  bool
+	fullTextReady  bool
+	fullTextDirty  bool
+	storageSet     bool
 }
 
 type Dataset struct {
@@ -43,10 +53,12 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	// A single connection keeps SQLite's connection-local PRAGMAs consistent and
-	// is sufficient for the intentionally small per-team deployment.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	readerConnections := max(2, min(runtime.GOMAXPROCS(0), 4))
+	if path == ":memory:" {
+		readerConnections = 1
+	}
+	db.SetMaxOpenConns(readerConnections)
+	db.SetMaxIdleConns(readerConnections)
 
 	store := &Store{db: db}
 	if err := store.initialize(context.Background()); err != nil {
@@ -59,10 +71,6 @@ func Open(path string) (*Store, error) {
 func (s *Store) initialize(ctx context.Context) error {
 	const schema = `
 PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = -65536;
 
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY,
@@ -133,7 +141,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_table_name
 ON datasets(table_name) WHERE table_name <> '';`); err != nil {
 		return fmt.Errorf("initialize dataset indexes: %w", err)
 	}
-	if err := s.CreateEventIndexes(ctx); err != nil {
+	if err := s.createOrdinaryEventIndexes(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -180,29 +188,272 @@ func (s *Store) ensureColumn(
 }
 
 func (s *Store) DropEventIndexes(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `
+	statements := []string{`
 DROP INDEX IF EXISTS idx_events_time;
 DROP INDEX IF EXISTS idx_events_source_time;
 DROP INDEX IF EXISTS idx_events_type_time;
 DROP INDEX IF EXISTS idx_events_host_time;
+DROP INDEX IF EXISTS idx_events_host_dataset;
 DROP INDEX IF EXISTS idx_events_user_time;
-DROP INDEX IF EXISTS idx_events_dataset_time;`); err != nil {
+DROP INDEX IF EXISTS idx_events_dataset_time;`}
+	expressionIndexes, err := s.eventExpressionIndexes(ctx)
+	if err != nil {
+		return err
+	}
+	for name := range expressionIndexes {
+		statements = append(statements, "DROP INDEX "+name)
+	}
+	if _, err := s.db.ExecContext(ctx, strings.Join(statements, ";")); err != nil {
 		return fmt.Errorf("drop event indexes: %w", err)
 	}
 	return nil
 }
 
 func (s *Store) CreateEventIndexes(ctx context.Context) error {
+	if err := s.createOrdinaryEventIndexes(ctx); err != nil {
+		return err
+	}
+
+	s.eventStorageMu.RLock()
+	paths := append([]string(nil), s.indexedPaths...)
+	configured := s.storageSet
+	s.eventStorageMu.RUnlock()
+	if !configured {
+		return nil
+	}
+	desired := make(map[string]string, len(paths))
+	for index, path := range paths {
+		name := "idx_events_json_" + strconv.Itoa(index)
+		desired[name] = eventExpressionIndexSQL(name, path)
+	}
+	existing, err := s.eventExpressionIndexes(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("reconcile event expression indexes: %w", err)
+	}
+	defer tx.Rollback()
+	for name, sqlText := range existing {
+		if desired[name] == sqlText {
+			delete(desired, name)
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "DROP INDEX "+name); err != nil {
+			return fmt.Errorf("drop stale event expression index %s: %w", name, err)
+		}
+	}
+	names := make([]string, 0, len(desired))
+	for name := range desired {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := tx.ExecContext(ctx, desired[name]); err != nil {
+			return fmt.Errorf("create event expression index %s: %w", name, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event expression indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) createOrdinaryEventIndexes(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_generated);
 CREATE INDEX IF NOT EXISTS idx_events_source_time ON events(source, time_generated);
 CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(event_type, time_generated) WHERE event_type IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_host_time ON events(host, time_generated) WHERE host IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_host_dataset ON events(host, dataset_id) WHERE host IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generated) WHERE username IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_dataset_time ON events(dataset_id, time_generated);`); err != nil {
 		return fmt.Errorf("create event indexes: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) ConfigureEventStorage(ctx context.Context, indexedPaths []string, fullTextIndex bool) error {
+	unique := make(map[string]struct{}, len(indexedPaths))
+	paths := make([]string, 0, len(indexedPaths))
+	for _, path := range indexedPaths {
+		if err := ValidateIndexedPath(path); err != nil {
+			return err
+		}
+		if _, found := unique[path]; found {
+			continue
+		}
+		unique[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if fullTextIndex {
+		var supported int
+		if err := s.db.QueryRowContext(ctx, `SELECT sqlite_compileoption_used('ENABLE_FTS5')`).Scan(&supported); err != nil {
+			return fmt.Errorf("check SQLite FTS5 support: %w", err)
+		}
+		if supported == 0 {
+			return fmt.Errorf("fullTextIndex requires a binary built with -tags sqlite_fts5")
+		}
+	}
+	s.eventStorageMu.Lock()
+	s.indexedPaths = paths
+	s.fullTextIndex = fullTextIndex
+	s.fullTextReady = false
+	s.fullTextDirty = false
+	s.storageSet = true
+	s.eventStorageMu.Unlock()
+	return nil
+}
+
+func ValidateIndexedPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("indexed path cannot be empty")
+	}
+	for _, segment := range strings.Split(path, ".") {
+		if segment == "" {
+			return fmt.Errorf("indexed path %q contains an empty segment", path)
+		}
+		for index, character := range segment {
+			if character != '_' && !unicode.IsLetter(character) && (index == 0 || !unicode.IsDigit(character)) {
+				return fmt.Errorf("indexed path %q segment %q is not a KQL identifier", path, segment)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) FullTextIndexEnabled() bool {
+	s.eventStorageMu.RLock()
+	defer s.eventStorageMu.RUnlock()
+	return s.fullTextIndex && s.fullTextReady
+}
+
+func (s *Store) MarkFullTextIndexDirty() {
+	s.eventStorageMu.Lock()
+	defer s.eventStorageMu.Unlock()
+	if s.fullTextIndex {
+		s.fullTextReady = false
+		s.fullTextDirty = true
+	}
+}
+
+func (s *Store) fullTextIndexConfigured() bool {
+	s.eventStorageMu.RLock()
+	defer s.eventStorageMu.RUnlock()
+	return s.fullTextIndex
+}
+
+func (s *Store) DropFullTextIndex(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS events_fts`); err != nil {
+		return fmt.Errorf("drop event full-text index: %w", err)
+	}
+	s.eventStorageMu.Lock()
+	s.fullTextReady = false
+	s.eventStorageMu.Unlock()
+	return nil
+}
+
+func (s *Store) SyncFullTextIndex(ctx context.Context, rebuild bool) error {
+	if !s.fullTextIndexConfigured() {
+		return s.DropFullTextIndex(ctx)
+	}
+	s.eventStorageMu.RLock()
+	ready, dirty := s.fullTextReady, s.fullTextDirty
+	s.eventStorageMu.RUnlock()
+	if !rebuild && ready {
+		return nil
+	}
+	if dirty {
+		rebuild = true
+	}
+	if !rebuild {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events_fts')`).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect event full-text index: %w", err)
+		}
+		if exists != 0 {
+			s.eventStorageMu.Lock()
+			s.fullTextReady = true
+			s.eventStorageMu.Unlock()
+			return nil
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("rebuild event full-text index: %w", err)
+	}
+	defer tx.Rollback()
+	if rebuild {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS events_fts`); err != nil {
+			return fmt.Errorf("drop event full-text index: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE VIRTUAL TABLE events_fts USING fts5(body, content='', tokenize='trigram')`); err != nil {
+		return fmt.Errorf("create event full-text index: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO events_fts(rowid, body)
+SELECT id,
+       coalesce(raw_data, '') || char(10) ||
+       coalesce(time_generated, '') || char(10) ||
+       coalesce(source, '') || char(10) ||
+       coalesce(event_type, '') || char(10) ||
+       coalesce(host, '') || char(10) ||
+       coalesce(username, '') || char(10) ||
+       coalesce(message, '')
+FROM events`); err != nil {
+		return fmt.Errorf("populate event full-text index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event full-text index: %w", err)
+	}
+	s.eventStorageMu.Lock()
+	s.fullTextReady = true
+	s.fullTextDirty = false
+	s.eventStorageMu.Unlock()
+	return nil
+}
+
+func (s *Store) eventExpressionIndexes(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT name, sql
+FROM sqlite_master
+WHERE type = 'index' AND name GLOB 'idx_events_json_[0-9]*'`)
+	if err != nil {
+		return nil, fmt.Errorf("inspect event expression indexes: %w", err)
+	}
+	defer rows.Close()
+	indexes := make(map[string]string)
+	for rows.Next() {
+		var name, sqlText string
+		if err := rows.Scan(&name, &sqlText); err != nil {
+			return nil, fmt.Errorf("scan event expression index: %w", err)
+		}
+		if strings.TrimPrefix(name, "idx_events_json_") == "" {
+			continue
+		}
+		if _, err := strconv.Atoi(strings.TrimPrefix(name, "idx_events_json_")); err != nil {
+			continue
+		}
+		indexes[name] = sqlText
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("inspect event expression indexes: %w", err)
+	}
+	return indexes, nil
+}
+
+func eventExpressionIndexSQL(name, path string) string {
+	var jsonPath strings.Builder
+	jsonPath.WriteByte('$')
+	for _, segment := range strings.Split(path, ".") {
+		jsonPath.WriteString(`."`)
+		jsonPath.WriteString(segment)
+		jsonPath.WriteByte('"')
+	}
+	return "CREATE INDEX " + name + " ON events(json_extract(raw_data, '" + jsonPath.String() + "'), dataset_id)"
 }
 
 func (s *Store) DB() *sql.DB {

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -30,6 +32,130 @@ func TestKQLRegex(t *testing.T) {
 	}
 	if got := querySQLiteFunction(t, store.DB(), `SELECT kql_regex(?, ?)`, `(^|[^[:alnum:]])powershell([^[:alnum:]]|$)`, "PowerShell admin"); got != int64(0) {
 		t.Fatalf("case-sensitive match = %#v", got)
+	}
+}
+
+func TestKQLRegexTermFastPathMatchesRegexp(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		values  []string
+	}{
+		{
+			name:    "whole term and boundaries",
+			pattern: `(^|[^A-Za-z0-9])Power([^A-Za-z0-9]|$)`,
+			values:  []string{"Power admin", "run Power!", "PowerShell", "xPower", "_Power_", "éPoweré"},
+		},
+		{
+			name:    "whole term alternate spelling",
+			pattern: `(^|[^a-za-z0-9])power([^a-za-z0-9]|$)`,
+			values:  []string{"power", "run power!", "powers", "xpower", "_power_"},
+		},
+		{
+			name:    "prefix",
+			pattern: `(^|[^A-Za-z0-9])Power[[:alnum:]]*`,
+			values:  []string{"PowerShell", "run PowerShell", "xPower", "power", "_Power"},
+		},
+		{
+			name:    "prefix alternate spelling",
+			pattern: `(^|[^a-za-z0-9])Power[[:alnum:]]*`,
+			values:  []string{"PowerShell", "run PowerShell", "xPower", "Power"},
+		},
+		{
+			name:    "suffix",
+			pattern: `(^|[^A-Za-z0-9])[[:alnum:]]*Shell([^A-Za-z0-9]|$)`,
+			values:  []string{"PowerShell", "run PowerShell!", "Shellx", "PowerShelly", "_Shell_"},
+		},
+		{
+			name:    "suffix alternate spelling",
+			pattern: `(^|[^a-za-z0-9])[[:alnum:]]*Shell([^a-za-z0-9]|$)`,
+			values:  []string{"PowerShell", "run PowerShell!", "Shellx", "Shell"},
+		},
+		{
+			name:    "case insensitive",
+			pattern: `(?i)(^|[^A-Za-z0-9])Power([^A-Za-z0-9]|$)`,
+			values:  []string{"power", "POWER!", "xpower", "powers"},
+		},
+		{
+			name:    "case insensitive Unicode simple fold",
+			pattern: `(?i)(^|[^A-Za-z0-9])K([^A-Za-z0-9]|$)`,
+			values:  []string{"K", "k", "K", "xK"},
+		},
+		{
+			name:    "escaped literal",
+			pattern: `(?i)(^|[^A-Za-z0-9])10\.10\.1\.9([^A-Za-z0-9]|$)`,
+			values:  []string{"from 10.10.1.9", "10x10x1x9", "110.10.1.9"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expression := regexp.MustCompile(test.pattern)
+			for _, value := range test.values {
+				got, recognized := matchKSQLTermRegex(test.pattern, value)
+				if !recognized {
+					t.Fatalf("pattern %q was not recognized", test.pattern)
+				}
+				if want := expression.MatchString(value); got != want {
+					t.Errorf("match %q = %t, want %t", value, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestKQLRegexFallsBackForGeneralRegexp(t *testing.T) {
+	const pattern = `^(foo|bar)+\d{2}$`
+	if _, recognized := matchKSQLTermRegex(pattern, "foobar42"); recognized {
+		t.Fatal("general regular expression used term fast path")
+	}
+	got, err := kqlRegex(pattern, "foobar42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := regexp.MustCompile(pattern).MatchString("foobar42"); got != want {
+		t.Fatalf("kqlRegex() = %t, want %t", got, want)
+	}
+}
+
+func TestRegexpCacheIsSharedBoundedAndConcurrent(t *testing.T) {
+	regexpCache.Purge()
+	t.Cleanup(regexpCache.Purge)
+
+	if _, err := kqlRegex(`^regex$`, "regex"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kqlExtract(`^(extract)$`, 1, "extract"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kqlTrim(`\s`, " value "); err != nil {
+		t.Fatal(err)
+	}
+	if got := kqlParse(`^(parse)$`, "string", "parse"); got == nil {
+		t.Fatal("kqlParse() returned nil")
+	}
+	for _, pattern := range []string{`^regex$`, `^(extract)$`, `^(?:\s)+|(?:\s)+$`, `^(parse)$`} {
+		if !regexpCache.Contains(pattern) {
+			t.Errorf("cache does not contain %q", pattern)
+		}
+	}
+
+	var wait sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			for index := 0; index < regexpCacheEntries; index++ {
+				pattern := regexp.QuoteMeta(string(rune(worker*regexpCacheEntries + index)))
+				if _, err := compileRegexp(pattern); err != nil {
+					t.Errorf("compileRegexp(%q): %v", pattern, err)
+					return
+				}
+			}
+		}(worker)
+	}
+	wait.Wait()
+	if got := regexpCache.Len(); got != regexpCacheEntries {
+		t.Fatalf("cache entries = %d, want %d", got, regexpCacheEntries)
 	}
 }
 

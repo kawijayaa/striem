@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/kawijayaa/striem/internal/eventtime"
 	"github.com/mattn/go-sqlite3"
 )
@@ -24,6 +25,18 @@ const sqliteDriverName = "striem_sqlite3"
 
 func init() {
 	sql.Register(sqliteDriverName, &sqlite3.SQLiteDriver{ConnectHook: func(connection *sqlite3.SQLiteConn) error {
+		for _, pragma := range []string{
+			"PRAGMA foreign_keys = ON",
+			"PRAGMA busy_timeout = 5000",
+			"PRAGMA synchronous = NORMAL",
+			"PRAGMA cache_size = -131072",
+			"PRAGMA temp_store = MEMORY",
+			"PRAGMA mmap_size = 268435456",
+		} {
+			if _, err := connection.Exec(pragma, nil); err != nil {
+				return fmt.Errorf("configure SQLite connection: %w", err)
+			}
+		}
 		if err := connection.RegisterFunc("kql_has", kqlHas, true); err != nil {
 			return err
 		}
@@ -105,9 +118,18 @@ const (
 	maxIPv4AddressBytes  = len("255.255.255.255/32")
 	maxIPv4RangeBytes    = 4 << 10
 	maxIPv4Ranges        = 128
+	regexpCacheEntries   = 256
 )
 
 var isoDatetimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?$`)
+
+var regexpCache = func() *lru.Cache {
+	cache, err := lru.New(regexpCacheEntries)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}()
 
 var privateIPv4Prefixes = [...]netip.Prefix{
 	netip.MustParsePrefix("10.0.0.0/8"),
@@ -223,11 +245,151 @@ func kqlRegex(patternValue, valueValue any) (bool, error) {
 	if len(pattern) > 512 {
 		return false, fmt.Errorf("regular expression exceeds 512 characters")
 	}
-	expression, err := regexp.Compile(pattern)
+	if matched, recognized := matchKSQLTermRegex(pattern, value); recognized {
+		return matched, nil
+	}
+	expression, err := compileRegexp(pattern)
 	if err != nil {
 		return false, err
 	}
 	return expression.MatchString(value), nil
+}
+
+func compileRegexp(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := regexpCache.Get(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	expression, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	regexpCache.Add(pattern, expression)
+	return expression, nil
+}
+
+func matchKSQLTermRegex(pattern, value string) (bool, bool) {
+	caseInsensitive := strings.HasPrefix(pattern, "(?i)")
+	if caseInsensitive {
+		pattern = strings.TrimPrefix(pattern, "(?i)")
+	}
+
+	leftBoundaries := [...]string{`(^|[^A-Za-z0-9])`, `(^|[^a-za-z0-9])`}
+	rightBoundaries := [...]string{`([^A-Za-z0-9]|$)`, `([^a-za-z0-9]|$)`}
+	for index := range leftBoundaries {
+		left := leftBoundaries[index]
+		right := rightBoundaries[index]
+		if !strings.HasPrefix(pattern, left) {
+			continue
+		}
+		body := strings.TrimPrefix(pattern, left)
+		mode := byte('p')
+		switch {
+		case strings.HasPrefix(body, `[[:alnum:]]*`) && strings.HasSuffix(body, right):
+			mode = 's'
+			body = strings.TrimSuffix(strings.TrimPrefix(body, `[[:alnum:]]*`), right)
+		case strings.HasSuffix(body, right):
+			mode = 'w'
+			body = strings.TrimSuffix(body, right)
+		case strings.HasSuffix(body, `[[:alnum:]]*`):
+			body = strings.TrimSuffix(body, `[[:alnum:]]*`)
+		default:
+			continue
+		}
+		term, ok := decodeRegexpLiteral(body)
+		if !ok || term == "" {
+			return false, false
+		}
+		return matchTerm(value, term, mode, caseInsensitive), true
+	}
+	return false, false
+}
+
+func decodeRegexpLiteral(pattern string) (string, bool) {
+	const metacharacters = `\.+*?()|[]{}^$`
+	var literal strings.Builder
+	literal.Grow(len(pattern))
+	for offset := 0; offset < len(pattern); offset++ {
+		character := pattern[offset]
+		if character == '\\' {
+			offset++
+			if offset >= len(pattern) || !strings.ContainsRune(metacharacters, rune(pattern[offset])) {
+				return "", false
+			}
+			literal.WriteByte(pattern[offset])
+			continue
+		}
+		if strings.ContainsRune(metacharacters, rune(character)) {
+			return "", false
+		}
+		literal.WriteByte(character)
+	}
+	return literal.String(), true
+}
+
+func matchTerm(value, term string, mode byte, caseInsensitive bool) bool {
+	if caseInsensitive {
+		valueRunes, termRunes := []rune(value), []rune(term)
+		for start := 0; start+len(termRunes) <= len(valueRunes); start++ {
+			end := start + len(termRunes)
+			if equalFoldRunes(valueRunes[start:end], termRunes) &&
+				(mode == 's' || asciiTokenBoundaryRunes(valueRunes, start, -1)) &&
+				(mode == 'p' || asciiTokenBoundaryRunes(valueRunes, end, 1)) {
+				return true
+			}
+		}
+		return false
+	}
+	for offset := 0; offset <= len(value)-len(term); {
+		index := strings.Index(value[offset:], term)
+		if index < 0 {
+			return false
+		}
+		start := offset + index
+		end := start + len(term)
+		if (mode == 's' || asciiTokenBoundary(value, start, -1)) &&
+			(mode == 'p' || asciiTokenBoundary(value, end, 1)) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func equalFoldRunes(left, right []rune) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index, character := range left {
+		if character == right[index] {
+			continue
+		}
+		folded := unicode.SimpleFold(character)
+		for folded != character && folded != right[index] {
+			folded = unicode.SimpleFold(folded)
+		}
+		if folded != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiTokenBoundary(value string, offset, direction int) bool {
+	if direction < 0 {
+		return offset <= 0 || !isASCIIAlphaNumeric(value[offset-1])
+	}
+	return offset >= len(value) || !isASCIIAlphaNumeric(value[offset])
+}
+
+func asciiTokenBoundaryRunes(value []rune, offset, direction int) bool {
+	if direction < 0 {
+		return offset <= 0 || value[offset-1] > unicode.MaxASCII || !isASCIIAlphaNumeric(byte(value[offset-1]))
+	}
+	return offset >= len(value) || value[offset] > unicode.MaxASCII || !isASCIIAlphaNumeric(byte(value[offset]))
+}
+
+func isASCIIAlphaNumeric(character byte) bool {
+	return character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
 }
 
 func tokenBoundary(value string, offset, direction int) bool {
@@ -255,7 +417,7 @@ func kqlExtract(pattern string, capture int64, value string) (string, error) {
 	if len(pattern) > 512 {
 		return "", fmt.Errorf("extract pattern exceeds 512 characters")
 	}
-	expression, err := regexp.Compile(pattern)
+	expression, err := compileRegexp(pattern)
 	if err != nil {
 		return "", err
 	}
@@ -270,7 +432,7 @@ func kqlTrim(pattern, value string) (string, error) {
 	if len(pattern) > 512 {
 		return "", fmt.Errorf("trim pattern exceeds 512 characters")
 	}
-	expression, err := regexp.Compile("^(?:" + pattern + ")+|(?:" + pattern + ")+$")
+	expression, err := compileRegexp("^(?:" + pattern + ")+|(?:" + pattern + ")+$")
 	if err != nil {
 		return "", err
 	}
@@ -285,7 +447,7 @@ func kqlParse(patternValue, typesValue, sourceValue any) any {
 		return nil
 	}
 
-	expression, err := regexp.Compile(pattern)
+	expression, err := compileRegexp(pattern)
 	if err != nil || expression.NumSubexp() > maxParseCaptures {
 		return nil
 	}

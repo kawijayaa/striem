@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ type Manifest struct {
 	ChallengeName      string     `json:"challengeName" yaml:"challengeName"`
 	Flag               string     `json:"flag" yaml:"flag"`
 	SubmissionCooldown string     `json:"submissionCooldown" yaml:"submissionCooldown"`
+	FullTextIndex      bool       `json:"fullTextIndex" yaml:"fullTextIndex"`
 	Questions          []Question `json:"questions" yaml:"questions"`
 	Datasets           []Dataset  `json:"datasets" yaml:"datasets"`
 }
@@ -43,9 +46,17 @@ type Dataset struct {
 	TimestampPath   string            `json:"timestampPath" yaml:"timestampPath"`
 	TimestampFormat string            `json:"timestampFormat" yaml:"timestampFormat"`
 	FieldPaths      map[string]string `json:"fieldPaths" yaml:"fieldPaths"`
+	IndexedPaths    []string          `json:"indexedPaths" yaml:"indexedPaths"`
 }
 
-func Load(ctx context.Context, store *database.Store, manifestPath string) ([]database.Dataset, error) {
+type preparedDataset struct {
+	configured Dataset
+	path       string
+	format     string
+	signature  string
+}
+
+func Load(ctx context.Context, store *database.Store, manifestPath string) (loaded []database.Dataset, err error) {
 	file, err := os.Open(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("open deployment manifest: %w", err)
@@ -73,24 +84,10 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest directory: %w", err)
 	}
-	existingDatasets, err := store.ListDatasets(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existingByName := make(map[string]database.Dataset, len(existingDatasets))
-	for _, dataset := range existingDatasets {
-		existingByName[dataset.Name] = dataset
-	}
-	indexesDropped := false
-	defer func() {
-		if indexesDropped {
-			_ = store.CreateEventIndexes(context.Background())
-		}
-	}()
 	seen := make(map[string]struct{}, len(manifest.Datasets))
 	seenTables := make(map[string]struct{}, len(manifest.Datasets))
-	service := ingest.New(store)
-	loaded := make([]database.Dataset, 0, len(manifest.Datasets))
+	indexedPathSet := make(map[string]struct{})
+	prepared := make([]preparedDataset, 0, len(manifest.Datasets))
 	names := make([]string, 0, len(manifest.Datasets))
 	for index, configured := range manifest.Datasets {
 		if strings.TrimSpace(configured.Name) == "" {
@@ -110,6 +107,12 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		names = append(names, configured.Name)
 		if strings.TrimSpace(configured.Path) == "" {
 			return nil, fmt.Errorf("dataset %q has no path", configured.Name)
+		}
+		for _, indexedPath := range configured.IndexedPaths {
+			if err := database.ValidateIndexedPath(indexedPath); err != nil {
+				return nil, fmt.Errorf("dataset %q: %w", configured.Name, err)
+			}
+			indexedPathSet[indexedPath] = struct{}{}
 		}
 
 		path := configured.Path
@@ -132,25 +135,71 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 		if err != nil {
 			return nil, fmt.Errorf("sign dataset %q: %w", configured.Name, err)
 		}
-		if existing, found := existingByName[configured.Name]; found && existing.Signature == signature {
+		prepared = append(prepared, preparedDataset{configured: configured, path: path, format: format, signature: signature})
+	}
+	indexedPaths := make([]string, 0, len(indexedPathSet))
+	for path := range indexedPathSet {
+		indexedPaths = append(indexedPaths, path)
+	}
+	sort.Strings(indexedPaths)
+	if err := store.ConfigureEventStorage(ctx, indexedPaths, manifest.FullTextIndex); err != nil {
+		return nil, fmt.Errorf("configure event storage: %w", err)
+	}
+	existingDatasets, err := store.ListDatasets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	existingByName := make(map[string]database.Dataset, len(existingDatasets))
+	for _, dataset := range existingDatasets {
+		existingByName[dataset.Name] = dataset
+	}
+	storageChanged := len(existingDatasets) != len(prepared)
+	for _, dataset := range prepared {
+		if existing, found := existingByName[dataset.configured.Name]; !found || existing.Signature != dataset.signature {
+			storageChanged = true
+			break
+		}
+	}
+	derivedDropped := false
+	if storageChanged {
+		if err := store.DropEventIndexes(ctx); err != nil {
+			return nil, err
+		}
+		derivedDropped = true
+		defer func() {
+			if !derivedDropped {
+				return
+			}
+			restoreErr := store.CreateEventIndexes(context.Background())
+			if fullTextErr := store.SyncFullTextIndex(context.Background(), true); fullTextErr != nil {
+				restoreErr = errors.Join(restoreErr, fullTextErr)
+			}
+			if restoreErr != nil {
+				err = errors.Join(err, restoreErr)
+			}
+		}()
+		if err := store.DropFullTextIndex(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	service := ingest.New(store)
+	loaded = make([]database.Dataset, 0, len(prepared))
+	for _, dataset := range prepared {
+		configured := dataset.configured
+		if existing, found := existingByName[configured.Name]; found && existing.Signature == dataset.signature {
 			loaded = append(loaded, existing)
 			continue
 		}
-		if !indexesDropped {
-			if err := store.DropEventIndexes(ctx); err != nil {
-				return nil, err
-			}
-			indexesDropped = true
-		}
-		input, err := os.Open(path)
+		input, err := os.Open(dataset.path)
 		if err != nil {
 			return nil, fmt.Errorf("open dataset %q: %w", configured.Name, err)
 		}
-		result, importErr := service.Import(ctx, input, strings.EqualFold(filepath.Ext(path), ".gz"), ingest.Mapping{
+		result, importErr := service.Import(ctx, input, strings.EqualFold(filepath.Ext(dataset.path), ".gz"), ingest.Mapping{
 			Name:            configured.Name,
 			Table:           configured.Table,
-			Signature:       signature,
-			Format:          format,
+			Signature:       dataset.signature,
+			Format:          dataset.format,
 			Source:          configured.Source,
 			SourcePath:      configured.SourcePath,
 			TimestampPath:   configured.TimestampPath,
@@ -170,11 +219,21 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) ([]da
 	if err := store.DeleteDatasetsExcept(ctx, names); err != nil {
 		return nil, err
 	}
-	if indexesDropped {
+	if derivedDropped {
 		if err := store.CreateEventIndexes(ctx); err != nil {
 			return nil, err
 		}
-		indexesDropped = false
+		if err := store.SyncFullTextIndex(ctx, true); err != nil {
+			return nil, err
+		}
+		derivedDropped = false
+	} else {
+		if err := store.CreateEventIndexes(ctx); err != nil {
+			return nil, err
+		}
+		if err := store.SyncFullTextIndex(ctx, false); err != nil {
+			return nil, err
+		}
 	}
 	if err := store.SetChallengeName(ctx, manifest.ChallengeName); err != nil {
 		return nil, err
@@ -262,13 +321,16 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 	return challenge, nil
 }
 
+const schemaVersion = 3
+
 func datasetSignature(configured Dataset, path string, info os.FileInfo) (string, error) {
 	payload := struct {
-		Dataset  Dataset `json:"dataset"`
-		Path     string  `json:"path"`
-		Size     int64   `json:"size"`
-		Modified int64   `json:"modified"`
-	}{configured, path, info.Size(), info.ModTime().UnixNano()}
+		SchemaVersion int     `json:"schemaVersion"`
+		Dataset       Dataset `json:"dataset"`
+		Path          string  `json:"path"`
+		Size          int64   `json:"size"`
+		Modified      int64   `json:"modified"`
+	}{schemaVersion, configured, path, info.Size(), info.ModTime().UnixNano()}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", err

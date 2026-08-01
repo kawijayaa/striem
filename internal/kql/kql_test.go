@@ -90,7 +90,7 @@ func TestCompileLowersDynamicPropertyAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(compiled.SQL, `json_each("RawData")`) || !strings.Contains(compiled.SQL, `key = 'process'`) {
+	if !strings.Contains(compiled.SQL, `json_extract("RawData", '$."process"."name"')`) || strings.Contains(compiled.SQL, `json_each("RawData")`) {
 		t.Fatalf("compiled SQL = %s", compiled.SQL)
 	}
 }
@@ -321,5 +321,53 @@ func TestCompileRejectsUnknownTable(t *testing.T) {
 	_, err := Compile(`Missing | take 1`, time.Now())
 	if err == nil || !strings.Contains(err.Error(), `unknown table "Missing"`) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCompileAddsLeadingSearchFullTextPrefilter(t *testing.T) {
+	compiled, err := Compile(`Suricata | search "10.10.1.9" | where EventType == "alert" | project Host`, time.Now(), CompileConfig{
+		Tables: TableCatalog{"Suricata": 42}, FullTextIndex: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		`"dataset_id" = 42`,
+		`"rowid" IN (SELECT "rowid" FROM "events_fts" WHERE "events_fts" MATCH ?)`,
+		`kql_regex`,
+	} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+	if got := fmt.Sprint(compiled.Args); got != `["10.10.1.9"]` {
+		t.Fatalf("args = %s", got)
+	}
+}
+
+func TestCompileSkipsUnsupportedFullTextPrefilters(t *testing.T) {
+	for _, query := range []string{
+		`Events | where Source == "fixture" | search "powershell"`,
+		`Events | search "ab"`,
+		`Events | search "a\u0000bc"`,
+		`Events | project Host | union (Events | search "powershell" | project Host)`,
+	} {
+		compiled, err := Compile(query, time.Now(), CompileConfig{FullTextIndex: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(compiled.SQL, "events_fts") {
+			t.Fatalf("unsupported query received FTS prefilter:\n%s\nSQL: %s", query, compiled.SQL)
+		}
+	}
+}
+
+func TestCompileOrdersMultipleFullTextArgumentsBySQLPosition(t *testing.T) {
+	compiled, err := Compile(`let First = Events | search "alpha"; Events | search "bravo" | union (First)`, time.Now(), CompileConfig{FullTextIndex: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(compiled.Args); got != `["bravo" "alpha"]` {
+		t.Fatalf("args = %s, want SQL rendering order", got)
 	}
 }

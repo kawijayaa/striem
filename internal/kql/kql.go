@@ -2,8 +2,11 @@ package kql
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kawijayaa/ksql"
 	"github.com/kawijayaa/ksql/dialect"
@@ -13,6 +16,7 @@ import (
 )
 
 const resultLimit = 1000
+const fullTextPredicate = `"rowid" IN (SELECT "rowid" FROM "events_fts" WHERE "events_fts" MATCH ?)`
 
 var eventSchema = ksql.Schema{Columns: []ksql.Column{
 	{Name: "TimeGenerated", Type: ksql.TypeDateTime},
@@ -33,6 +37,29 @@ type CompiledQuery struct {
 
 type TableCatalog map[string]int64
 
+type compileSettings struct {
+	tables        TableCatalog
+	fullTextIndex bool
+}
+
+type CompileOption interface {
+	apply(*compileSettings)
+}
+
+func (catalog TableCatalog) apply(settings *compileSettings) {
+	settings.tables = catalog
+}
+
+type CompileConfig struct {
+	Tables        TableCatalog
+	FullTextIndex bool
+}
+
+func (config CompileConfig) apply(settings *compileSettings) {
+	settings.tables = config.Tables
+	settings.fullTextIndex = config.FullTextIndex
+}
+
 type Error struct {
 	Message string `json:"message"`
 	Line    int    `json:"line"`
@@ -43,16 +70,23 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("line %d, column %d: %s", e.Line, e.Column, e.Message)
 }
 
-func Compile(source string, now time.Time, catalogs ...TableCatalog) (CompiledQuery, error) {
-	var tables TableCatalog
-	if len(catalogs) > 0 {
-		tables = catalogs[0]
+func Compile(source string, now time.Time, compileOptions ...CompileOption) (CompiledQuery, error) {
+	var settings compileSettings
+	for _, option := range compileOptions {
+		if option != nil {
+			option.apply(&settings)
+		}
+	}
+	tables := settings.tables
+	fullTextTerms := map[int]string(nil)
+	if settings.fullTextIndex {
+		fullTextTerms = leadingSearchTerms(source)
 	}
 	catalog := newCatalog(tables)
 	options := compilerOptions(now.UTC())
 	options = append(options,
 		ksql.WithCatalog(catalog),
-		ksql.WithSource("table", tableSource(tables)),
+		ksql.WithSource("table", tableSource(tables, fullTextTerms)),
 		ksql.WithLimits(ksql.Limits{
 			MaxSourceBytes:     32 << 10,
 			MaxOutputRows:      resultLimit,
@@ -62,7 +96,10 @@ func Compile(source string, now time.Time, catalogs ...TableCatalog) (CompiledQu
 			MaxJoinKeys:        16,
 		}),
 	)
-	target := dialect.SQLite(dialect.WithRegexFunction("kql_regex"))
+	target := dialect.SQLite(
+		dialect.WithRegexFunction("kql_regex"),
+		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
+	)
 	compiler := ksql.New(target, options...)
 	result := compiler.Compile(source)
 	if diagnostic, ok := firstError(result.Diagnostics); ok {
@@ -85,7 +122,8 @@ func Compile(source string, now time.Time, catalogs ...TableCatalog) (CompiledQu
 	if err != nil {
 		return CompiledQuery{}, err
 	}
-	return CompiledQuery{SQL: sqlText, Args: result.Args, Columns: columns, DynamicColumns: dynamic}, nil
+	sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
+	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic}, nil
 }
 
 func newCatalog(tables TableCatalog) ksql.Catalog {
@@ -102,7 +140,7 @@ func newCatalog(tables TableCatalog) ksql.Catalog {
 	})
 }
 
-func tableSource(tables TableCatalog) ksql.SourceRule {
+func tableSource(tables TableCatalog, fullTextTerms map[int]string) ksql.SourceRule {
 	return func(context ksql.LoweringContext, source ksqlkql.Source) (ksql.Relation, error) {
 		name := unquoteName(source.Name)
 		table, ok := context.Catalog().ResolveTable(name)
@@ -140,8 +178,124 @@ func tableSource(tables TableCatalog) ksql.SourceRule {
 				Right:    context.Bind(datasetID),
 			}
 		}
+		if _, found := fullTextTerms[source.Span.Offset]; found {
+			predicate := sqlast.Expr(&sqlast.Call{
+				Name: "striem_fts_prefilter",
+				Args: []sqlast.Expr{
+					&sqlast.Identifier{Parts: []string{"rowid"}},
+					stringLiteral(fullTextMarker(source.Span.Offset)),
+				},
+			})
+			if query.Where == nil {
+				query.Where = predicate
+			} else {
+				query.Where = &sqlast.Binary{Left: query.Where, Operator: "AND", Right: predicate}
+			}
+		}
 		return ksql.Relation{Query: query, Schema: table.Schema.Clone()}, nil
 	}
+}
+
+func parameterizeFullText(sqlText string, terms map[int]string) (string, []any) {
+	type replacement struct {
+		start int
+		end   int
+		term  string
+	}
+	var replacements []replacement
+	for offset, term := range terms {
+		call := `STRIEM_FTS_PREFILTER("rowid", '` + fullTextMarker(offset) + `')`
+		for position := 0; position < len(sqlText); {
+			index := strings.Index(sqlText[position:], call)
+			if index < 0 {
+				break
+			}
+			index += position
+			replacements = append(replacements, replacement{start: index, end: index + len(call), term: term})
+			position = index + len(call)
+		}
+	}
+	if len(replacements) == 0 {
+		return sqlText, nil
+	}
+	sort.Slice(replacements, func(i, j int) bool { return replacements[i].start < replacements[j].start })
+	var rendered strings.Builder
+	arguments := make([]any, 0, len(replacements))
+	position := 0
+	for _, replacement := range replacements {
+		rendered.WriteString(sqlText[position:replacement.start])
+		rendered.WriteString(fullTextPredicate)
+		arguments = append(arguments, replacement.term)
+		position = replacement.end
+	}
+	rendered.WriteString(sqlText[position:])
+	return rendered.String(), arguments
+}
+
+func fullTextMarker(offset int) string {
+	return "__striem_fts_" + strconv.Itoa(offset) + "__"
+}
+
+func leadingSearchTerms(source string) map[int]string {
+	script, parseErrors := ksqlkql.Parse(source)
+	if len(parseErrors) != 0 {
+		return nil
+	}
+	terms := make(map[int]string)
+	for _, statement := range script.Statements {
+		var pipeline *ksqlkql.Pipeline
+		switch value := statement.(type) {
+		case *ksqlkql.ExpressionStatement:
+			pipeline = value.Pipeline
+		case *ksqlkql.LetStatement:
+			pipeline = value.Pipeline
+		}
+		if pipeline == nil || pipeline.Source.Kind != "table" || len(pipeline.Operators) == 0 || pipeline.Operators[0].Kind != "search" {
+			continue
+		}
+		spec, ok := pipeline.Operators[0].Body.(ksqlkql.SearchSpec)
+		if !ok {
+			continue
+		}
+		literal, ok := spec.Term.(*ksqlkql.LiteralExpression)
+		if !ok || literal.Kind != ksqlkql.StringToken {
+			continue
+		}
+		term := unquoteKQLLiteral(literal.Text)
+		if !utf8.ValidString(term) || utf8.RuneCountInString(term) < 3 || strings.ContainsRune(term, '\x00') {
+			continue
+		}
+		terms[pipeline.Source.Span.Offset] = `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
+	}
+	return terms
+}
+
+func unquoteKQLLiteral(value string) string {
+	if len(value) > 1 && (value[0] == 'h' || value[0] == 'H') && (value[1] == '\'' || value[1] == '"' || value[1] == '@') {
+		value = value[1:]
+	}
+	verbatim := strings.HasPrefix(value, "@")
+	if verbatim {
+		value = value[1:]
+	}
+	if len(value) >= 6 && ((strings.HasPrefix(value, "```") && strings.HasSuffix(value, "```")) || (strings.HasPrefix(value, "~~~") && strings.HasSuffix(value, "~~~"))) {
+		return value[3 : len(value)-3]
+	}
+	if len(value) < 2 {
+		return value
+	}
+	quote := value[0]
+	if (quote != '\'' && quote != '"') || value[len(value)-1] != quote {
+		return value
+	}
+	value = value[1 : len(value)-1]
+	if verbatim {
+		return strings.ReplaceAll(value, string([]byte{quote, quote}), string(quote))
+	}
+	if unquoted, err := strconv.Unquote(string(quote) + value + string(quote)); err == nil {
+		return unquoted
+	}
+	return strings.ReplaceAll(value, "\\"+string(quote), string(quote))
 }
 
 func datasetID(tables TableCatalog, name string) (int64, bool) {

@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,7 +17,7 @@ import (
 )
 
 func TestProvisionedDataCanBeQueried(t *testing.T) {
-	store, server := testServer(t)
+	store := testStore(t)
 	events := `{"ts":"2024-01-01T00:00:00Z","host":"pc-1","process":{"name":"powershell.exe"}}
 {"ts":"2024-01-01T00:01:00Z","host":"pc-2","process":{"name":"cmd.exe"}}`
 	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(events), false, ingest.Mapping{
@@ -24,6 +26,7 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	server := serveStore(t, store)
 
 	response := queryAPI(t, server.URL, `Sysmon | extend Process=tostring(RawData.process.name) | where Process contains "powershell" | project Host, Process`)
 	defer response.Body.Close()
@@ -44,7 +47,7 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 }
 
 func TestKSQLAggregatesAndDynamicResults(t *testing.T) {
-	store, server := testServer(t)
+	store := testStore(t)
 	events := `{"ts":"2024-01-01T00:00:00Z","host":"pc-1","user":"alice","ip":"198.51.100.7"}
 {"ts":"2024-01-01T00:01:00Z","host":"pc-2","user":"bob","ip":"198.51.100.7"}
 {"ts":"2024-01-01T00:02:00Z","host":"pc-3","user":"alice","ip":"192.0.2.4"}`
@@ -54,6 +57,7 @@ func TestKSQLAggregatesAndDynamicResults(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	server := serveStore(t, store)
 
 	rows := queryRows(t, server.URL, `UAL | extend ClientIP=tostring(RawData.ip) | summarize Failures=count() by ClientIP | order by Failures desc`)
 	if len(rows) != 2 || rows[0]["ClientIP"] != "198.51.100.7" || rows[0]["Failures"] != float64(2) {
@@ -63,6 +67,123 @@ func TestKSQLAggregatesAndDynamicResults(t *testing.T) {
 	payload, ok := dynamicRows[0]["Payload"].(map[string]any)
 	if !ok || payload["host"] != "pc-1" {
 		t.Fatalf("dynamic payload = %#v", dynamicRows)
+	}
+}
+
+func TestQueryCatalogIsLoadedOnce(t *testing.T) {
+	store := testStore(t)
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z"}`), false, ingest.Mapping{
+		Name: "first", Table: "First", Source: "first", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z"}`), false, ingest.Mapping{
+		Name: "second", Table: "Second", Source: "second", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response := queryAPI(t, server.URL, `First | count`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("cached table query status = %d", response.StatusCode)
+	}
+	response = queryAPI(t, server.URL, `Second | count`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("post-startup table query status = %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestScanRowsPreservesDynamicJSON(t *testing.T) {
+	store := testStore(t)
+	object := `  {"large":9007199254740993, "decimal":2.50}  `
+	array := ` [1, {"ok":true}] `
+	scalar := ` 42 `
+	malformed := ` {"missing": `
+	rows, err := store.DB().QueryContext(t.Context(), `SELECT ? AS Object, ? AS Array, ? AS Scalar, ? AS Malformed`, object, array, scalar, malformed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	_, results, err := scanRows(rows, map[string]struct{}{"Object": {}, "Array": {}, "Scalar": {}, "Malformed": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("rows = %d, want 1", len(results))
+	}
+	if raw, ok := results[0]["Object"].(json.RawMessage); !ok || string(raw) != strings.TrimSpace(object) {
+		t.Fatalf("object = %#v", results[0]["Object"])
+	}
+	if raw, ok := results[0]["Array"].(json.RawMessage); !ok || string(raw) != strings.TrimSpace(array) {
+		t.Fatalf("array = %#v", results[0]["Array"])
+	}
+	if results[0]["Scalar"] != scalar || results[0]["Malformed"] != malformed {
+		t.Fatalf("scalar or malformed value changed: %#v", results[0])
+	}
+
+	recorder := httptest.NewRecorder()
+	writeJSON(recorder, http.StatusOK, results[0])
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"large":9007199254740993`) || !strings.Contains(body, `"decimal":2.50`) {
+		t.Fatalf("dynamic JSON representation changed: %s", body)
+	}
+}
+
+func TestQueryPrepareBehavior(t *testing.T) {
+	type errorResponse struct {
+		Error    string `json:"error"`
+		Position struct {
+			Line   int `json:"line"`
+			Column int `json:"column"`
+		} `json:"position"`
+	}
+
+	store := testStore(t)
+	apiServer := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	prepareCalls := 0
+	prepareQuery := apiServer.prepareQuery
+	apiServer.prepareQuery = func(ctx context.Context, query string) (*sql.Stmt, error) {
+		prepareCalls++
+		return prepareQuery(ctx, query)
+	}
+	server := httptest.NewServer(apiServer.Handler())
+	t.Cleanup(server.Close)
+
+	response := queryAPI(t, server.URL, `Events | take 1`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || prepareCalls != 0 {
+		t.Fatalf("query status = %d, prepare calls = %d", response.StatusCode, prepareCalls)
+	}
+
+	response = queryAPIPath(t, server.URL+"/api/query/validate", `Events | take 1`)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent || prepareCalls != 1 {
+		t.Fatalf("validation status = %d, prepare calls = %d", response.StatusCode, prepareCalls)
+	}
+
+	response = queryAPI(t, server.URL, `Events | summarize Nested=sum(count())`)
+	var queryError errorResponse
+	if err := json.NewDecoder(response.Body).Decode(&queryError); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest || queryError.Error != "query contains an invalid column or expression" || queryError.Position.Line != 1 || queryError.Position.Column != 1 || prepareCalls != 1 {
+		t.Fatalf("invalid query status = %d, response = %#v, prepare calls = %d", response.StatusCode, queryError, prepareCalls)
+	}
+
+	response = queryAPIPath(t, server.URL+"/api/query/validate", `Events | summarize Nested=sum(count())`)
+	queryError = errorResponse{}
+	if err := json.NewDecoder(response.Body).Decode(&queryError); err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest || queryError.Error != "query contains an invalid column or expression" || queryError.Position.Line != 1 || queryError.Position.Column != 1 || prepareCalls != 2 {
+		t.Fatalf("invalid validation status = %d, response = %#v, prepare calls = %d", response.StatusCode, queryError, prepareCalls)
 	}
 }
 
@@ -167,16 +288,25 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 
 func testServer(t *testing.T) (*database.Store, *httptest.Server) {
 	t.Helper()
+	store := testStore(t)
+	return store, serveStore(t, store)
+}
+
+func testStore(t *testing.T) *database.Store {
+	t.Helper()
 	store, err := database.Open(t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+func serveStore(t *testing.T, store *database.Store) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(New(store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
-	t.Cleanup(func() {
-		server.Close()
-		store.Close()
-	})
-	return store, server
+	t.Cleanup(server.Close)
+	return server
 }
 
 func queryRows(t *testing.T, serverURL, query string) []map[string]any {
