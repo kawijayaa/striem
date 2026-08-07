@@ -7,3 +7,5 @@ striem
 node_modules
 web/dist
 testdata
+deploy/
+.impeccable/
