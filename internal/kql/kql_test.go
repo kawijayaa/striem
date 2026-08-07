@@ -10,8 +10,15 @@ import (
 	_ "github.com/kawijayaa/striem/internal/database"
 )
 
+var logicalEventCatalog = TableCatalog{"Fixture": {ID: 1, Fields: []Field{
+	{Name: "event_type", Type: "string"},
+	{Name: "host", Type: "string"},
+	{Name: "user", Type: "string"},
+	{Name: "message", Type: "string"},
+}}}
+
 func TestCompileUsesKSQLWithStriemTable(t *testing.T) {
-	compiled, err := Compile(`Sysmon | where EventType == "1" | project Host | take 10`, time.Now(), TableCatalog{"Sysmon": 42})
+	compiled, err := Compile(`Sysmon | where event_type == "1" | project host | take 10`, time.Now(), TableCatalog{"Sysmon": {ID: 42, Fields: []Field{{Name: "event_type", Type: "string"}, {Name: "host", Type: "string"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,8 +30,24 @@ func TestCompileUsesKSQLWithStriemTable(t *testing.T) {
 	if len(compiled.Args) != 0 {
 		t.Fatalf("args = %#v", compiled.Args)
 	}
-	if strings.Join(compiled.Columns, ",") != "Host" {
+	if strings.Join(compiled.Columns, ",") != "host" {
 		t.Fatalf("columns = %v", compiled.Columns)
+	}
+}
+
+func TestCatalogBuildsDatasetAndUnionSchemas(t *testing.T) {
+	catalog := TableCatalog{
+		"Zulu":  {ID: 2, Fields: []Field{{Name: "shared", Type: "long"}, {Name: "zulu", Type: "bool"}, {Name: "CaseKey", Type: "string"}}},
+		"Alpha": {ID: 1, Fields: []Field{{Name: "alpha", Type: "string"}, {Name: "shared", Type: "string"}, {Name: "casekey", Type: "string"}}},
+	}
+	if got := catalog.Columns("Alpha"); fmt.Sprint(got) != `[{TimeGenerated datetime} {Source string} {RawData dynamic} {alpha string} {shared string} {casekey string}]` {
+		t.Fatalf("Alpha columns = %#v", got)
+	}
+	if got := catalog.Columns("Events"); fmt.Sprint(got) != `[{TimeGenerated datetime} {Source string} {RawData dynamic} {alpha string} {shared dynamic} {zulu bool}]` {
+		t.Fatalf("Events columns = %#v", got)
+	}
+	if got := catalog.Columns("Missing"); got != nil {
+		t.Fatalf("missing columns = %#v", got)
 	}
 }
 
@@ -34,7 +57,7 @@ func TestCompiledQueryExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	compiled, err := Compile(`Events | take 1`, time.Now())
@@ -52,10 +75,10 @@ func TestCompiledUnionExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := Compile(`Events | project Host | union (Events | project Host)`, time.Now())
+	compiled, err := Compile(`Events | project host | union (Events | project host)`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,17 +93,17 @@ func TestCompiledJoinExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := Compile(`Events | project User, Host | join kind=inner (Events | project User, Host, Message) on User`, time.Now())
+	compiled, err := Compile(`Events | project user, host | join kind=inner (Events | project user, host, message) on user`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Query(compiled.SQL, compiled.Args...); err != nil {
 		t.Fatalf("query error = %v\nSQL: %s", err, compiled.SQL)
 	}
-	if got := strings.Join(compiled.Columns, ","); got != "User,Host,User1,Host1,Message" {
+	if got := strings.Join(compiled.Columns, ","); got != "user,host,user1,host1,message" {
 		t.Fatalf("columns = %q", got)
 	}
 }
@@ -101,7 +124,7 @@ func TestDynamicArrayIndexExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"tags":["first"],"field.with.dots":"value"}')`); err != nil {
@@ -127,10 +150,10 @@ func TestMultiValueOperatorsExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO events(host, raw_data) VALUES ('pc-1', '{"items":[1,2,3]}')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"items":[1,2,3]}')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,13 +206,13 @@ func TestNewKSQLScalarOperatorsExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO events(username, message, raw_data) VALUES ('Admin', 'PowerShell alpha-user', '{}'), ('guest', 'benign', '{}')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"user":"Admin","message":"PowerShell alpha-user"}'), ('{"user":"guest","message":"benign"}')`); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := Compile(`Events | where User in~ ("ADMIN") and Message has_all ("powershell", "alpha") | project User`, time.Now())
+	compiled, err := Compile(`Events | where user in~ ("ADMIN") and message has_all ("powershell", "alpha") | project user`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +231,14 @@ func TestNewKSQLPipelineOperatorsExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO events(host, raw_data) VALUES ('pc-1', '{}'), ('pc-2', '{}')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"host":"pc-1"}'), ('{"host":"pc-2"}')`); err != nil {
 		t.Fatal(err)
 	}
 
-	sampled, err := Compile(`Events | sample 1 | project Host`, time.Now())
+	sampled, err := Compile(`Events | sample 1 | project host`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +247,7 @@ func TestNewKSQLPipelineOperatorsExecute(t *testing.T) {
 		t.Fatalf("sample error = %v\nSQL: %s", err, sampled.SQL)
 	}
 
-	aliased, err := Compile(`Events | as LeftSide | join kind=inner (LeftSide) on Host | project Host`, time.Now())
+	aliased, err := Compile(`Events | as LeftSide | join kind=inner (LeftSide) on host | project host`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,14 +271,14 @@ func TestSchemaAwareOperatorsExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO events(host, username, message, raw_data) VALUES ('old', 'alice', 'PowerShell launched', '{}')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"host":"old","user":"alice","message":"PowerShell launched"}')`); err != nil {
 		t.Fatal(err)
 	}
 
-	replaced, err := Compile(`Events | extend Host="new" | project Host`, time.Now())
+	replaced, err := Compile(`Events | extend host="new" | project host`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +290,7 @@ func TestSchemaAwareOperatorsExecute(t *testing.T) {
 		t.Fatalf("Host = %q", host)
 	}
 
-	searched, err := Compile(`Events | search "powershell" | project Host`, time.Now())
+	searched, err := Compile(`Events | search "powershell" | project host`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,18 +298,18 @@ func TestSchemaAwareOperatorsExecute(t *testing.T) {
 		t.Fatalf("search result = %q, %v\nSQL: %s", host, err, searched.SQL)
 	}
 
-	projected, err := Compile(`Events | project-away Source, EventType | project-rename Computer=Host | project-keep TimeGenerated, Computer, RawData`, time.Now())
+	projected, err := Compile(`Events | project-away Source, event_type | project-rename Computer=host | project-keep TimeGenerated, Computer, RawData`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(projected.Columns, ","); got != "TimeGenerated,Computer,RawData" {
+	if got := strings.Join(projected.Columns, ","); got != "TimeGenerated,RawData,Computer" {
 		t.Fatalf("columns = %q", got)
 	}
 	if _, dynamic := projected.DynamicColumns["RawData"]; !dynamic {
 		t.Fatal("RawData lost its dynamic type")
 	}
 
-	aggregated, err := Compile(`Events | summarize Users=make_list(User), UniqueUsers=make_set(User)`, time.Now())
+	aggregated, err := Compile(`Events | summarize Users=make_list(user), UniqueUsers=make_set(user)`, time.Now(), logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,16 +331,16 @@ func TestStriemScalarFunctionsExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO events(event_type, host, username, message, raw_data) VALUES (NULL, 'pc-1', 'alice', '', '{}')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO events(raw_data) VALUES ('{"event_type":null,"host":"pc-1","user":"alice","message":""}')`); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.August, 7, 12, 30, 0, 0, time.FixedZone("test", 10*60*60))
 	compiled, err := Compile(`Events
-| extend Current=now(), Prior=ago(1d), Fixed=todatetime("2026-01-02T03:04:05Z"), Integer=toint("42"), Real=toreal("2.5"), Missing=isnull(EventType), Present=isnotnull(Host), Blank=isempty(Message), Named=isnotempty(User)
-| project Current, Prior, Fixed, Integer, Real, Missing, Present, Blank, Named`, now)
+| extend Current=now(), Prior=ago(1d), Fixed=todatetime("2026-01-02T03:04:05Z"), Integer=toint("42"), Real=toreal("2.5"), Missing=isnull(event_type), Present=isnotnull(host), Blank=isempty(message), Named=isnotempty(user)
+| project Current, Prior, Fixed, Integer, Real, Missing, Present, Blank, Named`, now, logicalEventCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,14 +363,14 @@ func TestStriemScalarFunctionsRejectInvalidArguments(t *testing.T) {
 	queries := []string{
 		`Events | extend Value=now(1)`,
 		`Events | extend Value=ago()`,
-		`Events | extend Value=ago(Host)`,
+		`Events | extend Value=ago(host)`,
 		`Events | extend Value=ago(1x)`,
 		`Events | extend Value=toint()`,
 		`Events | extend Value=isnull()`,
 		`Events | extend Value=isempty()`,
 	}
 	for _, query := range queries {
-		if _, err := Compile(query, time.Now()); err == nil {
+		if _, err := Compile(query, time.Now(), logicalEventCatalog); err == nil {
 			t.Errorf("Compile(%q) succeeded", query)
 		}
 	}
@@ -399,8 +422,8 @@ func TestCompileRejectsUnknownTable(t *testing.T) {
 }
 
 func TestCompileAddsLeadingSearchFullTextPrefilter(t *testing.T) {
-	compiled, err := Compile(`Suricata | search "10.10.1.9" | where EventType == "alert" | project Host`, time.Now(), CompileConfig{
-		Tables: TableCatalog{"Suricata": 42}, FullTextIndex: true,
+	compiled, err := Compile(`Suricata | search "10.10.1.9" | where event_type == "alert" | project host`, time.Now(), CompileConfig{
+		Tables: TableCatalog{"Suricata": {ID: 42, Fields: []Field{{Name: "event_type", Type: "string"}, {Name: "host", Type: "string"}}}}, FullTextIndex: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -424,7 +447,7 @@ func TestCompileSkipsUnsupportedFullTextPrefilters(t *testing.T) {
 		`Events | where Source == "fixture" | search "powershell"`,
 		`Events | search "ab"`,
 		`Events | search "a\u0000bc"`,
-		`Events | project Host | union (Events | search "powershell" | project Host)`,
+		`Events | project Source | union (Events | search "powershell" | project Source)`,
 	} {
 		compiled, err := Compile(query, time.Now(), CompileConfig{FullTextIndex: true})
 		if err != nil {

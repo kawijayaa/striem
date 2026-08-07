@@ -28,12 +28,12 @@ func BenchmarkQuery(b *testing.B) {
 		name string
 		kql  string
 	}{
-		{name: "Q1_JSONScalar", kql: `Suricata | where RawData.src_ip == "10.10.1.9" | take 100`},
-		{name: "Q2_NestedTerm", kql: `Suricata | where RawData.alert.signature has "Heartbeat" | take 100`},
-		{name: "Q3_JSONSummarize", kql: `Suricata | summarize c=count() by tostring(RawData.event_type)`},
+		{name: "Q1_JSONScalar", kql: `Suricata | where src_ip == "10.10.1.9" | take 100`},
+		{name: "Q2_NestedTerm", kql: `Suricata | where alert.signature has "Heartbeat" | take 100`},
+		{name: "Q3_JSONSummarize", kql: `Suricata | summarize c=count() by event_type`},
 		{name: "Q4_Search", kql: `Events | search "10.10.1.9" | take 100`},
 		{name: "Q5_TimeIndex", kql: `Suricata | where TimeGenerated > ago(1d) | order by TimeGenerated desc | take 100`},
-		{name: "Q6_Join", kql: `Sysmon | join kind=inner (Suricata) on Host | take 100`},
+		{name: "Q6_Join", kql: `Sysmon | extend host=tostring(Event.System.Computer) | join kind=inner (Suricata) on host | take 100`},
 	}
 
 	for _, query := range queries {
@@ -79,8 +79,20 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 			b.Fatal(err)
 		}
 		catalog := make(kql.TableCatalog, len(datasets))
+		groups, err := store.ListFieldGroups(b.Context())
+		if err != nil {
+			b.Fatal(err)
+		}
+		fieldsByTable := make(map[string][]kql.Field, len(groups))
+		for _, group := range groups {
+			for _, field := range group.Fields {
+				if !strings.ContainsAny(field.Path, ".[\"") {
+					fieldsByTable[group.Table] = append(fieldsByTable[group.Table], kql.Field{Name: field.Path, Type: field.Type})
+				}
+			}
+		}
 		for _, dataset := range datasets {
-			catalog[dataset.Table] = dataset.ID
+			catalog[dataset.Table] = kql.Table{ID: dataset.ID, Fields: fieldsByTable[dataset.Table]}
 		}
 		if *queryBenchmarkFullText {
 			if err := store.ConfigureEventStorage(b.Context(), []string{"src_ip", "dest_ip", "alert.signature_id"}, true); err != nil {
@@ -112,7 +124,7 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 			b.Fatal(err)
 		}
 	}
-	statement, err := tx.PrepareContext(b.Context(), `INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	statement, err := tx.PrepareContext(b.Context(), `INSERT INTO events(dataset_id, time_generated, source, raw_data) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -133,9 +145,9 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 		if index < 10_000 {
 			host = fmt.Sprintf("host-%d", index)
 		}
-		raw := fmt.Sprintf(`{"timestamp":%q,"event_type":"alert","src_ip":%q,"dest_ip":"192.0.2.%d","alert":{"signature_id":%d,"signature":%q},"network":{"protocol":"tcp","bytes":1024}}`,
-			timestamp.Format(time.RFC3339Nano), srcIP, index%251, index%10_000, signature)
-		if _, err := statement.ExecContext(b.Context(), 1, eventtime.Format(timestamp), "suricata", "alert", host, nil, signature, raw); err != nil {
+		raw := fmt.Sprintf(`{"timestamp":%q,"event_type":"alert","host":%q,"src_ip":%q,"dest_ip":"192.0.2.%d","alert":{"signature_id":%d,"signature":%q},"network":{"protocol":"tcp","bytes":1024}}`,
+			timestamp.Format(time.RFC3339Nano), host, srcIP, index%251, index%10_000, signature)
+		if _, err := statement.ExecContext(b.Context(), 1, eventtime.Format(timestamp), "suricata", raw); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -143,7 +155,7 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 		timestamp := time.Date(2026, time.July, 27, 0, 0, 0, index, time.UTC)
 		host := fmt.Sprintf("host-%d", index)
 		raw := fmt.Sprintf(`{"Event":{"System":{"TimeCreated":{"SystemTime":%q},"Computer":%q,"EventID":1},"EventData":{"Image":"powershell.exe","DestinationIp":"10.10.1.9"}}}`, timestamp.Format(time.RFC3339Nano), host)
-		if _, err := statement.ExecContext(b.Context(), 2, eventtime.Format(timestamp), "sysmon", "1", host, fmt.Sprintf("user-%d", index%100), "Process Create", raw); err != nil {
+		if _, err := statement.ExecContext(b.Context(), 2, eventtime.Format(timestamp), "sysmon", raw); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -162,7 +174,10 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 	if err := store.SyncFullTextIndex(b.Context(), *queryBenchmarkFullText); err != nil {
 		b.Fatal(err)
 	}
-	return store, kql.TableCatalog{"Suricata": 1, "Sysmon": 2}
+	return store, kql.TableCatalog{
+		"Suricata": {ID: 1, Fields: []kql.Field{{Name: "timestamp", Type: "string"}, {Name: "event_type", Type: "string"}, {Name: "host", Type: "string"}, {Name: "src_ip", Type: "string"}, {Name: "dest_ip", Type: "string"}, {Name: "alert", Type: "dynamic"}, {Name: "network", Type: "dynamic"}}},
+		"Sysmon":   {ID: 2, Fields: []kql.Field{{Name: "Event", Type: "dynamic"}}},
+	}
 }
 
 func consumeBenchmarkRows(b *testing.B, rows *sql.Rows) {

@@ -383,7 +383,7 @@ function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): H
     time.dateTime = String(row.TimeGenerated);
     open.append(time);
   }
-  const standardColumns = new Set(['TimeGenerated', 'Source', 'EventType', 'Host', 'User', 'Message', 'RawData']);
+  const standardColumns = new Set(['TimeGenerated', 'Source', 'RawData']);
   let detailList: HTMLDListElement | undefined;
   const details = columns.filter(column => !standardColumns.has(column)
     && row[column] !== null && row[column] !== undefined && typeof row[column] !== 'object').slice(0, 3);
@@ -410,7 +410,8 @@ function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): H
   open.addEventListener('click', () => showRaw(row));
   const actions = document.createElement('div');
   actions.className = 'mobile-result-card-actions';
-  const pivotColumn = ['EventType', 'Source', 'Host', 'User'].find(column => row[column] !== null && row[column] !== undefined);
+  const pivotColumn = columns.find(column => !['TimeGenerated', 'RawData'].includes(column)
+    && row[column] !== null && row[column] !== undefined && typeof row[column] !== 'object');
   if (pivotColumn) {
     const filter = document.createElement('button');
     filter.className = 'mobile-pivot-action';

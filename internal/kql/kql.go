@@ -18,13 +18,9 @@ import (
 const resultLimit = 1000
 const fullTextPredicate = `"rowid" IN (SELECT "rowid" FROM "events_fts" WHERE "events_fts" MATCH ?)`
 
-var eventSchema = ksql.Schema{Columns: []ksql.Column{
+var systemSchema = ksql.Schema{Columns: []ksql.Column{
 	{Name: "TimeGenerated", Type: ksql.TypeDateTime},
 	{Name: "Source", Type: ksql.TypeString},
-	{Name: "EventType", Type: ksql.TypeString},
-	{Name: "Host", Type: ksql.TypeString},
-	{Name: "User", Type: ksql.TypeString},
-	{Name: "Message", Type: ksql.TypeString},
 	{Name: "RawData", Type: ksql.TypeDynamic},
 }}
 
@@ -33,9 +29,111 @@ type CompiledQuery struct {
 	Args           []any
 	Columns        []string
 	DynamicColumns map[string]struct{}
+	BooleanColumns map[string]struct{}
 }
 
-type TableCatalog map[string]int64
+type Field struct {
+	Name string
+	Type string
+}
+
+type Table struct {
+	ID     int64
+	Fields []Field
+}
+
+type TableCatalog map[string]Table
+
+func (catalog TableCatalog) Columns(name string) []Field {
+	schema, ok := catalog.schema(name)
+	if !ok {
+		return nil
+	}
+	fields := make([]Field, len(schema.Columns))
+	for index, column := range schema.Columns {
+		fields[index] = Field{Name: column.Name, Type: string(column.Type)}
+	}
+	return fields
+}
+
+func (catalog TableCatalog) schema(name string) (ksql.Schema, bool) {
+	fields := make([]Field, 0)
+	if strings.EqualFold(name, "Events") {
+		byName := make(map[string]int)
+		ambiguous := make(map[string]struct{})
+		tableNames := make([]string, 0, len(catalog))
+		for tableName := range catalog {
+			tableNames = append(tableNames, tableName)
+		}
+		sort.Slice(tableNames, func(i, j int) bool { return strings.ToLower(tableNames[i]) < strings.ToLower(tableNames[j]) })
+		for _, tableName := range tableNames {
+			table := catalog[tableName]
+			for _, field := range table.Fields {
+				key := strings.ToLower(field.Name)
+				if _, exists := ambiguous[key]; exists {
+					continue
+				}
+				if index, exists := byName[key]; exists {
+					if fields[index].Name != field.Name {
+						fields[index].Name = ""
+						ambiguous[key] = struct{}{}
+						continue
+					}
+					if fields[index].Type != field.Type {
+						fields[index].Type = "dynamic"
+					}
+					continue
+				}
+				byName[key] = len(fields)
+				fields = append(fields, field)
+			}
+		}
+		filtered := fields[:0]
+		for _, field := range fields {
+			if field.Name != "" {
+				filtered = append(filtered, field)
+			}
+		}
+		fields = filtered
+		sort.Slice(fields, func(i, j int) bool { return strings.ToLower(fields[i].Name) < strings.ToLower(fields[j].Name) })
+	} else {
+		found := false
+		for tableName, table := range catalog {
+			if strings.EqualFold(name, tableName) {
+				fields = append(fields, table.Fields...)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ksql.Schema{}, false
+		}
+	}
+	schema := systemSchema.Clone()
+	for _, field := range fields {
+		schema.Columns = append(schema.Columns, ksql.Column{Name: field.Name, Type: fieldScalarType(field.Type)})
+	}
+	return schema, true
+}
+
+func fieldScalarType(value string) ksql.ScalarType {
+	switch value {
+	case "bool":
+		return ksql.TypeBool
+	case "long":
+		return ksql.TypeLong
+	case "real":
+		return ksql.TypeReal
+	case "string":
+		return ksql.TypeString
+	case "datetime":
+		return ksql.TypeDateTime
+	case "dynamic", "mixed":
+		return ksql.TypeDynamic
+	default:
+		return ksql.TypeUnknown
+	}
+}
 
 type compileSettings struct {
 	tables        TableCatalog
@@ -108,10 +206,13 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 
 	columns := make([]string, 0, len(result.Columns))
 	dynamic := make(map[string]struct{})
+	booleans := make(map[string]struct{})
 	for _, column := range result.Columns {
 		columns = append(columns, column.Name)
 		if column.Type == ksql.TypeDynamic {
 			dynamic[column.Name] = struct{}{}
+		} else if column.Type == ksql.TypeBool {
+			booleans[column.Name] = struct{}{}
 		}
 	}
 	query := &sqlast.Select{
@@ -123,18 +224,14 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		return CompiledQuery{}, err
 	}
 	sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
-	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic}, nil
+	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans}, nil
 }
 
 func newCatalog(tables TableCatalog) ksql.Catalog {
 	return ksql.CatalogFunc(func(name string) (ksql.Table, bool) {
-		if strings.EqualFold(name, "Events") {
-			return ksql.Table{Name: "events", Schema: eventSchema.Clone()}, true
-		}
-		for table := range tables {
-			if strings.EqualFold(name, table) {
-				return ksql.Table{Name: "events", Schema: eventSchema.Clone()}, true
-			}
+		schema, ok := tables.schema(name)
+		if ok {
+			return ksql.Table{Name: "events", Schema: schema}, true
 		}
 		return ksql.Table{}, false
 	})
@@ -153,15 +250,28 @@ func tableSource(tables TableCatalog, fullTextTerms map[int]string) ksql.SourceR
 		}{
 			{name: "time_generated", alias: "TimeGenerated"},
 			{name: "source", alias: "Source"},
-			{name: "event_type", alias: "EventType"},
-			{name: "host", alias: "Host"},
-			{name: "username", alias: "User"},
-			{name: "message", alias: "Message"},
 			{name: "raw_data", alias: "RawData"},
 		}
-		projections := make([]sqlast.SelectItem, len(physical))
-		for index, column := range physical {
-			projections[index] = sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.name}}, Alias: column.alias}
+		projections := make([]sqlast.SelectItem, 0, len(table.Schema.Columns))
+		for _, column := range physical {
+			projections = append(projections, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.name}}, Alias: column.alias})
+		}
+		for _, column := range table.Schema.Columns[len(systemSchema.Columns):] {
+			path := stringLiteral(`$."` + column.Name + `"`)
+			expression := sqlast.Expr(&sqlast.Call{Name: "json_extract", Args: []sqlast.Expr{
+				&sqlast.Identifier{Parts: []string{"raw_data"}}, path,
+			}})
+			if column.Type == ksql.TypeDynamic {
+				expression = &sqlast.Binary{
+					Left:     &sqlast.Identifier{Parts: []string{"raw_data"}},
+					Operator: "->",
+					Right:    path,
+				}
+			}
+			projections = append(projections, sqlast.SelectItem{
+				Expr:  expression,
+				Alias: column.Name,
+			})
 		}
 		query := &sqlast.Select{
 			From:        &sqlast.Table{Parts: []string{"main", table.Name}},
@@ -299,9 +409,9 @@ func unquoteKQLLiteral(value string) string {
 }
 
 func datasetID(tables TableCatalog, name string) (int64, bool) {
-	for table, id := range tables {
+	for table, definition := range tables {
 		if strings.EqualFold(name, table) {
-			return id, true
+			return definition.ID, true
 		}
 	}
 	return 0, false

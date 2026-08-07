@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/kql"
@@ -31,10 +32,18 @@ func New(store *database.Store, logger *slog.Logger) *Server {
 	if err != nil {
 		panic(err)
 	}
+	groups, err := store.ListFieldGroups(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	fieldsByTable := make(map[string][]kql.Field, len(groups))
+	for _, group := range groups {
+		fieldsByTable[group.Table] = logicalFields(group.Fields)
+	}
 	tableCatalog := make(kql.TableCatalog, len(datasets))
 	for _, dataset := range datasets {
 		if dataset.Table != "" {
-			tableCatalog[dataset.Table] = dataset.ID
+			tableCatalog[dataset.Table] = kql.Table{ID: dataset.ID, Fields: fieldsByTable[dataset.Table]}
 		}
 	}
 	return &Server{
@@ -43,6 +52,51 @@ func New(store *database.Store, logger *slog.Logger) *Server {
 		tableCatalog: tableCatalog,
 		prepareQuery: store.DB().PrepareContext,
 	}
+}
+
+func logicalFields(fields []database.Field) []kql.Field {
+	reserved := map[string]struct{}{"timegenerated": {}, "source": {}, "rawdata": {}}
+	result := make([]kql.Field, 0, len(fields))
+	indexes := make(map[string]int)
+	ambiguous := make(map[string]struct{})
+	for _, field := range fields {
+		if !isLogicalFieldName(field.Path) {
+			continue
+		}
+		key := strings.ToLower(field.Path)
+		if _, found := reserved[key]; found {
+			continue
+		}
+		if _, found := ambiguous[key]; found {
+			continue
+		}
+		if index, found := indexes[key]; found {
+			result[index].Name = ""
+			ambiguous[key] = struct{}{}
+			continue
+		}
+		indexes[key] = len(result)
+		result = append(result, kql.Field{Name: field.Path, Type: field.Type})
+	}
+	filtered := result[:0]
+	for _, field := range result {
+		if field.Name != "" {
+			filtered = append(filtered, field)
+		}
+	}
+	return filtered
+}
+
+func isLogicalFieldName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, character := range value {
+		if character != '_' && !unicode.IsLetter(character) && (index == 0 || !unicode.IsDigit(character)) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) Handler() http.Handler {
@@ -73,10 +127,6 @@ func (s *Server) fields(w http.ResponseWriter, r *http.Request) {
 	common := []database.Field{
 		{Path: "TimeGenerated", Type: "datetime"},
 		{Path: "Source", Type: "string"},
-		{Path: "EventType", Type: "string"},
-		{Path: "Host", Type: "string"},
-		{Path: "User", Type: "string"},
-		{Path: "Message", Type: "string"},
 		{Path: "RawData", Type: "dynamic"},
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"common": common, "tables": groups})
@@ -103,15 +153,6 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load workspace metadata", nil)
 		return
 	}
-	columns := []map[string]string{
-		{"name": "TimeGenerated", "type": "datetime"},
-		{"name": "Source", "type": "string"},
-		{"name": "EventType", "type": "string"},
-		{"name": "Host", "type": "string"},
-		{"name": "User", "type": "string"},
-		{"name": "Message", "type": "string"},
-		{"name": "RawData", "type": "dynamic"},
-	}
 	sort.Slice(datasets, func(i, j int) bool { return datasets[i].Table < datasets[j].Table })
 	var totalEvents int64
 	tables := make([]map[string]any, 0, len(datasets)+1)
@@ -119,14 +160,14 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		totalEvents += dataset.EventCount
 	}
 	tables = append(tables, map[string]any{
-		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": columns,
+		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": schemaColumns(s.tableCatalog.Columns("Events")),
 	})
 	for _, dataset := range datasets {
 		if dataset.Table == "" {
 			continue
 		}
 		tables = append(tables, map[string]any{
-			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": columns,
+			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": schemaColumns(s.tableCatalog.Columns(dataset.Table)),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -136,6 +177,14 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		"operators":     []string{"where", "filter", "search", "project", "project-away", "project-keep", "project-rename", "project-reorder", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "sample", "sample-distinct", "count", "serialize", "as", "mv-expand", "mv-apply", "union", "join", "lookup"},
 		"functions":     []string{"now", "ago", "datetime", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "bag_keys", "bag_has_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "max", "avg", "make_set", "make_list", "take_any"},
 	})
+}
+
+func schemaColumns(fields []kql.Field) []map[string]string {
+	columns := make([]map[string]string, len(fields))
+	for index, field := range fields {
+		columns[index] = map[string]string{"name": field.Name, "type": field.Type}
+	}
+	return columns
 }
 
 type queryRequest struct {
@@ -149,7 +198,7 @@ type answerRequest struct {
 func (s *Server) questions(w http.ResponseWriter, r *http.Request) {
 	state, err := s.store.ChallengeState(r.Context())
 	if err != nil {
-		s.logger.Error("list investigation questions", "error", err)
+		s.logger.Error("Could not list investigation questions", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not load investigation questions", nil)
 		return
 	}
@@ -185,7 +234,7 @@ func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("submit investigation answer", "question", r.PathValue("id"), "error", err)
+		s.logger.Error("Could not submit investigation answer", "question", r.PathValue("id"), "error", err)
 		writeError(w, http.StatusInternalServerError, "could not submit answer", nil)
 		return
 	}
@@ -211,15 +260,15 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	rows, err := s.store.DB().QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
-		s.logger.Error("query execution failed", "error", err)
+		s.logger.Error("Query execution failed", "error", err)
 		writeQueryError(w, invalidSQLExpressionError())
 		return
 	}
 	defer rows.Close()
 
-	columns, results, err := scanRows(rows, compiled.DynamicColumns)
+	columns, results, err := scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns)
 	if err != nil {
-		s.logger.Error("query result failed", "error", err)
+		s.logger.Error("Could not read query result", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read query result", nil)
 		return
 	}
@@ -302,7 +351,7 @@ func requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []map[string]any, error) {
+func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}) ([]string, []map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, nil, err
@@ -320,6 +369,14 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []m
 		row := make(map[string]any, len(columns))
 		for index, column := range columns {
 			value := values[index]
+			if _, boolean := booleanColumns[column]; boolean {
+				switch current := value.(type) {
+				case int64:
+					value = current != 0
+				case float64:
+					value = current != 0
+				}
+			}
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
 			}
@@ -329,11 +386,9 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []m
 					continue
 				}
 				trimmed := strings.TrimSpace(text)
-				if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-					raw := json.RawMessage(trimmed)
-					if json.Valid(raw) {
-						value = raw
-					}
+				raw := json.RawMessage(trimmed)
+				if json.Valid(raw) {
+					value = raw
 				}
 			}
 			row[column] = value
@@ -345,9 +400,13 @@ func scanRows(rows *sql.Rows, dynamicColumns map[string]struct{}) ([]string, []m
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.logger.Enabled(r.Context(), slog.LevelDebug) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		started := time.Now()
 		next.ServeHTTP(w, r)
-		s.logger.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started))
+		s.logger.DebugContext(r.Context(), r.Method+" "+r.URL.Path, "duration", time.Since(started))
 	})
 }
 

@@ -23,13 +23,20 @@ export function resultRowKey(result: QueryResult, row: EventRow): string {
 }
 
 export function resultIdentity(row: EventRow): string {
-  return String(row.EventType || row.Message || row.Source || 'Security event');
+  const field = logicalScalarFields(row)[0];
+  return String(field?.[1] ?? row.Source ?? 'Security event');
 }
 
 export function resultContext(row: EventRow): string {
-  return [row.Source, row.User, row.Host]
+  return [row.Source, ...logicalScalarFields(row).slice(1, 3).map(([, value]) => value)]
     .filter(value => value !== null && value !== undefined && value !== '')
     .join(' · ');
+}
+
+function logicalScalarFields(row: EventRow): [string, unknown][] {
+  const system = new Set(['TimeGenerated', 'Source', 'RawData']);
+  return Object.entries(row).filter(([name, value]) => !system.has(name)
+    && value !== null && value !== undefined && value !== '' && typeof value !== 'object');
 }
 
 export function resultTime(row: EventRow): string | undefined {

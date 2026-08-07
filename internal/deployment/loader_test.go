@@ -35,8 +35,6 @@ datasets:
     path: events.ndjson
     source: fixture
     timestampPath: ts
-    fieldPaths:
-      Host: host
 `
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
@@ -146,8 +144,6 @@ func TestLoadDetectsCSVAndGzip(t *testing.T) {
     path: PLACEHOLDER
     source: fixture
     timestampPath: ts
-    fieldPaths:
-      Host: host
 `
 			manifest = strings.Replace(manifest, "PLACEHOLDER", fileName, 1)
 			manifestPath := filepath.Join(directory, "datasets.yaml")
@@ -327,7 +323,7 @@ func TestLoadUnionsIndexedPathsAndQueryUsesExpressionIndex(t *testing.T) {
 		t.Fatalf("expression index count = %d, want 3", indexCount)
 	}
 
-	compiled, err := kql.Compile(`One | where RawData.src_ip == "198.51.100.77" | project RawData`, time.Now(), kql.TableCatalog{"One": loaded[0].ID})
+	compiled, err := kql.Compile(`One | where src_ip == "198.51.100.77" | project RawData`, time.Now(), kql.TableCatalog{"One": {ID: loaded[0].ID, Fields: []kql.Field{{Name: "src_ip", Type: "string"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

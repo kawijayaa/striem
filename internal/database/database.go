@@ -88,10 +88,6 @@ CREATE TABLE IF NOT EXISTS events (
     dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
     time_generated TEXT NOT NULL,
     source TEXT NOT NULL,
-    event_type TEXT,
-    host TEXT,
-    username TEXT,
-    message TEXT,
     raw_data TEXT NOT NULL
 );
 
@@ -120,6 +116,9 @@ CREATE TABLE IF NOT EXISTS investigation_progress (
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("initialize database: %w", err)
 	}
+	if err := s.removeNormalizedEventColumns(ctx); err != nil {
+		return err
+	}
 	datasetColumns := []struct {
 		name        string
 		definition  string
@@ -143,6 +142,65 @@ ON datasets(table_name) WHERE table_name <> '';`); err != nil {
 	}
 	if err := s.createOrdinaryEventIndexes(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) removeNormalizedEventColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(events)")
+	if err != nil {
+		return fmt.Errorf("inspect event schema: %w", err)
+	}
+	existing := make(map[string]struct{})
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect event column: %w", err)
+		}
+		existing[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspect event schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("inspect event schema: %w", err)
+	}
+	legacy := []string{"event_type", "host", "username", "message"}
+	found := false
+	for _, column := range legacy {
+		if _, ok := existing[column]; ok {
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("migrate event schema: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+DROP INDEX IF EXISTS idx_events_type_time;
+DROP INDEX IF EXISTS idx_events_host_time;
+DROP INDEX IF EXISTS idx_events_host_dataset;
+DROP INDEX IF EXISTS idx_events_user_time;`); err != nil {
+		return fmt.Errorf("drop normalized event indexes: %w", err)
+	}
+	for _, column := range legacy {
+		if _, ok := existing[column]; !ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE events DROP COLUMN "+column); err != nil {
+			return fmt.Errorf("drop normalized event column %s: %w", column, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event schema migration: %w", err)
 	}
 	return nil
 }
@@ -264,10 +322,6 @@ func (s *Store) createOrdinaryEventIndexes(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(time_generated);
 CREATE INDEX IF NOT EXISTS idx_events_source_time ON events(source, time_generated);
-CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(event_type, time_generated) WHERE event_type IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_events_host_time ON events(host, time_generated) WHERE host IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_events_host_dataset ON events(host, dataset_id) WHERE host IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_events_user_time ON events(username, time_generated) WHERE username IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_dataset_time ON events(dataset_id, time_generated);`); err != nil {
 		return fmt.Errorf("create event indexes: %w", err)
 	}
@@ -398,11 +452,7 @@ INSERT INTO events_fts(rowid, body)
 SELECT id,
        coalesce(raw_data, '') || char(10) ||
        coalesce(time_generated, '') || char(10) ||
-       coalesce(source, '') || char(10) ||
-       coalesce(event_type, '') || char(10) ||
-       coalesce(host, '') || char(10) ||
-       coalesce(username, '') || char(10) ||
-       coalesce(message, '')
+       coalesce(source, '')
 FROM events`); err != nil {
 		return fmt.Errorf("populate event full-text index: %w", err)
 	}

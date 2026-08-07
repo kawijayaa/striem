@@ -14,6 +14,7 @@ import (
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/ingest"
+	"github.com/kawijayaa/striem/internal/kql"
 )
 
 func TestProvisionedDataCanBeQueried(t *testing.T) {
@@ -22,13 +23,12 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 {"ts":"2024-01-01T00:01:00Z","host":"pc-2","process":{"name":"cmd.exe"}}`
 	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(events), false, ingest.Mapping{
 		Name: "demo", Table: "Sysmon", Source: "sysmon", TimestampPath: "ts", TimestampFormat: "auto",
-		FieldPaths: map[string]string{"EventType": "kind", "Host": "host", "User": "user", "Message": "message"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	server := serveStore(t, store)
 
-	response := queryAPI(t, server.URL, `Sysmon | extend Process=tostring(RawData.process.name) | where Process contains "powershell" | project Host, Process`)
+	response := queryAPI(t, server.URL, `Sysmon | extend Computer=tostring(host), ProcessName=tostring(process.name) | where ProcessName contains "powershell" | project Computer, ProcessName`)
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
@@ -41,7 +41,7 @@ func TestProvisionedDataCanBeQueried(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(result.Columns, ",") != "Host,Process" || len(result.Rows) != 1 || result.Rows[0]["Host"] != "pc-1" || result.Rows[0]["Process"] != "powershell.exe" {
+	if strings.Join(result.Columns, ",") != "Computer,ProcessName" || len(result.Rows) != 1 || result.Rows[0]["Computer"] != "pc-1" || result.Rows[0]["ProcessName"] != "powershell.exe" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -53,13 +53,12 @@ func TestKSQLAggregatesAndDynamicResults(t *testing.T) {
 {"ts":"2024-01-01T00:02:00Z","host":"pc-3","user":"alice","ip":"192.0.2.4"}`
 	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(events), false, ingest.Mapping{
 		Name: "audit", Table: "UAL", Source: "audit", TimestampPath: "ts",
-		FieldPaths: map[string]string{"Host": "host", "User": "user"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	server := serveStore(t, store)
 
-	rows := queryRows(t, server.URL, `UAL | extend ClientIP=tostring(RawData.ip) | summarize Failures=count() by ClientIP | order by Failures desc`)
+	rows := queryRows(t, server.URL, `UAL | summarize Failures=count() by ClientIP=ip | order by Failures desc`)
 	if len(rows) != 2 || rows[0]["ClientIP"] != "198.51.100.7" || rows[0]["Failures"] != float64(2) {
 		t.Fatalf("aggregate rows = %#v", rows)
 	}
@@ -67,6 +66,40 @@ func TestKSQLAggregatesAndDynamicResults(t *testing.T) {
 	payload, ok := dynamicRows[0]["Payload"].(map[string]any)
 	if !ok || payload["host"] != "pc-1" {
 		t.Fatalf("dynamic payload = %#v", dynamicRows)
+	}
+}
+
+func TestLogicalRootColumnsPreserveJSONTypes(t *testing.T) {
+	store := testStore(t)
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z","count":7,"score":2.5,"enabled":true,"nested":{"value":"ok"}}`), false, ingest.Mapping{
+		Name: "typed", Table: "Typed", Source: "fixture", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+	rows := queryRows(t, server.URL, `Typed | project count, score, enabled, nested`)
+	if len(rows) != 1 || rows[0]["count"] != float64(7) || rows[0]["score"] != 2.5 || rows[0]["enabled"] != true {
+		t.Fatalf("typed row = %#v", rows)
+	}
+	nested, ok := rows[0]["nested"].(map[string]any)
+	if !ok || nested["value"] != "ok" {
+		t.Fatalf("nested value = %#v", rows[0]["nested"])
+	}
+}
+
+func TestMixedLogicalRootColumnPreservesPerRowTypes(t *testing.T) {
+	store := testStore(t)
+	events := `{"ts":"2024-01-01T00:00:00Z","variant":true}
+{"ts":"2024-01-01T00:01:00Z","variant":"text"}`
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(events), false, ingest.Mapping{
+		Name: "mixed", Table: "Mixed", Source: "fixture", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+	rows := queryRows(t, server.URL, `Mixed | order by TimeGenerated asc | project variant`)
+	if len(rows) != 2 || rows[0]["variant"] != true || rows[1]["variant"] != "text" {
+		t.Fatalf("mixed rows = %#v", rows)
 	}
 }
 
@@ -109,7 +142,7 @@ func TestScanRowsPreservesDynamicJSON(t *testing.T) {
 	}
 	defer rows.Close()
 
-	_, results, err := scanRows(rows, map[string]struct{}{"Object": {}, "Array": {}, "Scalar": {}, "Malformed": {}})
+	_, results, err := scanRows(rows, map[string]struct{}{"Object": {}, "Array": {}, "Scalar": {}, "Malformed": {}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +155,10 @@ func TestScanRowsPreservesDynamicJSON(t *testing.T) {
 	if raw, ok := results[0]["Array"].(json.RawMessage); !ok || string(raw) != strings.TrimSpace(array) {
 		t.Fatalf("array = %#v", results[0]["Array"])
 	}
-	if results[0]["Scalar"] != scalar || results[0]["Malformed"] != malformed {
+	if raw, ok := results[0]["Scalar"].(json.RawMessage); !ok || string(raw) != strings.TrimSpace(scalar) {
+		t.Fatalf("scalar = %#v", results[0]["Scalar"])
+	}
+	if results[0]["Malformed"] != malformed {
 		t.Fatalf("scalar or malformed value changed: %#v", results[0])
 	}
 
@@ -329,9 +365,9 @@ VALUES (1, 'Zulu audit', 'Zulu', 'z', 'audit', 'ts', 4, '2026-08-07T00:00:00Z'),
        (2, 'Alpha logs', 'Alpha', 'a', 'sysmon', 'ts', 3, '2026-08-07T00:00:00Z'),
        (3, 'Legacy data', '', 'legacy', 'legacy', 'ts', 2, '2026-08-07T00:00:00Z');
 INSERT INTO dataset_fields(dataset_id, path, type)
-VALUES (1, 'RawData.User', 'string'),
-       (2, 'RawData.EventID', 'number'),
-       (3, 'RawData.Hidden', 'string');`); err != nil {
+VALUES (1, 'User', 'string'),
+       (2, 'EventID', 'long'),
+       (3, 'Hidden', 'string');`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetChallengeName(t.Context(), "Coverage Challenge"); err != nil {
@@ -368,10 +404,10 @@ VALUES (1, 'RawData.User', 'string'),
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || len(fields.Common) != 7 || len(fields.Tables) != 2 {
+	if response.StatusCode != http.StatusOK || len(fields.Common) != 3 || len(fields.Tables) != 2 {
 		t.Fatalf("fields status = %d, body = %#v", response.StatusCode, fields)
 	}
-	if fields.Tables[0].Table != "Alpha" || fields.Tables[0].Fields[0].Path != "RawData.EventID" || fields.Tables[1].Table != "Zulu" {
+	if fields.Tables[0].Table != "Alpha" || fields.Tables[0].Fields[0].Path != "EventID" || fields.Tables[1].Table != "Zulu" {
 		t.Fatalf("field groups = %#v", fields.Tables)
 	}
 
@@ -426,6 +462,23 @@ func TestReadEndpointsReportUnavailableDatabase(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("/api/questions status = %d, want in-memory state to remain available", response.StatusCode)
+	}
+}
+
+func TestLogicalFieldsExcludeReservedInvalidAndAmbiguousNames(t *testing.T) {
+	fields := logicalFields([]database.Field{
+		{Path: "Alpha", Type: "string"},
+		{Path: "alpha", Type: "long"},
+		{Path: "TimeGenerated", Type: "string"},
+		{Path: "Source", Type: "string"},
+		{Path: "RawData", Type: "dynamic"},
+		{Path: "nested.value", Type: "string"},
+		{Path: `RawData["invalid-name"]`, Type: "string"},
+		{Path: "valid_name", Type: "bool"},
+		{Path: "名前", Type: "string"},
+	})
+	if len(fields) != 2 || fields[0] != (kql.Field{Name: "valid_name", Type: "bool"}) || fields[1] != (kql.Field{Name: "名前", Type: "string"}) {
+		t.Fatalf("logical fields = %#v", fields)
 	}
 }
 

@@ -37,16 +37,15 @@ type Question struct {
 }
 
 type Dataset struct {
-	Name            string            `json:"name" yaml:"name"`
-	Table           string            `json:"table" yaml:"table"`
-	Path            string            `json:"path" yaml:"path"`
-	Format          string            `json:"format" yaml:"format"`
-	Source          string            `json:"source" yaml:"source"`
-	SourcePath      string            `json:"sourcePath" yaml:"sourcePath"`
-	TimestampPath   string            `json:"timestampPath" yaml:"timestampPath"`
-	TimestampFormat string            `json:"timestampFormat" yaml:"timestampFormat"`
-	FieldPaths      map[string]string `json:"fieldPaths" yaml:"fieldPaths"`
-	IndexedPaths    []string          `json:"indexedPaths" yaml:"indexedPaths"`
+	Name            string   `json:"name" yaml:"name"`
+	Table           string   `json:"table" yaml:"table"`
+	Path            string   `json:"path" yaml:"path"`
+	Format          string   `json:"format" yaml:"format"`
+	Source          string   `json:"source" yaml:"source"`
+	SourcePath      string   `json:"sourcePath" yaml:"sourcePath"`
+	TimestampPath   string   `json:"timestampPath" yaml:"timestampPath"`
+	TimestampFormat string   `json:"timestampFormat" yaml:"timestampFormat"`
+	IndexedPaths    []string `json:"indexedPaths" yaml:"indexedPaths"`
 }
 
 type preparedDataset struct {
@@ -204,7 +203,6 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 			SourcePath:      configured.SourcePath,
 			TimestampPath:   configured.TimestampPath,
 			TimestampFormat: configured.TimestampFormat,
-			FieldPaths:      configured.FieldPaths,
 			ReplaceExisting: true,
 		})
 		closeErr := input.Close()
@@ -321,7 +319,7 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 	return challenge, nil
 }
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 func datasetSignature(configured Dataset, path string, info os.FileInfo) (string, error) {
 	payload := struct {

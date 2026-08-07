@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Velocidex/ordereddict"
@@ -39,16 +40,15 @@ const (
 )
 
 type Mapping struct {
-	Name            string            `json:"name"`
-	Table           string            `json:"table"`
-	Signature       string            `json:"-"`
-	Format          string            `json:"format"`
-	Source          string            `json:"source"`
-	SourcePath      string            `json:"sourcePath"`
-	TimestampPath   string            `json:"timestampPath"`
-	TimestampFormat string            `json:"timestampFormat"`
-	FieldPaths      map[string]string `json:"fieldPaths"`
-	ReplaceExisting bool              `json:"-"`
+	Name            string `json:"name"`
+	Table           string `json:"table"`
+	Signature       string `json:"-"`
+	Format          string `json:"format"`
+	Source          string `json:"source"`
+	SourcePath      string `json:"sourcePath"`
+	TimestampPath   string `json:"timestampPath"`
+	TimestampFormat string `json:"timestampFormat"`
+	ReplaceExisting bool   `json:"-"`
 }
 
 type Result struct {
@@ -158,12 +158,12 @@ VALUES (?, ?, ?, ?, ?, ?)`, mapping.Name, mapping.Table, mapping.Signature, mapp
 	}
 
 	discovery := newFieldDiscovery()
-	pendingValues := make([]any, 0, eventInsertBatchSize*8)
+	pendingValues := make([]any, 0, eventInsertBatchSize*4)
 	pendingRecords := 0
-	const insertEvents = `INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data) VALUES `
+	const insertEvents = `INSERT INTO events(dataset_id, time_generated, source, raw_data) VALUES `
 	batchRows := make([]string, eventInsertBatchSize)
 	for index := range batchRows {
-		batchRows[index] = "(?, ?, ?, ?, ?, ?, ?, ?)"
+		batchRows[index] = "(?, ?, ?, ?)"
 	}
 	eventStatement, err := transaction.PrepareContext(ctx, insertEvents+strings.Join(batchRows, ","))
 	if err != nil {
@@ -381,7 +381,7 @@ INSERT OR IGNORE INTO dataset_fields(dataset_id, path, type) VALUES (?, ?, ?)`)
 		return Result{}, fmt.Errorf("prepare field insert: %w", err)
 	}
 	defer fieldStatement.Close()
-	for path, fieldType := range discovery.fields {
+	for path, fieldType := range discovery.catalogueFields() {
 		if _, err := fieldStatement.ExecContext(ctx, datasetID, path, fieldType); err != nil {
 			return Result{}, fmt.Errorf("store discovered field %q: %w", path, err)
 		}
@@ -503,7 +503,7 @@ func prepareParsedEvent(raw json.RawMessage, parsed gjson.Result, index int, map
 	var normalized []byte
 	var err error
 	if discovery != nil {
-		if discovery.discoverResult(parsed, discovery.embeddedPaths, "RawData", true, 0) {
+		if discovery.discoverResult(parsed, discovery.embeddedPaths, "", true, 0) {
 			value, decodeErr := decodeJSONValue(raw)
 			if decodeErr != nil {
 				return nil, fmt.Errorf("normalize record %d: %w", index, decodeErr)
@@ -554,10 +554,6 @@ func prepareParsedEvent(raw json.RawMessage, parsed gjson.Result, index int, map
 	return []any{
 		eventtime.Format(timestamp),
 		source,
-		mappedValue(parsed, mapping.FieldPaths, "EventType"),
-		mappedValue(parsed, mapping.FieldPaths, "Host"),
-		mappedValue(parsed, mapping.FieldPaths, "User"),
-		mappedValue(parsed, mapping.FieldPaths, "Message"),
 		string(normalized),
 	}, nil
 }
@@ -626,9 +622,9 @@ func (d *fieldDiscovery) discoverResult(value gjson.Result, node *embeddedPathNo
 		found = childEmbedded || found
 		if catalogue {
 			if childEmbedded && child.Type == gjson.String {
-				d.fields[childPath] = "dynamic"
+				d.recordField(childPath, "dynamic")
 			} else {
-				d.fields[childPath] = resultFieldType(child)
+				d.recordField(childPath, resultFieldType(child))
 			}
 		}
 		if childNode.active() && !wasKnown {
@@ -663,7 +659,7 @@ func (d *fieldDiscovery) discover(value any, node *embeddedPathNode, path string
 			current[key] = normalized
 			changed = changed || childChanged
 			if catalogue {
-				d.fields[childPath] = fieldType(normalized)
+				d.recordField(childPath, fieldType(normalized))
 			}
 			if childNode.active() && !wasKnown {
 				if node.objects == nil {
@@ -700,6 +696,50 @@ func (d *fieldDiscovery) discover(value any, node *embeddedPathNode, path string
 	default:
 		return value, false
 	}
+}
+
+func (d *fieldDiscovery) recordField(path, observedType string) {
+	existing, found := d.fields[path]
+	if !found || existing == "null" || existing == "unknown" {
+		d.fields[path] = observedType
+		return
+	}
+	if observedType == "null" || observedType == "unknown" || observedType == existing {
+		return
+	}
+	d.fields[path] = "mixed"
+}
+
+func (d *fieldDiscovery) catalogueFields() map[string]string {
+	rootNames := make(map[string][]string)
+	for path := range d.fields {
+		if isIdentifier(path) {
+			key := strings.ToLower(path)
+			rootNames[key] = append(rootNames[key], path)
+		}
+	}
+
+	blockedRoots := make(map[string]struct{})
+	for key, names := range rootNames {
+		if key == "timegenerated" || key == "source" || key == "rawdata" || len(names) > 1 {
+			for _, name := range names {
+				blockedRoots[name] = struct{}{}
+			}
+		}
+	}
+
+	result := make(map[string]string, len(d.fields))
+	for path, fieldType := range d.fields {
+		cataloguePath := path
+		for root := range blockedRoots {
+			if path == root || strings.HasPrefix(path, root+".") || strings.HasPrefix(path, root+"[") {
+				cataloguePath = "RawData[" + strconv.Quote(root) + "]" + strings.TrimPrefix(path, root)
+				break
+			}
+		}
+		result[cataloguePath] = fieldType
+	}
+	return result
 }
 
 func normalizeKnownEmbeddedJSON(value any, node *embeddedPathNode, depth int) (any, bool) {
@@ -782,6 +822,12 @@ func (d *fieldDiscovery) cachedFieldPath(path, key string) string {
 }
 
 func appendFieldPath(path, key string) string {
+	if path == "" {
+		if isIdentifier(key) {
+			return key
+		}
+		return "RawData[" + strconv.Quote(key) + "]"
+	}
 	if isIdentifier(key) {
 		return path + "." + key
 	}
@@ -789,12 +835,11 @@ func appendFieldPath(path, key string) string {
 }
 
 func isIdentifier(value string) bool {
-	if value == "" || !((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z') || value[0] == '_') {
+	if value == "" {
 		return false
 	}
-	for index := 1; index < len(value); index++ {
-		character := value[index]
-		if !((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_') {
+	for index, character := range value {
+		if character != '_' && !unicode.IsLetter(character) && (index == 0 || !unicode.IsDigit(character)) {
 			return false
 		}
 	}
@@ -1195,18 +1240,6 @@ func ensureEOF(decoder *json.Decoder) error {
 		return errors.New("unexpected JSON after array")
 	}
 	return err
-}
-
-func mappedValue(record gjson.Result, paths map[string]string, field string) any {
-	path := paths[field]
-	if path == "" {
-		return nil
-	}
-	value := record.Get(path)
-	if !value.Exists() || value.Type == gjson.Null {
-		return nil
-	}
-	return valueString(value)
 }
 
 func valueString(value gjson.Result) string {

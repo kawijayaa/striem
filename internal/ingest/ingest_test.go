@@ -16,7 +16,7 @@ import (
 	"github.com/kawijayaa/striem/internal/database"
 )
 
-func TestImportPreservesTimestampAndMapsFields(t *testing.T) {
+func TestImportPreservesTimestampAndRawFields(t *testing.T) {
 	store := openTestStore(t)
 	service := New(store)
 	input := strings.NewReader(`
@@ -25,7 +25,6 @@ func TestImportPreservesTimestampAndMapsFields(t *testing.T) {
 `)
 	result, err := service.Import(context.Background(), input, false, Mapping{
 		Name: "fixture", Table: "Sysmon", Source: "sysmon", TimestampPath: "ts",
-		FieldPaths: map[string]string{"EventType": "kind", "Host": "host.name", "Message": "message"},
 	})
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
@@ -34,7 +33,7 @@ func TestImportPreservesTimestampAndMapsFields(t *testing.T) {
 		t.Fatalf("event count = %d, want 2", result.Dataset.EventCount)
 	}
 	var timestamp, host string
-	if err := store.DB().QueryRow("SELECT time_generated, host FROM events ORDER BY id LIMIT 1").Scan(&timestamp, &host); err != nil {
+	if err := store.DB().QueryRow("SELECT time_generated, json_extract(raw_data, '$.host.name') FROM events ORDER BY id LIMIT 1").Scan(&timestamp, &host); err != nil {
 		t.Fatal(err)
 	}
 	if timestamp != "2024-01-02T01:04:05.000000000Z" || host != "pc-1" {
@@ -51,7 +50,7 @@ func TestImportGzipJSONArray(t *testing.T) {
 	writer.Close()
 
 	result, err := service.Import(context.Background(), &compressed, true, Mapping{
-		Name: "compressed", Table: "Compressed", Source: "test", TimestampPath: "ts", FieldPaths: map[string]string{"Message": "message"},
+		Name: "compressed", Table: "Compressed", Source: "test", TimestampPath: "ts",
 	})
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
@@ -81,7 +80,7 @@ func TestImportNormalizesEmbeddedJSONAndCatalogsFields(t *testing.T) {
 	}
 	found := false
 	for _, field := range fields {
-		if field.Path == "RawData.AuditData.ClientIP" && field.Type == "string" {
+		if field.Path == "AuditData.ClientIP" && field.Type == "string" {
 			found = true
 		}
 	}
@@ -111,11 +110,11 @@ func TestImportMinifiesRawJSONAndCatalogsFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"RawData.count":          "long",
-		"RawData.score":          "real",
-		"RawData.nested":         "dynamic",
-		"RawData.nested.enabled": "bool",
-		"RawData.items":          "dynamic",
+		"count":          "long",
+		"score":          "real",
+		"nested":         "dynamic",
+		"nested.enabled": "bool",
+		"items":          "dynamic",
 	}
 	for _, field := range fields {
 		if fieldType, exists := want[field.Path]; exists && field.Type == fieldType {
@@ -173,7 +172,6 @@ func TestImportCSVMapsFieldsAndNormalizesCells(t *testing.T) {
 		`2024-01-02T03:05:05Z,endpoint,process,pc-2,"line one` + "\n" + `line two","{""ClientIP"":""192.0.2.11""}",00456` + "\n")
 	result, err := New(store).Import(t.Context(), input, false, Mapping{
 		Name: "csv", Table: "CSV", Format: FormatCSV, SourcePath: "source", TimestampPath: "ts", TimestampFormat: "rfc3339",
-		FieldPaths: map[string]string{"EventType": "kind", "Host": "host", "Message": "message"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +180,7 @@ func TestImportCSVMapsFieldsAndNormalizesCells(t *testing.T) {
 		t.Fatalf("event count = %d, want 2", result.Dataset.EventCount)
 	}
 	var source, host, message, clientIP, serial string
-	if err := store.DB().QueryRow(`SELECT source, host, message, json_extract(raw_data, '$.AuditData.ClientIP'), json_extract(raw_data, '$.serial') FROM events ORDER BY id LIMIT 1`).Scan(&source, &host, &message, &clientIP, &serial); err != nil {
+	if err := store.DB().QueryRow(`SELECT source, json_extract(raw_data, '$.host'), json_extract(raw_data, '$.message'), json_extract(raw_data, '$.AuditData.ClientIP'), json_extract(raw_data, '$.serial') FROM events ORDER BY id LIMIT 1`).Scan(&source, &host, &message, &clientIP, &serial); err != nil {
 		t.Fatal(err)
 	}
 	if source != "endpoint" || host != "pc-1" || message != "hello, world" || clientIP != "192.0.2.10" || serial != "00123" {
@@ -222,7 +220,7 @@ func TestImportCSVRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestImportEVTXMapsFields(t *testing.T) {
+func TestImportEVTXPreservesFields(t *testing.T) {
 	store := openTestStore(t)
 	input, err := os.Open(filepath.Join("testdata", "security-one-record.evtx"))
 	if err != nil {
@@ -233,11 +231,6 @@ func TestImportEVTXMapsFields(t *testing.T) {
 	result, err := New(store).Import(t.Context(), input, false, Mapping{
 		Name: "security", Table: "Security", Format: FormatEVTX,
 		SourcePath: "System.Provider.Name", TimestampPath: "System.TimeCreated.SystemTime",
-		FieldPaths: map[string]string{
-			"EventType": "System.EventID.Value",
-			"Host":      "System.Computer",
-			"User":      "UserData.LogFileCleared.SubjectUserName",
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +241,10 @@ func TestImportEVTXMapsFields(t *testing.T) {
 
 	var timestamp, source, eventType, host, user, provider string
 	if err := store.DB().QueryRow(`
-SELECT time_generated, source, event_type, host, username,
+SELECT time_generated, source,
+       json_extract(raw_data, '$.System.EventID.Value'),
+       json_extract(raw_data, '$.System.Computer'),
+       json_extract(raw_data, '$.UserData.LogFileCleared.SubjectUserName'),
        json_extract(raw_data, '$.System.Provider.Name')
 FROM events ORDER BY id LIMIT 1`).Scan(&timestamp, &source, &eventType, &host, &user, &provider); err != nil {
 		t.Fatal(err)
@@ -333,10 +329,10 @@ func TestFieldDiscoverySampleCutoffAndUnseenKeySets(t *testing.T) {
 	for _, field := range fields {
 		found[field.Path] = true
 	}
-	if found["RawData.nested.lateKnown"] {
+	if found["nested.lateKnown"] {
 		t.Fatal("record 5001 with a known top-level key set was fully discovered")
 	}
-	if !found["RawData.nested.lateUnseen"] || !found["RawData.variant"] {
+	if !found["nested.lateUnseen"] || !found["variant"] {
 		t.Fatalf("unseen key-set fields were not discovered: %#v", fields)
 	}
 }
@@ -347,6 +343,49 @@ func TestFieldPathCacheReusesParentKeyEntry(t *testing.T) {
 	second := discovery.cachedFieldPath("RawData.parent", "field.with.dot")
 	if first != second || len(discovery.pathCache["RawData.parent"]) != 1 {
 		t.Fatalf("cached paths = %q, %q, %#v", first, second, discovery.pathCache)
+	}
+}
+
+func TestRootFieldPathsPromoteOnlyIdentifiers(t *testing.T) {
+	if got := appendFieldPath("", "event_type"); got != "event_type" {
+		t.Fatalf("identifier path = %q", got)
+	}
+	if got := appendFieldPath("", "名前"); got != "名前" {
+		t.Fatalf("Unicode identifier path = %q", got)
+	}
+	if got := appendFieldPath("", "field.with.dots"); got != `RawData["field.with.dots"]` {
+		t.Fatalf("escaped root path = %q", got)
+	}
+}
+
+func TestCatalogueFieldsEscapesReservedAndAmbiguousRoots(t *testing.T) {
+	discovery := newFieldDiscovery()
+	discovery.fields = map[string]string{
+		"Source":       "dynamic",
+		"Source.name":  "string",
+		"Alpha":        "string",
+		"alpha":        "dynamic",
+		"alpha.value":  "long",
+		"valid_name":   "bool",
+		`RawData["x"]`: "string",
+	}
+
+	fields := discovery.catalogueFields()
+	for path, fieldType := range map[string]string{
+		`RawData["Source"]`:      "dynamic",
+		`RawData["Source"].name`: "string",
+		`RawData["Alpha"]`:       "string",
+		`RawData["alpha"]`:       "dynamic",
+		`RawData["alpha"].value`: "long",
+		"valid_name":             "bool",
+		`RawData["x"]`:           "string",
+	} {
+		if fields[path] != fieldType {
+			t.Errorf("field %q = %q, want %q; all fields: %#v", path, fields[path], fieldType, fields)
+		}
+	}
+	if len(fields) != 7 {
+		t.Fatalf("catalogue fields = %#v", fields)
 	}
 }
 
@@ -545,7 +584,6 @@ func BenchmarkImportNDJSON(b *testing.B) {
 		result, err := New(store).Import(b.Context(), strings.NewReader(payload), false, Mapping{
 			Name: fmt.Sprintf("benchmark-%d", iteration), Table: fmt.Sprintf("Benchmark%d", iteration),
 			Source: "benchmark", TimestampPath: "ts", TimestampFormat: "rfc3339",
-			FieldPaths: map[string]string{"EventType": "event.type", "Host": "event.host", "User": "event.user", "Message": "message"},
 		})
 		if err != nil {
 			b.Fatal(err)
@@ -569,21 +607,18 @@ func BenchmarkImportTestdata(b *testing.B) {
 			name: "Microsoft365CSV", file: "events.csv",
 			mapping: Mapping{
 				Format: FormatCSV, Source: "microsoft365", TimestampPath: "CreationDate", TimestampFormat: "2/01/2006 3:04:05 PM",
-				FieldPaths: map[string]string{"EventType": "Operations", "User": "UserIds", "Message": "RecordType"},
 			},
 		},
 		{
 			name: "SysmonNDJSON", file: "sysmon.ndjson",
 			mapping: Mapping{
 				Source: "sysmon", TimestampPath: "Event.System.TimeCreated.#attributes.SystemTime", TimestampFormat: "rfc3339",
-				FieldPaths: map[string]string{"EventType": "Event.System.EventID", "Host": "Event.System.Computer", "User": "Event.EventData.User", "Message": "Event.EventData.Image"},
 			},
 		},
 		{
 			name: "SuricataJSON", file: "eve.json",
 			mapping: Mapping{
 				Source: "suricata", TimestampPath: "timestamp", TimestampFormat: "2006-01-02T15:04:05.999999-0700",
-				FieldPaths: map[string]string{"EventType": "event_type", "Message": "alert.signature"},
 			},
 		},
 	}

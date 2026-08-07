@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -87,9 +88,9 @@ VALUES (1, 'alpha', 'Alpha', 'a', 'one', 'ts', 1, '2026-08-07T00:00:00Z'),
        (2, 'beta', 'Beta', 'b', 'two', 'ts', 1, '2026-08-07T00:00:00Z'),
        (3, 'gamma', 'Gamma', 'c', 'three', 'ts', 1, '2026-08-07T00:00:00Z');
 INSERT INTO dataset_fields(dataset_id, path, type)
-VALUES (1, 'RawData.Shared', 'string'),
-       (2, 'RawData.Shared', 'number'),
-       (2, 'RawData.Unique', 'bool');
+VALUES (1, 'Shared', 'string'),
+       (2, 'Shared', 'number'),
+       (2, 'Unique', 'bool');
 INSERT INTO events(dataset_id, time_generated, source, raw_data)
 VALUES (3, '2026-08-07T00:00:00Z', 'three', '{}');`); err != nil {
 		t.Fatal(err)
@@ -99,7 +100,7 @@ VALUES (3, '2026-08-07T00:00:00Z', 'three', '{}');`); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 2 || fields[0] != (Field{Path: "RawData.Shared", Type: "mixed"}) || fields[1] != (Field{Path: "RawData.Unique", Type: "bool"}) {
+	if len(fields) != 2 || fields[0] != (Field{Path: "Shared", Type: "mixed"}) || fields[1] != (Field{Path: "Unique", Type: "bool"}) {
 		t.Fatalf("fields = %#v", fields)
 	}
 	groups, err := store.ListFieldGroups(t.Context())
@@ -346,5 +347,80 @@ CREATE TABLE investigation_progress (
 INSERT INTO investigation_progress(question_id, revision, answer)
 VALUES ('question', 1, 'accepted')`); err != nil {
 		t.Fatalf("write migrated question answer: %v", err)
+	}
+}
+
+func TestOpenRemovesNormalizedEventColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-events.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE datasets (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    table_name TEXT NOT NULL DEFAULT '',
+    input_signature TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    timestamp_path TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE events (
+    id INTEGER PRIMARY KEY,
+    dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    time_generated TEXT NOT NULL,
+    source TEXT NOT NULL,
+    event_type TEXT,
+    host TEXT,
+    username TEXT,
+    message TEXT,
+    raw_data TEXT NOT NULL
+);
+CREATE INDEX idx_events_type_time ON events(event_type, time_generated);
+CREATE INDEX idx_events_host_time ON events(host, time_generated);
+CREATE INDEX idx_events_host_dataset ON events(host, dataset_id);
+CREATE INDEX idx_events_user_time ON events(username, time_generated);
+INSERT INTO datasets(id, name, table_name, source, timestamp_path, created_at)
+VALUES (1, 'legacy', 'Legacy', 'source', 'ts', '2026-08-07T00:00:00Z');
+INSERT INTO events(dataset_id, time_generated, source, event_type, host, username, message, raw_data)
+VALUES (1, '2026-08-07T00:00:00Z', 'source', 'login', 'pc-1', 'alice', 'signed in', '{"event_type":"login","host":"pc-1","user":"alice","message":"signed in"}');`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.DB().Query("PRAGMA table_info(events)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var columns []string
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		columns = append(columns, name)
+	}
+	if got := strings.Join(columns, ","); got != "id,dataset_id,time_generated,source,raw_data" {
+		t.Fatalf("event columns = %s", got)
+	}
+	var raw string
+	if err := store.DB().QueryRow("SELECT raw_data FROM events WHERE id = 1").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(raw, `"host":"pc-1"`) {
+		t.Fatalf("migrated raw data = %s", raw)
 	}
 }

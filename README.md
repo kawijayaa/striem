@@ -65,6 +65,17 @@ Configuration:
 | `STRIEM_CONFIG` | unset | Deployment YAML manifest |
 | `STRIEM_MAX_INPUT_BYTES` | `2147483648` | Maximum expanded input size in bytes |
 
+### Logs
+
+Striem writes compact, human-readable logs to standard output. Normal startup output summarizes the loaded deployment instead of printing one line per dataset:
+
+```text
+23:48:35 INFO  Deployment loaded  datasets=3  events=805192
+23:48:35 INFO  Server listening  address=:8080
+```
+
+Routine HTTP access messages are logged at debug level and are omitted from the default output. Warnings and errors remain visible; multiline errors are printed as indented text rather than escaped `\n` sequences. Container deployments can collect the same stream through `docker logs` or their configured logging driver.
+
 ## Provision datasets
 
 The player interface has no ingestion or dataset-management controls. Set `STRIEM_CONFIG` to a manifest mounted alongside the prepared logs. Striem imports every configured dataset before opening its HTTP listener and exits if provisioning fails.
@@ -95,27 +106,29 @@ datasets:
     timestampPath: CreationDate
     timestampFormat: 2/01/2006 3:04:05 PM
     indexedPaths: [ClientIP, AuditData.ActorIpAddress]
-    fieldPaths:
-      EventType: Operations
-      User: UserIds
-      Message: RecordType
 ```
 
 `challengeName` is optional, limited to 120 characters, and displayed in the navigation bar. Each dataset requires a unique `table` name. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, Windows EVTX, and gzip-compressed variants. The optional `format` is `auto`, `json`, `csv`, or `evtx`; auto-detection selects CSV for `.csv` and `.csv.gz`, EVTX for `.evtx` and `.evtx.gz`, and JSON otherwise. Explicit `format` can override the extension.
 
-`indexedPaths` adds SQLite expression indexes for frequently filtered dotted `RawData` paths. Paths are unioned, deduplicated, and sorted across all datasets, and each segment must be a KQL identifier. Use these indexes for selective equality predicates such as `RawData.src_ip == "198.51.100.77"`; an explicit cast changes the SQLite expression and cannot use the index. Striem does not push ordinary predicates through the KQL pipeline because SQLite already flattens the generated subqueries.
+The former `fieldPaths` dataset option is no longer supported. Root fields are discovered and exposed automatically; remove `fieldPaths` from older manifests before upgrading. The normalized `EventType`, `Host`, `User`, and `Message` columns have also been removed; query the corresponding discovered root fields instead. Existing raw event data is preserved when the legacy physical columns are dropped.
 
-`fullTextIndex` defaults to `false`. Enabling it builds a contentless FTS5 trigram index over raw JSON and normalized columns, which accelerates a literal `search` when it is the first operator after a physical table source. The original KQL search remains as an exact recheck. Plan for at least an additional 1.5-2.5x the raw JSON size in disk usage and comparable extra ingestion work; trigram density can cost more. The bundled 805,192-event corpus measured 2.29 GB of additional database space, about 3.2x its source files. Local binaries need `go run -tags sqlite_fts5`; the Docker image includes this build tag by default.
+The deployment schema change causes configured datasets to be re-ingested on the first upgraded start so their logical field catalogues can be rebuilt. With `fullTextIndex: true`, this also rebuilds the FTS5 index and can take several minutes for a large deployment. Striem opens its HTTP listener after provisioning completes; later starts reuse unchanged imported data.
+
+`indexedPaths` adds SQLite expression indexes for frequently filtered JSON paths. Paths are unioned, deduplicated, and sorted across all datasets, and each segment must be a KQL identifier. Use these indexes for selective equality predicates such as `src_ip == "198.51.100.77"` or `AuditData.ActorIpAddress == "198.51.100.77"`; an explicit cast changes the SQLite expression and cannot use the index. Striem does not push ordinary predicates through the KQL pipeline because SQLite already flattens the generated subqueries.
+
+`fullTextIndex` defaults to `false`. Enabling it builds a contentless FTS5 trigram index over raw JSON plus the system timestamp and source, which accelerates a literal `search` when it is the first operator after a physical table source. The original KQL search remains as an exact recheck. Plan for at least an additional 1.5-2.5x the raw JSON size in disk usage and comparable extra ingestion work; trigram density can cost more. The bundled 805,192-event corpus measured 2.29 GB of additional database space, about 3.2x its source files. Local binaries need `go run -tags sqlite_fts5`; the Docker image includes this build tag by default.
 
 Investigation questions are optional and share progress across everyone using the deployment. Question IDs must be unique lowercase identifiers. Answers are trimmed and matched case-insensitively by default; `acceptedAnswers` can contain aliases. Incorrect submissions are tracked and limited by `submissionCooldown`, which defaults to three seconds. The final `flag` is returned only after every configured question is solved. Increment a question's `revision` when changing its accepted answers to reset that question's progress. The successfully submitted answer is persisted with shared progress and shown after a task is solved. Configured accepted answers and the flag remain in process memory, so the YAML manifest must be supplied on every startup and kept inaccessible to players.
 
-CSV headers become top-level `RawData` fields and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) in mappings, such as `host\.name`.
+CSV headers become top-level query columns and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) for `timestampPath` or `sourcePath`, such as `host\.name`.
 
-EVTX records become top-level JSON objects containing `System`, `EventData`, and any `UserData`. Common mappings include `System.TimeCreated.SystemTime` for `timestampPath`, `System.Provider.Name` for `sourcePath`, `System.EventID.Value` for `EventType`, and `System.Computer` for `Host`. Human-readable Windows messages are not embedded in most EVTX files and are therefore not rendered during ingestion.
+EVTX records expose the dynamic top-level columns `System`, `EventData`, and any `UserData`. Common paths include `System.TimeCreated.SystemTime` for `timestampPath` and `System.Provider.Name` for `sourcePath`; values can then be queried directly as `System.EventID.Value`, `System.Computer`, or `EventData.Image`. Human-readable Windows messages are not embedded in most EVTX files.
 
-Mappings use GJSON paths for every format. JSON objects or arrays encoded inside string fields are parsed automatically, including JSON stored in CSV cells, so fields such as `RawData.AuditData.ClientIP` can be queried directly. Embedded JSON paths discovered during sampling are normalized on later records, and every stored `RawData` object is minified without changing JSON scalar types or number text. Changed datasets atomically replace previous datasets with the same name, while unchanged files and mappings reuse their existing imported data. Datasets absent from the manifest are removed. Timestamps are normalized to UTC but are not rebased.
+`timestampPath` and `sourcePath` use GJSON paths for every format. JSON objects or arrays encoded inside string fields are parsed automatically, including JSON stored in CSV cells, so fields such as `AuditData.ClientIP` can be queried directly. Embedded JSON paths discovered during sampling are normalized on later records, and every stored `RawData` object is minified without changing JSON scalar types or number text. Changed datasets atomically replace previous datasets with the same name, while unchanged files and configuration reuse their existing imported data. Datasets absent from the manifest are removed. Timestamps are normalized to UTC but are not rebased.
 
-The field catalogue is used only for editor autocomplete. Striem fully discovers fields in records 1 through 5,000 inclusive. After record 5,000, it performs full discovery only for the first record whose exact set of top-level key names has not appeared earlier in the input. Consequently, a nested field first appearing after record 5,000 under an already-seen top-level key set remains queryable but may be absent from autocomplete.
+Valid root-level JSON keys are automatically exposed as logical KQL columns backed by `json_extract`; Striem does not create a physical SQLite column for each field. Nested objects remain dynamic, so a discovered root `process` can be queried as `process.name`. `TimeGenerated`, `Source`, and `RawData` are reserved system names. A conflicting raw key remains available through `RawData`, as do keys that are not valid KQL identifiers. Root keys that differ only by case are omitted from any schema in which they collide because KQL names are case-insensitive.
+
+The field catalogue drives both logical schemas and editor autocomplete. Striem fully discovers fields in records 1 through 5,000 inclusive. After record 5,000, it performs full discovery only for the first record whose exact set of top-level key names has not appeared earlier in the input. Consequently, a nested field first appearing after record 5,000 under an already-seen top-level key set remains queryable but may be absent from autocomplete.
 
 Expanded input is limited to 2 GiB by default and each event is limited to 4 MiB. Set `STRIEM_MAX_INPUT_BYTES` to a positive base-10 integer number of bytes to change the expanded-input limit; invalid, zero, negative, or overflowing values stop import with a configuration error. The expanded limit applies after gzip decompression.
 
@@ -201,23 +214,19 @@ Query a configured dataset directly by its manifest table name:
 
 ```kusto
 UAL
-| where EventType == "UserLoginFailed"
+| where Operations == "UserLoginFailed"
 | take 100
 ```
 
-`Events` remains available as a union of every configured table:
+`Events` remains available as a union of every configured table. Its schema contains the union of discovered root fields, and fields absent from a particular event evaluate to null. Conflicting field types are exposed as `dynamic`.
 
-Every table exposes the normalized columns below. Mappings may leave optional columns null; the complete source record remains in `RawData`.
+Every table exposes these system columns plus its discovered root fields. The complete source record remains in `RawData`.
 
 Available columns:
 
 ```text
 TimeGenerated  datetime
 Source         string
-EventType      string
-Host           string
-User           string
-Message        string
 RawData        dynamic
 ```
 
@@ -225,8 +234,8 @@ Example:
 
 ```kusto
 Events
-| where EventType == "UserLoginFailed"
-| extend ClientIP = tostring(RawData.AuditData.ClientIP)
+| where Operations == "UserLoginFailed"
+| extend ClientIP = tostring(AuditData.ClientIP)
 | summarize Failures=count() by ClientIP
 | order by Failures desc
 ```
@@ -260,18 +269,18 @@ Dynamic object properties can use dot or bracket access, and arrays support zero
 
 ```kusto
 Events
-| project Command=tostring(RawData.process.name), FirstTag=RawData.tags[0]
+| project Command=tostring(process.name), FirstTag=tags[0]
 ```
 
 `mv-expand` supports one dynamic array, an explicit output alias, `with_itemindex`, `limit`, and `to typeof(...)`. `mv-apply` supports one dynamic array and row-wise `where`, `extend`, and `serialize` operators. Its inner pipeline does not yet support row-reducing operators such as `summarize`, `top`, or `take`:
 
 ```kusto
 Events
-| mv-apply Item=RawData.items on (
+| mv-apply Item=items on (
     where Item > 1
     | extend Doubled=Item * 2
   )
-| project Host, Item, Doubled
+| project host, Item, Doubled
 ```
 
 Scalar variables and reusable tabular pipelines can be declared before the main query:

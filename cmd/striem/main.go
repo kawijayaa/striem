@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,33 +16,35 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := newConsoleLogger(os.Stdout)
 	dataDir := envOrDefault("STRIEM_DATA_DIR", "./data")
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
-		logger.Error("create data directory", "error", err)
+		logger.Error("Could not create data directory", "error", err)
 		os.Exit(1)
 	}
 
 	store, err := database.Open(filepath.Join(dataDir, "striem.db"))
 	if err != nil {
-		logger.Error("open database", "error", err)
+		logger.Error("Could not open database", "error", err)
 		os.Exit(1)
 	}
 	defer store.Close()
 	if manifestPath := os.Getenv("STRIEM_CONFIG"); manifestPath != "" {
 		datasets, err := deployment.Load(context.Background(), store, manifestPath)
 		if err != nil {
-			logger.Error("load deployment datasets", "error", err)
+			logger.Error("Could not load deployment", "error", err)
 			os.Exit(1)
 		}
+		var eventCount int64
 		for _, dataset := range datasets {
-			logger.Info("loaded deployment dataset", "name", dataset.Name, "events", dataset.EventCount)
+			eventCount += dataset.EventCount
 		}
+		logger.Info("Deployment loaded", "datasets", len(datasets), "events", eventCount)
 	} else {
 		logger.Warn("STRIEM_CONFIG is not set; starting without events")
 	}
 	if _, err := store.DB().ExecContext(context.Background(), "PRAGMA analysis_limit = 400; PRAGMA optimize;"); err != nil {
-		logger.Error("optimize database", "error", err)
+		logger.Error("Could not optimize database", "error", err)
 		os.Exit(1)
 	}
 
@@ -57,9 +58,9 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("Striem listening", "address", server.Addr)
+		logger.Info("Server listening", "address", server.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("serve", "error", err)
+			logger.Error("Server stopped unexpectedly", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -71,7 +72,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("shutdown", "error", err)
+		logger.Error("Could not shut down server cleanly", "error", err)
 	}
 }
 

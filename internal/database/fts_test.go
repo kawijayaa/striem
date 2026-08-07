@@ -19,8 +19,8 @@ func TestFullTextIndexRebuildAndDisable(t *testing.T) {
 	if _, err := store.DB().Exec(`
 INSERT INTO datasets(id, name, source, timestamp_path, created_at)
 VALUES (1, 'first', 'suricata', 'ts', '2026-07-29T00:00:00Z');
-INSERT INTO events(id, dataset_id, time_generated, source, host, message, raw_data)
-VALUES (11, 1, '2026-07-29T00:00:00Z', 'suricata', 'sensor-1', 'network alert', '{"src_ip":"10.10.1.9"}')`); err != nil {
+INSERT INTO events(id, dataset_id, time_generated, source, raw_data)
+VALUES (11, 1, '2026-07-29T00:00:00Z', 'suricata', '{"host":"sensor-1","message":"network alert","src_ip":"10.10.1.9"}')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SyncFullTextIndex(t.Context(), true); err != nil {

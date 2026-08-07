@@ -65,21 +65,18 @@ func BenchmarkImport(b *testing.B) {
 			name: "NDJSON", format: FormatJSON,
 			mapping: Mapping{
 				Source: "suricata", TimestampPath: "timestamp", TimestampFormat: "rfc3339",
-				FieldPaths: map[string]string{"EventType": "event_type", "Host": "host", "Message": "alert.signature"},
 			},
 		},
 		{
 			name: "CSV", format: FormatCSV,
 			mapping: Mapping{
 				Source: "microsoft365", TimestampPath: "CreationDate", TimestampFormat: "rfc3339",
-				FieldPaths: map[string]string{"EventType": "Operation", "Host": "Host", "User": "UserId", "Message": "Message"},
 			},
 		},
 		{
 			name: "EVTX", format: FormatEVTX,
 			mapping: Mapping{
 				Source: "windows", TimestampPath: "System.TimeCreated.SystemTime",
-				FieldPaths: map[string]string{"EventType": "System.EventID.Value", "Host": "System.Computer"},
 			},
 		},
 	}
