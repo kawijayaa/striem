@@ -248,6 +248,8 @@ Events
 | order by TimeGenerated desc
 ```
 
+Press `Shift+Enter` in the query editor to run the current query. Press `Ctrl+Enter` to insert a new pipeline line beginning with `|`. JSON badges in query results open that cell's structured value in the searchable JSON viewer.
+
 The navigation bar shows the project and challenge names. The browser keeps recent hunts, named saved hunts, and answer drafts in local storage. Copy link creates a URL containing the current query. Results that include `TimeGenerated` display a selectable histogram of the visible rows.
 
 KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) v0.4.0. Supported tabular operators are:
