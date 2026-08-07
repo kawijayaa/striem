@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Striem</title>
+  <title>striem</title>
   <link rel="preload" href="/fonts/plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/src/style.css">
 </head>
@@ -14,7 +14,7 @@
     OWN-WORLD: Cloud-gray canvas, white work planes, Defender blue commands, compact Segoe UI, square controls, and one-pixel neutral dividers.
     STORY: Read the task hypothesis, inspect schema, write and run KQL, examine events, preserve evidence, and answer without leaving the hunting surface.
     FIRST VIEWPORT: Dark enterprise header above a task strip; persistent schema rail at left; query command bar, editor, and results fill the primary plane with Run first.
-    FORM: User-pinned category canon, Microsoft Sentinel Advanced Hunting; seed key canon-sentinel-kql-2026.
+    FORM: User-pinned category canon and compact KQL investigation workspace.
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
 
@@ -22,10 +22,7 @@
     <div class="workspace-shell">
 
   <nav class="app-nav" aria-label="Application">
-    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 2.25 16 4.5v4.7c0 3.8-2.35 6.95-6 8.55-3.65-1.6-6-4.75-6-8.55V4.5z"/><path d="m7 10 2 2 4-4"/></svg></span>
-    <strong class="brand-name">Striem</strong>
-    <span class="nav-divider" aria-hidden="true"></span>
-    <span class="surface-name">Advanced hunting</span>
+    <strong class="brand-name">striem</strong>
     <span id="challenge-name" class="challenge-name">Investigation workspace</span>
   </nav>
 
@@ -102,7 +99,7 @@
       <div class="panel-toolbar">
         <div class="query-toolbar-title"><strong>Query</strong><span>KQL</span></div>
         <div class="toolbar-actions">
-          <button id="run-query" class="primary" type="button">
+          <button id="run-query" class="primary" type="button" title="Run query (Shift+Enter)" aria-keyshortcuts="Shift+Enter">
             <span id="run-label">Run query</span>
           </button>
           <button id="save-query" class="secondary" type="button">Save hunt</button>

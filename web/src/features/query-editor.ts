@@ -146,9 +146,13 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
           options.onDocumentChange();
           update.view.dispatch(setDiagnostics(update.state, []));
         }),
-        EditorView.contentAttributes.of({ 'aria-label': 'KQL query editor' }),
+        EditorView.contentAttributes.of({
+          'aria-label': 'KQL query editor',
+          'aria-keyshortcuts': 'Shift+Enter Control+Enter',
+        }),
         keymap.of([
-          { key: 'Mod-Enter', run: () => { options.onRun(); return true; } },
+          { key: 'Shift-Enter', run: () => { options.onRun(); return true; } },
+          { key: 'Ctrl-Enter', run: insertPipelineLine },
           ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
@@ -192,6 +196,11 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
       view.dispatch({ effects: vimCompartment.reconfigure(vimEnabled ? vim() : []) });
     },
   };
+}
+
+function insertPipelineLine(view: EditorView): boolean {
+  view.dispatch(view.state.replaceSelection('\n| '));
+  return true;
 }
 
 function createLanguage(availableTables: Set<string>) {

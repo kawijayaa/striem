@@ -497,9 +497,17 @@ function renderResults(result: QueryResult, resetSort = true): void {
       const value = row[column];
       if (value !== null && typeof value === 'object') {
         td.className = 'raw';
-        const dynamic = document.createElement('span');
+        const dynamic = document.createElement('button');
         dynamic.className = ui.rawValue;
+        dynamic.type = 'button';
         dynamic.textContent = 'JSON';
+        dynamic.title = `Open ${column} JSON`;
+        dynamic.setAttribute('aria-label', `Open ${column} JSON`);
+        dynamic.addEventListener('click', event => {
+          event.stopPropagation();
+          selectRow();
+          showRaw(value);
+        });
         td.append(dynamic);
       } else {
         if (value === null || value === undefined) td.className = 'nil';
@@ -900,7 +908,7 @@ function renderActiveTask(): void {
     : question.prompt;
   if (!lastResult) {
     $('#empty-results-title').textContent = `Run a query for “${question.title}”`;
-    $('#empty-results-detail').textContent = 'Start with the prepared query, then use Fields to add the evidence you need. Press Ctrl/Cmd+Enter to run.';
+    $('#empty-results-detail').textContent = 'Start with the prepared query, then use Fields to add the evidence you need. Press Shift+Enter to run.';
     const emptyAction = $<HTMLButtonElement>('#empty-results-action');
     emptyAction.textContent = 'Run current query';
     emptyAction.dataset.action = 'run';
@@ -1176,7 +1184,7 @@ async function loadFields() {
     const challengeLabel = $('#challenge-name');
     challengeLabel.textContent = challengeName;
     challengeLabel.setAttribute('title', challengeName);
-    document.title = `${challengeName} | Striem`;
+    document.title = `${challengeName} | striem`;
     fieldGroups.forEach(group => availableTables.add(group.table));
     const source = querySource(editor.state.doc.toString());
     if (source && availableTables.has(source)) activeTable = source;
@@ -1235,8 +1243,8 @@ document.addEventListener('keydown', event => {
 
   if (event.defaultPrevented) return;
 
-  const isRunShortcut = event.key === 'Enter' && (event.ctrlKey || event.metaKey)
-    && !event.altKey && !event.shiftKey;
+  const isRunShortcut = event.key === 'Enter' && event.shiftKey
+    && !event.altKey && !event.ctrlKey && !event.metaKey;
   if (!isRunShortcut || document.querySelector('dialog[open]')) return;
   if (inTextField && !inEditor) return;
   event.preventDefault();
