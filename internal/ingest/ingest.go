@@ -1005,16 +1005,17 @@ func (reader *boundedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 }
 
 func decodeCSVRecords(ctx context.Context, input io.Reader, consume func(int, json.RawMessage) error) (int, error) {
-	reader := csv.NewReader(input)
+	buffered := bufio.NewReader(input)
+	if prefix, _ := buffered.Peek(3); bytes.Equal(prefix, []byte{0xEF, 0xBB, 0xBF}) {
+		_, _ = buffered.Discard(3)
+	}
+	reader := csv.NewReader(buffered)
 	header, err := reader.Read()
 	if errors.Is(err, io.EOF) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, fmt.Errorf("read CSV header: %w", err)
-	}
-	if len(header) > 0 {
-		header[0] = strings.TrimPrefix(header[0], "\uFEFF")
 	}
 	seen := make(map[string]struct{}, len(header))
 	for index, name := range header {

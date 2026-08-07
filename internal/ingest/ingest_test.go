@@ -168,7 +168,7 @@ func TestImportRollsBackFlushedBatchOnInvalidRecord(t *testing.T) {
 
 func TestImportCSVMapsFieldsAndNormalizesCells(t *testing.T) {
 	store := openTestStore(t)
-	input := strings.NewReader("\uFEFFts,source,kind,host,message,AuditData,serial\n" +
+	input := strings.NewReader("\uFEFF\"ts\",\"source\",\"kind\",\"host\",\"message\",\"AuditData\",\"serial\"\n" +
 		`2024-01-02T03:04:05Z,endpoint,login,pc-1,"hello, world","{""ClientIP"":""192.0.2.10""}",00123` + "\n" +
 		`2024-01-02T03:05:05Z,endpoint,process,pc-2,"line one` + "\n" + `line two","{""ClientIP"":""192.0.2.11""}",00456` + "\n")
 	result, err := New(store).Import(t.Context(), input, false, Mapping{
