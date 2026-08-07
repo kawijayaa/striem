@@ -48,6 +48,91 @@ func TestEventExpressionIndexesAreDeterministicAndReconciled(t *testing.T) {
 	if stale != 0 {
 		t.Fatal("stale expression index was not dropped")
 	}
+	if err := store.DropEventIndexes(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := store.DB().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name GLOB 'idx_events_*'`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("event indexes after drop = %d, want 0", remaining)
+	}
+}
+
+func TestWorkspaceMetadataAndDatasetCatalogue(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "catalogue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	name, err := store.ChallengeName(t.Context())
+	if err != nil || name != "" {
+		t.Fatalf("initial challenge name = %q, err = %v", name, err)
+	}
+	for _, want := range []string{"First name", "Updated name"} {
+		if err := store.SetChallengeName(t.Context(), want); err != nil {
+			t.Fatal(err)
+		}
+		name, err = store.ChallengeName(t.Context())
+		if err != nil || name != want {
+			t.Fatalf("challenge name = %q, err = %v, want %q", name, err, want)
+		}
+	}
+
+	if _, err := store.DB().ExecContext(t.Context(), `
+INSERT INTO datasets(id, name, table_name, input_signature, source, timestamp_path, event_count, created_at)
+VALUES (1, 'alpha', 'Alpha', 'a', 'one', 'ts', 1, '2026-08-07T00:00:00Z'),
+       (2, 'beta', 'Beta', 'b', 'two', 'ts', 1, '2026-08-07T00:00:00Z'),
+       (3, 'gamma', 'Gamma', 'c', 'three', 'ts', 1, '2026-08-07T00:00:00Z');
+INSERT INTO dataset_fields(dataset_id, path, type)
+VALUES (1, 'RawData.Shared', 'string'),
+       (2, 'RawData.Shared', 'number'),
+       (2, 'RawData.Unique', 'bool');
+INSERT INTO events(dataset_id, time_generated, source, raw_data)
+VALUES (3, '2026-08-07T00:00:00Z', 'three', '{}');`); err != nil {
+		t.Fatal(err)
+	}
+
+	fields, err := store.ListFields(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 2 || fields[0] != (Field{Path: "RawData.Shared", Type: "mixed"}) || fields[1] != (Field{Path: "RawData.Unique", Type: "bool"}) {
+		t.Fatalf("fields = %#v", fields)
+	}
+	groups, err := store.ListFieldGroups(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 || groups[0].Table != "Alpha" || groups[1].Table != "Beta" || len(groups[1].Fields) != 2 {
+		t.Fatalf("field groups = %#v", groups)
+	}
+
+	if deleted, err := store.DeleteDataset(t.Context(), 99); err != nil || deleted {
+		t.Fatalf("delete missing dataset = %t, err = %v", deleted, err)
+	}
+	if deleted, err := store.DeleteDataset(t.Context(), 3); err != nil || !deleted {
+		t.Fatalf("delete dataset = %t, err = %v", deleted, err)
+	}
+	var events int
+	if err := store.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM events WHERE dataset_id = 3").Scan(&events); err != nil || events != 0 {
+		t.Fatalf("events after cascade = %d, err = %v", events, err)
+	}
+	if err := store.DeleteDatasetsExcept(t.Context(), nil); err == nil {
+		t.Fatal("DeleteDatasetsExcept accepted an empty retention list")
+	}
+	if err := store.DeleteDatasetsExcept(t.Context(), []string{"beta"}); err != nil {
+		t.Fatal(err)
+	}
+	datasets, err := store.ListDatasets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(datasets) != 1 || datasets[0].Name != "beta" {
+		t.Fatalf("retained datasets = %#v", datasets)
+	}
 }
 
 func TestValidateIndexedPath(t *testing.T) {

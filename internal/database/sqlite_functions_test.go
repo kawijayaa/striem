@@ -35,6 +35,44 @@ func TestKQLRegex(t *testing.T) {
 	}
 }
 
+func TestKQLHasAndSplit(t *testing.T) {
+	store, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	hasTests := []struct {
+		name          string
+		value         string
+		term          string
+		caseSensitive int64
+		want          int64
+	}{
+		{name: "case insensitive term", value: "PowerShell admin", term: "powershell", want: 1},
+		{name: "case sensitive match", value: "PowerShell admin", term: "PowerShell", caseSensitive: 1, want: 1},
+		{name: "case sensitive mismatch", value: "PowerShell admin", term: "powershell", caseSensitive: 1},
+		{name: "not a token", value: "PowerShellCore", term: "PowerShell"},
+		{name: "unicode boundaries", value: "run—PowerShell!", term: "PowerShell", caseSensitive: 1, want: 1},
+		{name: "empty term", value: "PowerShell", term: ""},
+	}
+	for _, test := range hasTests {
+		t.Run(test.name, func(t *testing.T) {
+			got := querySQLiteFunction(t, store.DB(), "SELECT kql_has(?, ?, ?)", test.value, test.term, test.caseSensitive)
+			if got != test.want {
+				t.Fatalf("kql_has() = %#v, want %d", got, test.want)
+			}
+		})
+	}
+
+	if got := querySQLiteFunction(t, store.DB(), "SELECT kql_split(?, ?)", "alpha||beta||", "||"); got != `["alpha","beta",""]` {
+		t.Fatalf("kql_split() = %#v", got)
+	}
+	if _, err := store.DB().Exec("SELECT kql_split('value', '')"); err == nil || !strings.Contains(err.Error(), "delimiter cannot be empty") {
+		t.Fatalf("empty split delimiter error = %v", err)
+	}
+}
+
 func TestKQLRegexTermFastPathMatchesRegexp(t *testing.T) {
 	tests := []struct {
 		name    string

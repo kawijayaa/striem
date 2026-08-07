@@ -302,6 +302,80 @@ func TestSchemaAwareOperatorsExecute(t *testing.T) {
 	}
 }
 
+func TestStriemScalarFunctionsExecute(t *testing.T) {
+	database, err := sql.Open("striem_sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, event_type TEXT, host TEXT, username TEXT, message TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO events(event_type, host, username, message, raw_data) VALUES (NULL, 'pc-1', 'alice', '', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 7, 12, 30, 0, 0, time.FixedZone("test", 10*60*60))
+	compiled, err := Compile(`Events
+| extend Current=now(), Prior=ago(1d), Fixed=todatetime("2026-01-02T03:04:05Z"), Integer=toint("42"), Real=toreal("2.5"), Missing=isnull(EventType), Present=isnotnull(Host), Blank=isempty(Message), Named=isnotempty(User)
+| project Current, Prior, Fixed, Integer, Real, Missing, Present, Blank, Named`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current, prior, fixed string
+	var integer int64
+	var real float64
+	var missing, present, blank, named bool
+	if err := database.QueryRow(compiled.SQL, compiled.Args...).Scan(&current, &prior, &fixed, &integer, &real, &missing, &present, &blank, &named); err != nil {
+		t.Fatalf("query error = %v\nSQL: %s", err, compiled.SQL)
+	}
+	if current != "2026-08-07T02:30:00.000000000Z" || prior != "2026-08-06T02:30:00.000000000Z" || fixed != "2026-01-02T03:04:05.000000000Z" {
+		t.Fatalf("datetimes = %q, %q, %q", current, prior, fixed)
+	}
+	if integer != 42 || real != 2.5 || !missing || !present || !blank || !named {
+		t.Fatalf("scalar values = %d, %f, %t, %t, %t, %t", integer, real, missing, present, blank, named)
+	}
+}
+
+func TestStriemScalarFunctionsRejectInvalidArguments(t *testing.T) {
+	queries := []string{
+		`Events | extend Value=now(1)`,
+		`Events | extend Value=ago()`,
+		`Events | extend Value=ago(Host)`,
+		`Events | extend Value=ago(1x)`,
+		`Events | extend Value=toint()`,
+		`Events | extend Value=isnull()`,
+		`Events | extend Value=isempty()`,
+	}
+	for _, query := range queries {
+		if _, err := Compile(query, time.Now()); err == nil {
+			t.Errorf("Compile(%q) succeeded", query)
+		}
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	tests := []struct {
+		value string
+		want  time.Duration
+	}{
+		{value: "90m", want: 90 * time.Minute},
+		{value: "1d", want: 24 * time.Hour},
+		{value: "2.5d", want: 60 * time.Hour},
+		{value: "1w", want: 7 * 24 * time.Hour},
+	}
+	for _, test := range tests {
+		got, err := parseDuration(test.value)
+		if err != nil || got != test.want {
+			t.Errorf("parseDuration(%q) = %s, %v, want %s", test.value, got, err, test.want)
+		}
+	}
+	for _, value := range []string{"", "1x", "999999999999999999999w"} {
+		if _, err := parseDuration(value); err == nil {
+			t.Errorf("parseDuration(%q) succeeded", value)
+		}
+	}
+}
+
 func TestSchemaBindingRejectsUnknownColumn(t *testing.T) {
 	_, err := Compile(`Events | where Missing == 1`, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "unknown column Missing") {

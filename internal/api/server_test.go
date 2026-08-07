@@ -224,6 +224,41 @@ func TestQueryValidation(t *testing.T) {
 	}
 }
 
+func TestQueryRequestValidationRejectsMalformedBodies(t *testing.T) {
+	_, server := testServer(t)
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		status      int
+	}{
+		{name: "wrong content type", contentType: "text/plain", body: `{"query":"Events"}`, status: http.StatusUnsupportedMediaType},
+		{name: "malformed JSON", contentType: "application/json", body: `{`, status: http.StatusBadRequest},
+		{name: "missing query", contentType: "application/json", body: `{}`, status: http.StatusBadRequest},
+		{name: "unknown property", contentType: "application/json", body: `{"query":"Events","extra":true}`, status: http.StatusBadRequest},
+		{name: "trailing object", contentType: "application/json", body: `{"query":"Events"} {}`, status: http.StatusBadRequest},
+		{name: "oversized query", contentType: "application/json", body: string(mustJSON(t, map[string]string{"query": strings.Repeat("x", 32<<10+1)})), status: http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, server.URL+"/api/query/validate", strings.NewReader(test.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", test.contentType)
+			request.Header.Set("X-Striem-Request", "1")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != test.status {
+				t.Fatalf("status = %d, want %d", response.StatusCode, test.status)
+			}
+		})
+	}
+}
+
 func TestStateChangingRequestsRequireSameOrigin(t *testing.T) {
 	_, server := testServer(t)
 	tests := []struct {
@@ -283,6 +318,114 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 	}
 	if contains(schema.Functions, "dcount") {
 		t.Fatalf("schema advertises unsupported features: %#v", schema)
+	}
+}
+
+func TestHealthFieldsAndSchemaReflectProvisionedStore(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.DB().ExecContext(t.Context(), `
+INSERT INTO datasets(id, name, table_name, input_signature, source, timestamp_path, event_count, created_at)
+VALUES (1, 'Zulu audit', 'Zulu', 'z', 'audit', 'ts', 4, '2026-08-07T00:00:00Z'),
+       (2, 'Alpha logs', 'Alpha', 'a', 'sysmon', 'ts', 3, '2026-08-07T00:00:00Z'),
+       (3, 'Legacy data', '', 'legacy', 'legacy', 'ts', 2, '2026-08-07T00:00:00Z');
+INSERT INTO dataset_fields(dataset_id, path, type)
+VALUES (1, 'RawData.User', 'string'),
+       (2, 'RawData.EventID', 'number'),
+       (3, 'RawData.Hidden', 'string');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetChallengeName(t.Context(), "Coverage Challenge"); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+
+	for _, path := range []string{"/api/health", "/api/ready"} {
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var health map[string]string
+		if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || health["status"] != "ok" {
+			t.Fatalf("%s status = %d, body = %#v", path, response.StatusCode, health)
+		}
+	}
+
+	response, err := http.Get(server.URL + "/api/fields")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields struct {
+		Common []database.Field      `json:"common"`
+		Tables []database.FieldGroup `json:"tables"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&fields); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || len(fields.Common) != 7 || len(fields.Tables) != 2 {
+		t.Fatalf("fields status = %d, body = %#v", response.StatusCode, fields)
+	}
+	if fields.Tables[0].Table != "Alpha" || fields.Tables[0].Fields[0].Path != "RawData.EventID" || fields.Tables[1].Table != "Zulu" {
+		t.Fatalf("field groups = %#v", fields.Tables)
+	}
+
+	response, err = http.Get(server.URL + "/api/schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		ChallengeName string `json:"challengeName"`
+		Tables        []struct {
+			Name       string `json:"name"`
+			EventCount int64  `json:"eventCount"`
+		} `json:"tables"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&schema); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || schema.ChallengeName != "Coverage Challenge" || len(schema.Tables) != 3 {
+		t.Fatalf("schema status = %d, body = %#v", response.StatusCode, schema)
+	}
+	if schema.Tables[0].Name != "Events" || schema.Tables[0].EventCount != 9 || schema.Tables[1].Name != "Alpha" || schema.Tables[2].Name != "Zulu" {
+		t.Fatalf("schema tables = %#v", schema.Tables)
+	}
+}
+
+func TestReadEndpointsReportUnavailableDatabase(t *testing.T) {
+	store := testStore(t)
+	apiServer := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(apiServer.Handler())
+	t.Cleanup(server.Close)
+
+	for _, path := range []string{"/api/health", "/api/ready", "/api/fields", "/api/schema"} {
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusServiceUnavailable && response.StatusCode != http.StatusInternalServerError {
+			t.Errorf("%s status = %d, want an unavailable-server response", path, response.StatusCode)
+		}
+	}
+
+	response, err := http.Get(server.URL + "/api/questions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("/api/questions status = %d, want in-memory state to remain available", response.StatusCode)
 	}
 }
 

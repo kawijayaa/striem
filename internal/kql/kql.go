@@ -415,16 +415,20 @@ func stringLiteral(value string) sqlast.Expr {
 }
 
 func parseDuration(value string) (time.Duration, error) {
+	original := value
+	scale := time.Duration(1)
 	if strings.HasSuffix(value, "d") {
-		value = strings.TrimSuffix(value, "d") + "24h"
+		value = strings.TrimSuffix(value, "d") + "h"
+		scale = 24
 	} else if strings.HasSuffix(value, "w") {
-		value = strings.TrimSuffix(value, "w") + "168h"
+		value = strings.TrimSuffix(value, "w") + "h"
+		scale = 168
 	}
 	duration, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration %q", value)
+	if err != nil || scale > 1 && (duration > time.Duration(1<<63-1)/scale || duration < time.Duration(-1<<63)/scale) {
+		return 0, fmt.Errorf("invalid duration %q", original)
 	}
-	return duration, nil
+	return duration * scale, nil
 }
 
 func firstError(diagnostics []ksql.Diagnostic) (ksql.Diagnostic, bool) {
