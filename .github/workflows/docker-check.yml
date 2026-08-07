@@ -1,0 +1,44 @@
+name: Check Docker image
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/docker-*.yml"
+      - ".dockerignore"
+      - "Dockerfile"
+      - "go.mod"
+      - "go.sum"
+      - "package.json"
+      - "package-lock.json"
+      - "cmd/**"
+      - "internal/**"
+      - "web/**"
+      - "tsconfig.json"
+      - "vite.config.js"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: striem:check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -121,13 +121,76 @@ Expanded input is limited to 2 GiB by default and each event is limited to 4 MiB
 
 ## Docker
 
+Prebuilt Linux images for AMD64 and ARM64 are published to GitHub Container Registry. `latest` follows the `main` branch; versioned releases are also available as `1.2.3`, `1.2`, and `1`. The examples below use `latest`; pin a version tag for repeatable deployments.
+
+The directory mounted at `/config` must contain `challenge.yaml` and any dataset files referenced by relative path from that manifest.
+
+### Docker
+
 ```bash
-docker build -t striem .
-docker run --rm -p 8080:8080 \
+docker pull ghcr.io/kawijayaa/striem:latest
+docker run --name striem --restart unless-stopped -p 8080:8080 \
   -v striem-data:/data \
   -v "/path/to/config:/config:ro" \
   -e STRIEM_CONFIG=/config/challenge.yaml \
-  striem
+  ghcr.io/kawijayaa/striem:latest
+```
+
+Open <http://localhost:8080>. To upgrade, pull the desired tag and recreate the container; the named `striem-data` volume preserves the database.
+
+### Docker Compose
+
+Create `compose.yaml` alongside a `config` directory containing the manifest and datasets:
+
+```yaml
+services:
+  striem:
+    image: ghcr.io/kawijayaa/striem:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      STRIEM_CONFIG: /config/challenge.yaml
+    volumes:
+      - striem-data:/data
+      - ./config:/config:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 90s
+
+volumes:
+  striem-data:
+```
+
+Start or upgrade the deployment with:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Set the image tag in `compose.yaml` to a published version such as `1.2.3` when the deployment must not change until explicitly upgraded. If the GHCR package is private, authenticate first with a GitHub personal access token that has `read:packages` permission:
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin
+```
+
+Striem has no built-in authentication. Do not expose it directly to untrusted networks; place it behind the CTF platform or an authenticating reverse proxy.
+
+### Build locally
+
+```bash
+docker build -t striem .
 ```
 
 The Dockerfile uses separate Node.js and Go build stages. The Node.js stage installs the locked frontend dependencies, performs the strict TypeScript check, and builds the Tailwind/Vite assets. The Go stage embeds those generated assets into a single stripped binary. The runtime image contains only the binary and its writable `/data` volume; Node.js, the TypeScript sources, and build tools are not included.
