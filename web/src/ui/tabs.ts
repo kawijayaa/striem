@@ -18,9 +18,10 @@ export function renderTabSelection<Name extends string>(
 }
 
 export function enableTabKeyboardNavigation(tablist: Element, selector: string): void {
-  const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>(selector));
   tablist.addEventListener('keydown', event => {
     if (!(event instanceof KeyboardEvent)) return;
+    const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>(selector))
+      .filter(tab => !tab.classList.contains('hidden') && !tab.disabled);
     const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
     if (current < 0 || tabs.length === 0) return;
 

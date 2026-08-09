@@ -1,8 +1,8 @@
 # Striem
 
-Striem is a per-team CTF log investigation application. Challenge operators provision prepared JSON, CSV, or Windows EVTX telemetry and investigation questions at deployment time. Players query the telemetry with a bounded Kusto Query Language (KQL) subset, inspect event JSON, and solve tasks to unlock the challenge flag.
+Striem is a log investigation and lightweight SIEM application for prepared JSON, CSV, or Windows EVTX telemetry. It can run as a normal KQL hunting workspace or add optional investigation questions and a completion flag for team CTF challenges.
 
-The current interface includes live preflight query diagnostics, table and field completion, sortable and resizable results, CSV export, an event timeline, mobile result cards, saved hunts, recent hunt history, and shared task progress. Correctly submitted answers remain visible after a task is solved.
+The interface includes live preflight query diagnostics, table and field completion, sortable and resizable results, CSV export, an event timeline, mobile result cards, saved hunts, and recent hunt history. When questions are configured, it also provides shared task progress and keeps correctly submitted answers visible after each task is solved.
 
 ![Striem investigation workspace showing an active task, KQL query, fields, and populated results](screenshot.png)
 
@@ -78,7 +78,7 @@ Routine HTTP access messages are logged at debug level and are omitted from the 
 
 ## Provision datasets
 
-The player interface has no ingestion or dataset-management controls. Set `STRIEM_CONFIG` to a manifest mounted alongside the prepared logs. Striem imports every configured dataset before opening its HTTP listener and exits if provisioning fails.
+The browser interface has no ingestion or dataset-management controls. Set `STRIEM_CONFIG` to a manifest mounted alongside the prepared logs. Striem imports every configured dataset before opening its HTTP listener and exits if provisioning fails.
 
 Example manifest:
 
@@ -118,7 +118,7 @@ The deployment schema change causes configured datasets to be re-ingested on the
 
 `fullTextIndex` defaults to `false`. Enabling it builds a contentless FTS5 trigram index over raw JSON plus the system timestamp and source, which accelerates a literal `search` when it is the first operator after a physical table source. The original KQL search remains as an exact recheck. Plan for at least an additional 1.5-2.5x the raw JSON size in disk usage and comparable extra ingestion work; trigram density can cost more. The bundled 805,192-event corpus measured 2.29 GB of additional database space, about 3.2x its source files. Local binaries need `go run -tags sqlite_fts5`; the Docker image includes this build tag by default.
 
-Investigation questions are optional and share progress across everyone using the deployment. Question IDs must be unique lowercase identifiers. Answers are trimmed and matched case-insensitively by default; `acceptedAnswers` can contain aliases. Incorrect submissions are tracked and limited by `submissionCooldown`, which defaults to three seconds. The final `flag` is returned only after every configured question is solved. Increment a question's `revision` when changing its accepted answers to reset that question's progress. The successfully submitted answer is persisted with shared progress and shown after a task is solved. Configured accepted answers and the flag remain in process memory, so the YAML manifest must be supplied on every startup and kept inaccessible to players.
+Investigation questions are optional. Omit both `questions` and `flag` to use Striem as a normal SIEM workspace; the task strip and Tasks tab are then removed from the interface. When configured, questions share progress across everyone using the deployment. Question IDs must be unique lowercase identifiers. Answers are trimmed and matched case-insensitively by default; `acceptedAnswers` can contain aliases. Incorrect submissions are tracked and limited by `submissionCooldown`, which defaults to three seconds. The final `flag` is returned only after every configured question is solved. Increment a question's `revision` when changing its accepted answers to reset that question's progress. The successfully submitted answer is persisted with shared progress and shown after a task is solved. Configured accepted answers and the flag remain in process memory, so the YAML manifest must be supplied on every startup and kept inaccessible to users.
 
 CSV headers become top-level query columns and cells remain strings, preserving identifiers such as `00123`. Empty or duplicate headers and inconsistent row lengths are rejected. Numeric CSV timestamps require an explicit `unix` or `unix_ms` timestamp format. Headers containing dots use escaped [GJSON paths](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) for `timestampPath` or `sourcePath`, such as `host\.name`.
 

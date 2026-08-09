@@ -27,7 +27,7 @@
   </nav>
 
   <div class="workspace-context-stack">
-    <section id="active-task-bar" class="active-task-bar" aria-labelledby="active-task-title" aria-busy="true">
+    <section id="active-task-bar" class="active-task-bar hidden" aria-labelledby="active-task-title" aria-busy="true">
       <div class="active-task-copy">
         <span id="active-task-progress" class="active-task-progress">Loading investigation tasks</span>
         <h2 id="active-task-title">Preparing workspace</h2>
@@ -59,9 +59,9 @@
   <main class="console-layout">
 
     <aside id="investigate-panel" class="side-panel" data-workspace-view="investigate" aria-label="Investigation resources">
-      <div class="tabs side-tabs" role="tablist" aria-label="Investigation resources">
+      <div class="tabs side-tabs without-questions" role="tablist" aria-label="Investigation resources">
         <button id="fields-tab" class="tab side-tab selected" data-side-view="fields" role="tab" aria-selected="true" aria-controls="fields-pane" tabindex="0">Fields</button>
-        <button id="questions-tab" class="tab side-tab" data-side-view="questions" role="tab" aria-selected="false" aria-controls="questions-pane" tabindex="-1">Tasks <span class="count" id="question-tab-count">0/0</span></button>
+        <button id="questions-tab" class="tab side-tab hidden" data-side-view="questions" role="tab" aria-selected="false" aria-controls="questions-pane" tabindex="-1">Tasks <span class="count" id="question-tab-count">0/0</span></button>
         <button id="hunts-tab" class="tab side-tab" data-side-view="hunts" role="tab" aria-selected="false" aria-controls="hunts-pane" tabindex="-1">Hunts</button>
       </div>
 
@@ -154,7 +154,7 @@
             <path d="M31 59h34"/>
           </svg>
           <strong id="empty-results-title">Run a query to begin</strong>
-          <p id="empty-results-detail">Use the prepared query or choose fields from the investigation dock.</p>
+          <p id="empty-results-detail">Use the prepared query or choose fields from the Fields panel.</p>
           <div class="empty-actions">
             <button id="empty-results-action" class="primary" type="button">Run current query</button>
           </div>

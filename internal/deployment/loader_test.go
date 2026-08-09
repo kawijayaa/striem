@@ -280,6 +280,16 @@ datasets:
 	}
 }
 
+func TestValidateChallengeAllowsNormalWorkspaceWithoutQuestions(t *testing.T) {
+	challenge, err := validateChallenge(Manifest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if challenge.Flag != "" || len(challenge.Questions) != 0 {
+		t.Fatalf("challenge = %#v, want an empty optional challenge", challenge)
+	}
+}
+
 func TestLoadUnionsIndexedPathsAndQueryUsesExpressionIndex(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "one.json"), []byte(`{"ts":"2024-01-01T00:00:00Z","src_ip":"198.51.100.77","alert":{"signature_id":42}}`), 0o600); err != nil {

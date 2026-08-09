@@ -736,6 +736,7 @@ td.row-action { display: flex; align-items: center; gap: 3px; }
   border-top: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
 }
+.side-tabs.without-questions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .side-tab { padding: 0 3px; font-size: 9.8px; letter-spacing: .05em; }
 
 .side-workspace {

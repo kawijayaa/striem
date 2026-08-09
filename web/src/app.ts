@@ -792,7 +792,16 @@ function renderSidePanelView() {
   })));
 }
 
+function setQuestionUIVisibility(visible: boolean): void {
+  $('#active-task-bar').classList.toggle('hidden', !visible);
+  $('#questions-tab').classList.toggle('hidden', !visible);
+  $('.side-tabs').classList.toggle('without-questions', !visible);
+  if (!visible && sidePanelView === 'questions') sidePanelView = 'fields';
+  renderSidePanelView();
+}
+
 function showInvestigationPanel(view: 'questions' | 'hunts'): void {
+  if (view === 'questions' && !challengeState.totalQuestions) return;
   sidePanelView = view;
   renderSidePanelView();
   mobileWorkspace.show('investigate');
@@ -808,7 +817,7 @@ function renderDataSources(): void {
   if (!dataSources.length) {
     const empty = document.createElement('span');
     empty.className = ui.muted;
-    empty.textContent = 'No data sources are configured for this challenge.';
+    empty.textContent = 'No data sources are configured for this workspace.';
     list.append(empty);
     return;
   }
@@ -886,10 +895,8 @@ function renderActiveTask(): void {
   $('#active-task-cooldown').classList.add('hidden');
 
   if (!questionsLoaded) return;
+  setQuestionUIVisibility(challengeState.totalQuestions > 0);
   if (!challengeState.totalQuestions) {
-    progress.textContent = 'No challenge tasks';
-    title.textContent = 'Explore the telemetry';
-    prompt.textContent = 'Run queries and inspect events. There is no task to answer for this challenge.';
     return;
   }
 
@@ -1083,6 +1090,7 @@ function renderLoadFailure(target: HTMLElement, message: string, retry: () => vo
 }
 
 function renderActiveTaskFailure(): void {
+  setQuestionUIVisibility(true);
   $('#active-task-bar').setAttribute('aria-busy', 'false');
   $('#active-task-progress').textContent = 'Tasks unavailable';
   $('#active-task-title').textContent = 'Could not load investigation tasks';
@@ -1364,6 +1372,6 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 window.setInterval(() => {
-  if (document.hidden || document.activeElement?.matches('#active-task-answer')) return;
+  if (!challengeState.totalQuestions || document.hidden || document.activeElement?.matches('#active-task-answer')) return;
   void loadQuestions(true);
 }, 15_000);
