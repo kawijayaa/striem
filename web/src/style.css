@@ -156,6 +156,75 @@
 
 .hidden { display: none !important; }
 
+.workspace-pending { display: none; }
+
+.ingestion-screen {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 24px;
+  background: var(--ink-050);
+}
+
+.ingestion-card {
+  display: grid;
+  justify-items: center;
+  width: min(480px, 100%);
+  padding: 40px;
+  border: 1px solid var(--rule);
+  background: var(--ink-100);
+  box-shadow: var(--shadow-float);
+  text-align: center;
+}
+
+.ingestion-card .brand-name { margin-bottom: 8px; }
+
+.ingestion-challenge-name {
+  color: var(--paper-2);
+  font: 500 13px/1.4 var(--font-display);
+}
+
+.ingestion-card h1 {
+  margin-top: 24px;
+  font: 600 20px/1.3 var(--font-display);
+}
+
+.ingestion-card p {
+  max-width: 390px;
+  margin-top: 12px;
+  color: var(--paper-3);
+}
+
+.ingestion-spinner {
+  width: 32px;
+  height: 32px;
+  margin-top: 28px;
+  border: 2px solid var(--ink-300);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: ingestion-spin .8s linear infinite;
+}
+
+.ingestion-status {
+  margin-top: 24px;
+  color: var(--amber-hi);
+  font: 500 12px/1 var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ingestion-failed .ingestion-spinner { border-color: var(--coral); animation: none; }
+.ingestion-failed .ingestion-status { display: none; }
+
+@keyframes ingestion-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ingestion-spinner { animation: none; }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

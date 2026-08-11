@@ -435,6 +435,102 @@ VALUES (1, 'User', 'string'),
 	}
 }
 
+func TestLoadingServerStaysOnlineUntilCatalogIsRefreshed(t *testing.T) {
+	store := testStore(t)
+	apiServer := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	apiServer.SetChallengeName("Operation Loading Screen")
+	apiServer.SetLoading()
+	server := httptest.NewServer(apiServer.Handler())
+	t.Cleanup(server.Close)
+
+	response, err := http.Get(server.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("static interface status = %d, want 200", response.StatusCode)
+	}
+
+	response, err = http.Get(server.URL + "/api/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want 200 while loading", response.StatusCode)
+	}
+
+	response, err = http.Get(server.URL + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loadingState map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&loadingState); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable || loadingState["challengeName"] != "Operation Loading Screen" {
+		t.Fatalf("loading readiness status = %d, body = %#v", response.StatusCode, loadingState)
+	}
+
+	for _, path := range []string{"/api/schema", "/api/fields"} {
+		response, err = http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("%s status = %d, want 503 while loading", path, response.StatusCode)
+		}
+	}
+
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z","host":"ready"}`), false, ingest.Mapping{
+		Name: "startup", Table: "Startup", Source: "fixture", TimestampPath: "ts",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiServer.RefreshCatalog(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err = http.Get(server.URL + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("ready status = %d, want 200 after refresh", response.StatusCode)
+	}
+
+	rows := queryRows(t, server.URL, `Startup | project host`)
+	if len(rows) != 1 || rows[0]["host"] != "ready" {
+		t.Fatalf("rows after refresh = %#v", rows)
+	}
+}
+
+func TestReadinessReportsStartupFailure(t *testing.T) {
+	store := testStore(t)
+	apiServer := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	apiServer.SetStartupError("ingestion failed")
+	server := httptest.NewServer(apiServer.Handler())
+	t.Cleanup(server.Close)
+
+	response, err := http.Get(server.URL + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var state map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusServiceUnavailable || state["status"] != "error" || state["error"] != "ingestion failed" {
+		t.Fatalf("readiness failure status = %d, body = %#v", response.StatusCode, state)
+	}
+}
+
 func TestReadEndpointsReportUnavailableDatabase(t *testing.T) {
 	store := testStore(t)
 	apiServer := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))

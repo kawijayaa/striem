@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -21,20 +22,50 @@ import (
 )
 
 type Server struct {
-	store        *database.Store
-	logger       *slog.Logger
-	tableCatalog kql.TableCatalog
-	prepareQuery func(context.Context, string) (*sql.Stmt, error)
+	store         *database.Store
+	logger        *slog.Logger
+	mu            sync.RWMutex
+	tableCatalog  kql.TableCatalog
+	ready         bool
+	startupError  string
+	challengeName string
+	prepareQuery  func(context.Context, string) (*sql.Stmt, error)
 }
 
 func New(store *database.Store, logger *slog.Logger) *Server {
-	datasets, err := store.ListDatasets(context.Background())
+	tableCatalog, err := buildTableCatalog(context.Background(), store)
 	if err != nil {
 		panic(err)
 	}
-	groups, err := store.ListFieldGroups(context.Background())
+	challengeName, err := store.ChallengeName(context.Background())
 	if err != nil {
 		panic(err)
+	}
+	return &Server{
+		store:         store,
+		logger:        logger,
+		tableCatalog:  tableCatalog,
+		ready:         true,
+		challengeName: challengeName,
+		prepareQuery:  store.DB().PrepareContext,
+	}
+}
+
+// SetChallengeName makes the deployment name available to the startup screen.
+func (s *Server) SetChallengeName(name string) {
+	s.mu.Lock()
+	s.challengeName = name
+	s.mu.Unlock()
+}
+
+func buildTableCatalog(ctx context.Context, store *database.Store) (kql.TableCatalog, error) {
+	datasets, err := store.ListDatasets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := store.ListFieldGroups(ctx)
+	if err != nil {
+		return nil, err
 	}
 	fieldsByTable := make(map[string][]kql.Field, len(groups))
 	for _, group := range groups {
@@ -46,12 +77,37 @@ func New(store *database.Store, logger *slog.Logger) *Server {
 			tableCatalog[dataset.Table] = kql.Table{ID: dataset.ID, Fields: fieldsByTable[dataset.Table]}
 		}
 	}
-	return &Server{
-		store:        store,
-		logger:       logger,
-		tableCatalog: tableCatalog,
-		prepareQuery: store.DB().PrepareContext,
+	return tableCatalog, nil
+}
+
+// SetLoading keeps the static interface online while deployment data is ingested.
+func (s *Server) SetLoading() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ready = false
+	s.startupError = ""
+}
+
+// SetStartupError makes readiness failures visible without taking down the web server.
+func (s *Server) SetStartupError(message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ready = false
+	s.startupError = message
+}
+
+// RefreshCatalog publishes the datasets and fields added during ingestion.
+func (s *Server) RefreshCatalog(ctx context.Context) error {
+	catalog, err := buildTableCatalog(ctx, s.store)
+	if err != nil {
+		return err
 	}
+	s.mu.Lock()
+	s.tableCatalog = catalog
+	s.ready = true
+	s.startupError = ""
+	s.mu.Unlock()
+	return nil
 }
 
 func logicalFields(fields []database.Field) []kql.Field {
@@ -102,13 +158,13 @@ func isLogicalFieldName(value string) bool {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.health)
-	mux.HandleFunc("GET /api/ready", s.health)
-	mux.HandleFunc("GET /api/schema", s.schema)
-	mux.HandleFunc("GET /api/fields", s.fields)
-	mux.HandleFunc("GET /api/questions", s.questions)
-	mux.HandleFunc("POST /api/questions/{id}/answer", requireSameOrigin(s.submitAnswer))
-	mux.HandleFunc("POST /api/query", requireSameOrigin(s.query))
-	mux.HandleFunc("POST /api/query/validate", requireSameOrigin(s.validateQuery))
+	mux.HandleFunc("GET /api/ready", s.readiness)
+	mux.HandleFunc("GET /api/schema", s.whenReady(s.schema))
+	mux.HandleFunc("GET /api/fields", s.whenReady(s.fields))
+	mux.HandleFunc("GET /api/questions", s.whenReady(s.questions))
+	mux.HandleFunc("POST /api/questions/{id}/answer", s.whenReady(requireSameOrigin(s.submitAnswer)))
+	mux.HandleFunc("POST /api/query", s.whenReady(requireSameOrigin(s.query)))
+	mux.HandleFunc("POST /api/query/validate", s.whenReady(requireSameOrigin(s.validateQuery)))
 
 	static, err := fs.Sub(webassets.Files, "dist")
 	if err != nil {
@@ -142,7 +198,49 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	s.mu.RLock()
+	ready, startupError, challengeName := s.ready, s.startupError, s.challengeName
+	s.mu.RUnlock()
+	if startupError != "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": startupError, "challengeName": challengeName})
+		return
+	}
+	if !ready {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "loading", "challengeName": challengeName})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := s.store.DB().PingContext(ctx); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "challengeName": challengeName})
+}
+
+func (s *Server) whenReady(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		ready, startupError := s.ready, s.startupError
+		s.mu.RUnlock()
+		if !ready {
+			message := "deployment is still ingesting"
+			if startupError != "" {
+				message = startupError
+			}
+			writeError(w, http.StatusServiceUnavailable, message, nil)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	tableCatalog := s.tableCatalog
+	s.mu.RUnlock()
 	datasets, err := s.store.ListDatasets(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list tables", nil)
@@ -160,14 +258,14 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		totalEvents += dataset.EventCount
 	}
 	tables = append(tables, map[string]any{
-		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": schemaColumns(s.tableCatalog.Columns("Events")),
+		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": schemaColumns(tableCatalog.Columns("Events")),
 	})
 	for _, dataset := range datasets {
 		if dataset.Table == "" {
 			continue
 		}
 		tables = append(tables, map[string]any{
-			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": schemaColumns(s.tableCatalog.Columns(dataset.Table)),
+			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": schemaColumns(tableCatalog.Columns(dataset.Table)),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -310,8 +408,11 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 		return kql.CompiledQuery{}, false
 	}
 
+	s.mu.RLock()
+	tableCatalog := s.tableCatalog
+	s.mu.RUnlock()
 	compiled, err := kql.Compile(request.Query, time.Now(), kql.CompileConfig{
-		Tables:        s.tableCatalog,
+		Tables:        tableCatalog,
 		FullTextIndex: s.store.FullTextIndexEnabled(),
 	})
 	if err != nil {

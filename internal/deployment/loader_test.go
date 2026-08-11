@@ -39,6 +39,10 @@ datasets:
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	challengeName, err := ReadChallengeName(manifestPath)
+	if err != nil || challengeName != "Operation Northstar" {
+		t.Fatalf("pre-ingestion challenge name = %q, %v", challengeName, err)
+	}
 	store, err := database.Open(filepath.Join(directory, "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +69,7 @@ datasets:
 	if datasets != 1 || events != 1 {
 		t.Fatalf("reload produced %d datasets and %d events, want one of each", datasets, events)
 	}
-	challengeName, err := store.ChallengeName(t.Context())
+	challengeName, err = store.ChallengeName(t.Context())
 	if err != nil || challengeName != "Operation Northstar" {
 		t.Fatalf("challenge name = %q, %v", challengeName, err)
 	}

@@ -18,7 +18,18 @@
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
 
-  <div class="app-shell">
+  <section id="ingestion-screen" class="ingestion-screen" aria-labelledby="ingestion-title" aria-describedby="ingestion-detail" aria-live="polite">
+    <div class="ingestion-card">
+      <strong class="brand-name">striem</strong>
+      <span id="ingestion-challenge-name" class="ingestion-challenge-name hidden"></span>
+      <div class="ingestion-spinner" aria-hidden="true"></div>
+      <h1 id="ingestion-title">Preparing investigation data</h1>
+      <p id="ingestion-detail">Events are being ingested and indexed. The workspace will open automatically when ingestion is complete.</p>
+      <span class="ingestion-status" role="status">Ingesting deployment…</span>
+    </div>
+  </section>
+
+  <div class="app-shell workspace-pending" inert aria-hidden="true">
     <div class="workspace-shell">
 
   <nav class="app-nav" aria-label="Application">
@@ -235,6 +246,6 @@
     <button id="toast-action" class="toast-action hidden" type="button"></button>
   </div>
 
-  <script type="module" src="/src/app.ts"></script>
+  <script type="module" src="/src/bootstrap.ts"></script>
 </body>
 </html>

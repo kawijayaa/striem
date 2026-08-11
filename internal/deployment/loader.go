@@ -56,24 +56,12 @@ type preparedDataset struct {
 }
 
 func Load(ctx context.Context, store *database.Store, manifestPath string) (loaded []database.Dataset, err error) {
-	file, err := os.Open(manifestPath)
+	manifest, err := readManifest(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("open deployment manifest: %w", err)
-	}
-	defer file.Close()
-
-	var manifest Manifest
-	decoder := yaml.NewDecoder(file)
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("decode deployment manifest: %w", err)
+		return nil, err
 	}
 	if len(manifest.Datasets) == 0 {
 		return nil, fmt.Errorf("deployment manifest contains no datasets")
-	}
-	manifest.ChallengeName = strings.TrimSpace(manifest.ChallengeName)
-	if len(manifest.ChallengeName) > 120 {
-		return nil, fmt.Errorf("challengeName cannot exceed 120 characters")
 	}
 	challenge, err := validateChallenge(manifest)
 	if err != nil {
@@ -240,6 +228,35 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 		return nil, err
 	}
 	return loaded, nil
+}
+
+// ReadChallengeName reads the display name without waiting for dataset ingestion.
+func ReadChallengeName(manifestPath string) (string, error) {
+	manifest, err := readManifest(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	return manifest.ChallengeName, nil
+}
+
+func readManifest(manifestPath string) (Manifest, error) {
+	file, err := os.Open(manifestPath)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("open deployment manifest: %w", err)
+	}
+	defer file.Close()
+
+	var manifest Manifest
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		return Manifest{}, fmt.Errorf("decode deployment manifest: %w", err)
+	}
+	manifest.ChallengeName = strings.TrimSpace(manifest.ChallengeName)
+	if len(manifest.ChallengeName) > 120 {
+		return Manifest{}, fmt.Errorf("challengeName cannot exceed 120 characters")
+	}
+	return manifest, nil
 }
 
 var questionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)

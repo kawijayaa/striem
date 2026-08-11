@@ -119,6 +119,17 @@ function activeQuestion(): InvestigationQuestion | undefined {
   return challengeState.questions.find(question => question.id === activeQuestionId);
 }
 
+function nextUnsolvedQuestionId(afterQuestionId: string): string | null {
+  const questions = challengeState.questions;
+  const currentIndex = questions.findIndex(question => question.id === afterQuestionId);
+  if (currentIndex < 0) return questions.find(question => !question.solved)?.id || null;
+  for (let offset = 1; offset < questions.length; offset++) {
+    const candidate = questions[(currentIndex + offset) % questions.length];
+    if (candidate && !candidate.solved) return candidate.id;
+  }
+  return null;
+}
+
 const queryEditor = createQueryEditor({
   parent: $('#query'),
   initialDocument: sharedQuery || 'Events\n| order by TimeGenerated desc\n| take 100',
@@ -979,6 +990,7 @@ async function submitActiveQuestion(): Promise<void> {
   const answer = input.value.trim();
   if (!answer) return;
   let correct = false;
+  let advancedToNextQuestion = false;
   questionSubmitting = true;
   questionRequestGeneration++;
   questionDrafts.set(question.id, input.value);
@@ -998,6 +1010,11 @@ async function submitActiveQuestion(): Promise<void> {
       questionDrafts.delete(question.id);
       persistQuestionDrafts();
       questionCooldowns.delete(question.id);
+      const nextQuestionId = challengeState.completed ? null : nextUnsolvedQuestionId(question.id);
+      if (nextQuestionId) {
+        activeQuestionId = nextQuestionId;
+        advancedToNextQuestion = true;
+      }
       const message = result.alreadySolved
         ? 'Answer saved'
         : challengeState.completed ? 'Challenge complete. Flag unlocked.' : 'Task solved';
@@ -1019,7 +1036,7 @@ async function submitActiveQuestion(): Promise<void> {
     renderQuestions();
     renderActiveTask();
     window.requestAnimationFrame(() => {
-      if (correct) $<HTMLButtonElement>('#active-task-next').focus();
+      if (correct && !advancedToNextQuestion) $<HTMLButtonElement>('#active-task-next').focus();
       else $<HTMLInputElement>('#active-task-answer').focus();
     });
   }

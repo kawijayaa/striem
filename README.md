@@ -149,7 +149,7 @@ docker run --name striem --restart unless-stopped -p 8080:8080 \
   ghcr.io/kawijayaa/striem:latest
 ```
 
-Open <http://localhost:8080>. To upgrade, pull the desired tag and recreate the container; the named `striem-data` volume preserves the database.
+Open <http://localhost:8080>. The web server is available during startup and shows an ingestion screen until the deployment is fully loaded and indexed. To upgrade, pull the desired tag and recreate the container; the named `striem-data` volume preserves the database.
 
 ### Docker Compose
 
@@ -313,6 +313,8 @@ GET    /api/ready
 ```
 
 There is intentionally no built-in authentication. Deploy the service per team behind the CTF platform or an authenticating reverse proxy.
+
+`GET /api/health` reports whether the database is reachable. `GET /api/ready` returns `503` while deployment ingestion is running and changes to `200` only after ingestion, indexing, optimization, and query-catalog publication finish. Data API routes also return `503` during that window; static web assets remain available.
 
 State-changing API requests require `Content-Type: application/json` and `X-Striem-Request: 1`. Browser requests are additionally checked using `Origin` and `Sec-Fetch-Site`; cross-origin submissions are rejected. These checks provide CSRF protection but do not replace authentication or proxy access controls.
 
