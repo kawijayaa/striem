@@ -52,14 +52,6 @@ export function resultValue(value: unknown): string {
   return String(value);
 }
 
-export function createResultsCsv(result: QueryResult, rows: EventRow[]): string {
-  const lines = [
-    result.columns.map(encodeCsvValue).join(','),
-    ...rows.map(row => result.columns.map(column => encodeCsvValue(row[column])).join(',')),
-  ];
-  return `\uFEFF${lines.join('\r\n')}\r\n`;
-}
-
 function compareValues(left: unknown, right: unknown): number {
   if (left === right) return 0;
   if (left === null || left === undefined) return 1;
@@ -73,10 +65,4 @@ function compareValues(left: unknown, right: unknown): number {
 
 function comparableValue(value: unknown): string {
   return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
-}
-
-function encodeCsvValue(value: unknown): string {
-  let text = value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
-  if (/^[=+@\t\r]/.test(text) || /^-\D/.test(text)) text = `'${text}`;
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }

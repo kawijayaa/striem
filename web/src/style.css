@@ -528,12 +528,6 @@
   margin-top: 10px;
 }
 
-.results-actions {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin-left: auto;
-}
 .results-title { color: var(--paper); font-size: 13px; font-weight: 600; }
 
 .results-content {

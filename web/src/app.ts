@@ -2,7 +2,6 @@ import type { Completion } from '@codemirror/autocomplete';
 import { request } from './api';
 import { createQueryEditor } from './features/query-editor';
 import {
-  createResultsCsv,
   nextResultSort,
   resultContext,
   resultIdentity,
@@ -570,21 +569,7 @@ function renderResults(result: QueryResult, resetSort = true): void {
   $('#table-wrap').classList.toggle('hidden', result.rows.length === 0);
   mobileList.classList.toggle('hidden', result.rows.length === 0);
   $('#mobile-result-count').textContent = result.rowCount.toLocaleString();
-  $<HTMLButtonElement>('#export-results').disabled = result.rows.length === 0;
   timeline.render(result.rows);
-}
-
-function exportResults() {
-  if (!lastResult?.rows.length) return;
-  const result = lastResult;
-  const rows = sortedResultRows(result);
-  const blob = new Blob([createResultsCsv(result, rows)], { type: 'text/csv;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `striem-results-${new Date().toISOString().replaceAll(':', '-')}.csv`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-  showToast(`Exported ${formatCount(rows.length, 'row')}`);
 }
 
 function addTimelineFilter(start: Date, end: Date): void {
@@ -1350,7 +1335,6 @@ $('#save-query').addEventListener('click', saveCurrentQuery);
 $('#share-query').addEventListener('click', shareCurrentQuery);
 const vimToggle = $<HTMLButtonElement>('#vim-toggle');
 vimToggle.addEventListener('click', () => queryEditor.toggleVim(vimToggle));
-$('#export-results').addEventListener('click', exportResults);
 $('#saved-view').addEventListener('click', () => {
   queryLibraryView = 'saved';
   renderQueryLibrary();
