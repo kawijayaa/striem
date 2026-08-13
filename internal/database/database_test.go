@@ -317,6 +317,33 @@ VALUES ('legacy', 'legacy', 'ts', '2024-01-01T00:00:00Z');`); err != nil {
 	}
 }
 
+func TestOpenMigratesUniqueTableIndexForSharedTables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared-tables.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`DROP INDEX idx_datasets_table_name;
+CREATE UNIQUE INDEX idx_datasets_table_name ON datasets(table_name) WHERE table_name <> '';`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`
+INSERT INTO datasets(name, table_name, source, timestamp_path, created_at)
+VALUES ('one', 'Shared', 'one', 'ts', '2026-08-13T00:00:00Z'),
+       ('two', 'Shared', 'two', 'ts', '2026-08-13T00:00:00Z')`); err != nil {
+		t.Fatalf("insert shared table datasets after migration: %v", err)
+	}
+}
+
 func TestOpenMigratesQuestionAnswers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite3", path)

@@ -72,7 +72,7 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 		return nil, fmt.Errorf("resolve manifest directory: %w", err)
 	}
 	seen := make(map[string]struct{}, len(manifest.Datasets))
-	seenTables := make(map[string]struct{}, len(manifest.Datasets))
+	seenTables := make(map[string]string, len(manifest.Datasets))
 	indexedPathSet := make(map[string]struct{})
 	prepared := make([]preparedDataset, 0, len(manifest.Datasets))
 	names := make([]string, 0, len(manifest.Datasets))
@@ -87,10 +87,11 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 		if strings.TrimSpace(configured.Table) == "" {
 			return nil, fmt.Errorf("dataset %q has no table", configured.Name)
 		}
-		if _, duplicate := seenTables[configured.Table]; duplicate {
-			return nil, fmt.Errorf("table %q is configured more than once", configured.Table)
+		tableKey := strings.ToLower(configured.Table)
+		if spelling, exists := seenTables[tableKey]; exists && spelling != configured.Table {
+			return nil, fmt.Errorf("table %q uses inconsistent casing; use %q", configured.Table, spelling)
 		}
-		seenTables[configured.Table] = struct{}{}
+		seenTables[tableKey] = configured.Table
 		names = append(names, configured.Name)
 		if strings.TrimSpace(configured.Path) == "" {
 			return nil, fmt.Errorf("dataset %q has no path", configured.Name)

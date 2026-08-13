@@ -92,7 +92,10 @@ func benchmarkQueryStore(b *testing.B) (*Store, kql.TableCatalog) {
 			}
 		}
 		for _, dataset := range datasets {
-			catalog[dataset.Table] = kql.Table{ID: dataset.ID, Fields: fieldsByTable[dataset.Table]}
+			table := catalog[dataset.Table]
+			table.IDs = append(table.IDs, dataset.ID)
+			table.Fields = fieldsByTable[dataset.Table]
+			catalog[dataset.Table] = table
 		}
 		if *queryBenchmarkFullText {
 			if err := store.ConfigureEventStorage(b.Context(), []string{"src_ip", "dest_ip", "alert.signature_id"}, true); err != nil {

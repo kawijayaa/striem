@@ -135,9 +135,8 @@ CREATE TABLE IF NOT EXISTS investigation_progress (
 	if err := s.ensureColumn(ctx, "investigation_progress", "answer", "TEXT", "question answer"); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `
-CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_table_name
-ON datasets(table_name) WHERE table_name <> '';`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_datasets_table_name;
+CREATE INDEX idx_datasets_table_name ON datasets(table_name) WHERE table_name <> '';`); err != nil {
 		return fmt.Errorf("initialize dataset indexes: %w", err)
 	}
 	if err := s.createOrdinaryEventIndexes(ctx); err != nil {

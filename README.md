@@ -2,7 +2,7 @@
 
 Striem is a log investigation and lightweight SIEM application for prepared JSON, CSV, or Windows EVTX telemetry. It can run as a normal KQL hunting workspace or add optional investigation questions and a completion flag for team CTF challenges.
 
-The interface includes live preflight query diagnostics, table and field completion, sortable and resizable results, CSV export, an event timeline, mobile result cards, saved hunts, and recent hunt history. When questions are configured, it also provides shared task progress and keeps correctly submitted answers visible after each task is solved.
+The interface includes live preflight query diagnostics, table and field completion, sortable and resizable results, an event timeline, mobile result cards, saved hunts, and recent hunt history. When questions are configured, it also provides shared task progress and keeps correctly submitted answers visible after each task is solved.
 
 ![Striem investigation workspace showing an active task, KQL query, fields, and populated results](screenshot.png)
 
@@ -108,7 +108,23 @@ datasets:
     indexedPaths: [ClientIP, AuditData.ActorIpAddress]
 ```
 
-`challengeName` is optional, limited to 120 characters, and displayed in the navigation bar. Each dataset requires a unique `table` name. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, Windows EVTX, and gzip-compressed variants. The optional `format` is `auto`, `json`, `csv`, or `evtx`; auto-detection selects CSV for `.csv` and `.csv.gz`, EVTX for `.evtx` and `.evtx.gz`, and JSON otherwise. Explicit `format` can override the extension.
+`challengeName` is optional, limited to 120 characters, and displayed in the navigation bar. Each dataset requires a `table` name, and multiple datasets may use the same name to combine several inputs into one logical KQL table. Shared table names must use identical casing. Table names must be KQL identifiers and `Events` is reserved for the union of all configured datasets. Relative paths are resolved from the manifest directory. Supported inputs are NDJSON, JSON arrays, CSV with a header row, Windows EVTX, and gzip-compressed variants. The optional `format` is `auto`, `json`, `csv`, or `evtx`; auto-detection selects CSV for `.csv` and `.csv.gz`, EVTX for `.evtx` and `.evtx.gz`, and JSON otherwise. Explicit `format` can override the extension.
+
+For example, two EVTX inputs can contribute to the same `Sysmon` table while retaining their machine identity in `Source`:
+
+```yaml
+datasets:
+  - name: Sysmon workstation 01
+    table: Sysmon
+    path: workstation-01.evtx
+    source: workstation-01
+    timestampPath: System.TimeCreated.SystemTime
+  - name: Sysmon workstation 02
+    table: Sysmon
+    path: workstation-02.evtx
+    source: workstation-02
+    timestampPath: System.TimeCreated.SystemTime
+```
 
 The former `fieldPaths` dataset option is no longer supported. Root fields are discovered and exposed automatically; remove `fieldPaths` from older manifests before upgrading. The normalized `EventType`, `Host`, `User`, and `Message` columns have also been removed; query the corresponding discovered root fields instead. Existing raw event data is preserved when the legacy physical columns are dropped.
 

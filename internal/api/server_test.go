@@ -363,10 +363,12 @@ func TestHealthFieldsAndSchemaReflectProvisionedStore(t *testing.T) {
 INSERT INTO datasets(id, name, table_name, input_signature, source, timestamp_path, event_count, created_at)
 VALUES (1, 'Zulu audit', 'Zulu', 'z', 'audit', 'ts', 4, '2026-08-07T00:00:00Z'),
        (2, 'Alpha logs', 'Alpha', 'a', 'sysmon', 'ts', 3, '2026-08-07T00:00:00Z'),
-       (3, 'Legacy data', '', 'legacy', 'legacy', 'ts', 2, '2026-08-07T00:00:00Z');
+       (3, 'Legacy data', '', 'legacy', 'legacy', 'ts', 2, '2026-08-07T00:00:00Z'),
+       (4, 'Alpha logs two', 'Alpha', 'a2', 'sysmon-two', 'ts', 2, '2026-08-07T00:00:00Z');
 INSERT INTO dataset_fields(dataset_id, path, type)
 VALUES (1, 'User', 'string'),
        (2, 'EventID', 'long'),
+       (4, 'Computer', 'string'),
        (3, 'Hidden', 'string');`); err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +409,7 @@ VALUES (1, 'User', 'string'),
 	if response.StatusCode != http.StatusOK || len(fields.Common) != 3 || len(fields.Tables) != 2 {
 		t.Fatalf("fields status = %d, body = %#v", response.StatusCode, fields)
 	}
-	if fields.Tables[0].Table != "Alpha" || fields.Tables[0].Fields[0].Path != "EventID" || fields.Tables[1].Table != "Zulu" {
+	if fields.Tables[0].Table != "Alpha" || len(fields.Tables[0].Fields) != 2 || fields.Tables[0].Fields[0].Path != "Computer" || fields.Tables[0].Fields[1].Path != "EventID" || fields.Tables[1].Table != "Zulu" {
 		t.Fatalf("field groups = %#v", fields.Tables)
 	}
 
@@ -430,7 +432,7 @@ VALUES (1, 'User', 'string'),
 	if response.StatusCode != http.StatusOK || schema.ChallengeName != "Coverage Challenge" || len(schema.Tables) != 3 {
 		t.Fatalf("schema status = %d, body = %#v", response.StatusCode, schema)
 	}
-	if schema.Tables[0].Name != "Events" || schema.Tables[0].EventCount != 9 || schema.Tables[1].Name != "Alpha" || schema.Tables[2].Name != "Zulu" {
+	if schema.Tables[0].Name != "Events" || schema.Tables[0].EventCount != 11 || schema.Tables[1].Name != "Alpha" || schema.Tables[1].EventCount != 5 || schema.Tables[2].Name != "Zulu" {
 		t.Fatalf("schema tables = %#v", schema.Tables)
 	}
 }

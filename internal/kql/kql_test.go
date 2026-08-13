@@ -35,6 +35,20 @@ func TestCompileUsesKSQLWithStriemTable(t *testing.T) {
 	}
 }
 
+func TestCompileFiltersSharedTableByEveryDataset(t *testing.T) {
+	compiled, err := Compile(`Sysmon | take 10`, time.Now(), TableCatalog{
+		"Sysmon": {IDs: []int64{42, 84}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{`"dataset_id" = 42`, `"dataset_id" = 84`, ` OR `} {
+		if !strings.Contains(compiled.SQL, fragment) {
+			t.Fatalf("compiled SQL lacks %q: %s", fragment, compiled.SQL)
+		}
+	}
+}
+
 func TestCatalogBuildsDatasetAndUnionSchemas(t *testing.T) {
 	catalog := TableCatalog{
 		"Zulu":  {ID: 2, Fields: []Field{{Name: "shared", Type: "long"}, {Name: "zulu", Type: "bool"}, {Name: "CaseKey", Type: "string"}}},

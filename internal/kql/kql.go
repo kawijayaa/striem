@@ -39,6 +39,7 @@ type Field struct {
 
 type Table struct {
 	ID     int64
+	IDs    []int64
 	Fields []Field
 }
 
@@ -278,14 +279,21 @@ func tableSource(tables TableCatalog, fullTextTerms map[int]string) ksql.SourceR
 			Projections: projections,
 		}
 		if !strings.EqualFold(name, "Events") {
-			datasetID, found := datasetID(tables, name)
+			datasetIDs, found := datasetIDs(tables, name)
 			if !found {
 				return ksql.Relation{}, fmt.Errorf("unknown table %q", name)
 			}
-			query.Where = &sqlast.Binary{
-				Left:     &sqlast.Identifier{Parts: []string{"dataset_id"}},
-				Operator: "=",
-				Right:    context.Bind(datasetID),
+			for _, datasetID := range datasetIDs {
+				predicate := sqlast.Expr(&sqlast.Binary{
+					Left:     &sqlast.Identifier{Parts: []string{"dataset_id"}},
+					Operator: "=",
+					Right:    context.Bind(datasetID),
+				})
+				if query.Where == nil {
+					query.Where = predicate
+				} else {
+					query.Where = &sqlast.Binary{Left: query.Where, Operator: "OR", Right: predicate}
+				}
 			}
 		}
 		if _, found := fullTextTerms[source.Span.Offset]; found {
@@ -408,13 +416,16 @@ func unquoteKQLLiteral(value string) string {
 	return strings.ReplaceAll(value, "\\"+string(quote), string(quote))
 }
 
-func datasetID(tables TableCatalog, name string) (int64, bool) {
+func datasetIDs(tables TableCatalog, name string) ([]int64, bool) {
 	for table, definition := range tables {
 		if strings.EqualFold(name, table) {
-			return definition.ID, true
+			if len(definition.IDs) > 0 {
+				return definition.IDs, true
+			}
+			return []int64{definition.ID}, true
 		}
 	}
-	return 0, false
+	return nil, false
 }
 
 func compilerOptions(now time.Time) []ksql.Option {

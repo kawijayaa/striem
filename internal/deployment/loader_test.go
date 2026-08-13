@@ -225,10 +225,13 @@ func TestDatasetFormatDetectsEVTX(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsDuplicateTables(t *testing.T) {
+func TestLoadCombinesDatasetsInSharedTable(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "datasets.yaml")
 	if err := os.WriteFile(filepath.Join(directory, "one.json"), []byte(`{"ts":"2024-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "two.json"), []byte(`{"ts":"2024-01-02T00:00:00Z"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	manifest := `datasets:
@@ -251,8 +254,34 @@ func TestLoadRejectsDuplicateTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "configured more than once") {
-		t.Fatalf("Load() error = %v, want duplicate table error", err)
+	loaded, err := Load(t.Context(), store, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 || loaded[0].Table != "Shared" || loaded[1].Table != "Shared" {
+		t.Fatalf("loaded datasets = %#v", loaded)
+	}
+	compiled, err := kql.Compile(`Shared | project Source | order by Source asc`, time.Now(), kql.TableCatalog{
+		"Shared": {IDs: []int64{loaded[0].ID, loaded[1].ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.DB().QueryContext(t.Context(), compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var sources []string
+	for rows.Next() {
+		var source string
+		if err := rows.Scan(&source); err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, source)
+	}
+	if strings.Join(sources, ",") != "one,two" {
+		t.Fatalf("shared table sources = %v, want [one two]", sources)
 	}
 }
 

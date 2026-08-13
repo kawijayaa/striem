@@ -74,7 +74,10 @@ func buildTableCatalog(ctx context.Context, store *database.Store) (kql.TableCat
 	tableCatalog := make(kql.TableCatalog, len(datasets))
 	for _, dataset := range datasets {
 		if dataset.Table != "" {
-			tableCatalog[dataset.Table] = kql.Table{ID: dataset.ID, Fields: fieldsByTable[dataset.Table]}
+			table := tableCatalog[dataset.Table]
+			table.IDs = append(table.IDs, dataset.ID)
+			table.Fields = fieldsByTable[dataset.Table]
+			tableCatalog[dataset.Table] = table
 		}
 	}
 	return tableCatalog, nil
@@ -251,21 +254,36 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load workspace metadata", nil)
 		return
 	}
-	sort.Slice(datasets, func(i, j int) bool { return datasets[i].Table < datasets[j].Table })
+	sort.Slice(datasets, func(i, j int) bool {
+		if datasets[i].Table == datasets[j].Table {
+			return datasets[i].Name < datasets[j].Name
+		}
+		return datasets[i].Table < datasets[j].Table
+	})
 	var totalEvents int64
-	tables := make([]map[string]any, 0, len(datasets)+1)
+	tables := make([]map[string]any, 0, len(tableCatalog)+1)
 	for _, dataset := range datasets {
 		totalEvents += dataset.EventCount
 	}
 	tables = append(tables, map[string]any{
 		"name": "Events", "description": "All datasets", "eventCount": totalEvents, "columns": schemaColumns(tableCatalog.Columns("Events")),
 	})
-	for _, dataset := range datasets {
+	for index := 0; index < len(datasets); {
+		dataset := datasets[index]
 		if dataset.Table == "" {
+			index++
 			continue
 		}
+		eventCount := dataset.EventCount
+		datasetNames := []string{dataset.Name}
+		index++
+		for index < len(datasets) && datasets[index].Table == dataset.Table {
+			eventCount += datasets[index].EventCount
+			datasetNames = append(datasetNames, datasets[index].Name)
+			index++
+		}
 		tables = append(tables, map[string]any{
-			"name": dataset.Table, "description": dataset.Name, "eventCount": dataset.EventCount, "columns": schemaColumns(tableCatalog.Columns(dataset.Table)),
+			"name": dataset.Table, "description": strings.Join(datasetNames, ", "), "eventCount": eventCount, "columns": schemaColumns(tableCatalog.Columns(dataset.Table)),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
