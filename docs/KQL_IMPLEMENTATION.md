@@ -35,6 +35,8 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 - Numeric conversion adapters now return null for invalid text and overflow, truncate toward zero, enforce 32/64-bit bounds, and preserve long integer text precision. Boolean conversions preserve Boolean metadata. Compiler schemas now distinguish int/long, including union suffixes and mixed arithmetic promotion. Execution tests cover boundaries and composition. Full dynamic-value casting, non-finite real behavior, typed literal validation, and differential string-format conformance remain open. [Conversion reference](https://learn.microsoft.com/en-us/kusto/query/toint-function?view=microsoft-fabric).
 
+- Standard `getschema` returns the four documented metadata columns without scanning input rows. Tests cover transformations, empty inputs, wide schemas, parameter pruning, and pipeline composition. SQLite inline values now support valid aliases and empty tables. Unknown schema/types and `kind=csl` remain unsupported. [Reference](https://learn.microsoft.com/en-us/kusto/query/getschema-operator?view=microsoft-fabric).
+
 ## Remaining workstreams (all stay in scope)
 
 1. **Scalar semantics and types:** complete function catalog, Unicode/string behavior, all casts and null-on-failure behavior, dynamic values/literals, GUID/decimal/timespan types, scalar `let`/function definitions, datetime arithmetic, formatting/timezones, Boolean and null semantics.

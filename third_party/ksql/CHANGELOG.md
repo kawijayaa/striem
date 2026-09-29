@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Implement standard `getschema` over bound schemas, including pipeline composition and parameter pruning. Render SQLite inline values with valid aliases and support empty inline tables.
+
 - Distinguish int from long in schema binding, conversion metadata, and union output; promote mixed int/long arithmetic and integer sums correctly.
 
 - Add typed function adapters for argument validation and explicit result metadata, with registration precedence shared with untyped adapters. Preserve dynamic metadata for mapped bag aggregates and JSON parsers.

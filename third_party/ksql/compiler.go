@@ -327,6 +327,8 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		spec := operator.Body.(kql.ExpressionSpec)
 		items, schema := s.projectItems(spec.Expressions, false, input.Schema)
 		return Relation{Query: &sqlast.Select{Distinct: true, From: from, Projections: items}, Schema: schema}
+	case "getschema":
+		return s.getSchema(input.Schema, operator)
 	case "count":
 		alias := "Count"
 		if raw, ok := operator.Body.(kql.RawSpec); ok && len(raw.Tokens) == 2 && strings.EqualFold(raw.Tokens[0].Text, "as") {

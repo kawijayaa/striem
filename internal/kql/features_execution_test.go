@@ -197,3 +197,19 @@ func TestColumnPatternsUseBundledCompiler(t *testing.T) {
 		})
 	}
 }
+
+func TestSchemaIntrospection(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`Events | project user,n,items | getschema`, `[[user 0 System.String string] [n 1 System.Int64 long] [items 2 System.Object dynamic]]`},
+		{`Events | where n < 0 | project Small=toint(n),Flag=not(false) | getschema | project ColumnName,ColumnType`, `[[Small int] [Flag bool]]`},
+		{`datatable(n:long,label:string)[1,"one",2,"two"] | where n == 2 | project label`, `[[two]]`},
+		{`datatable(n:int)[] | getschema`, `[[n 0 System.Int32 int]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+}

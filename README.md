@@ -274,8 +274,10 @@ KQL parsing, schema binding, and relational SQL lowering are provided by [`githu
 where, filter, search, project, project-away, project-keep, project-rename,
 project-reorder, extend, summarize, distinct, count, serialize,
 order by, sort by, top, take, limit, sample, sample-distinct, as,
-mv-expand, mv-apply, union, join, lookup
+mv-expand, mv-apply, union, join, lookup, getschema
 ```
+
+`getschema` returns column names, zero-based positions, .NET type names, and KQL types from the bound input schema. Unknown types and `kind=csl` remain unsupported.
 
 `project-away`, `project-keep`, and `project-reorder` accept case-sensitive `*` column patterns. Reordering supports `asc`, `desc`, `granny-asc`, and `granny-desc`; the latter two sort embedded ASCII numbers numerically. Overlapping reorder patterns keep each column at its first matching position. Zero-column results remain unsupported.
 

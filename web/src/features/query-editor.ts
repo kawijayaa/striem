@@ -18,7 +18,7 @@ import type { QueryError } from '../types';
 const keywords = new Set([
   'let', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
   'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
-  'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
+  'getschema', 'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
   'lookup', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
   'on', 'by', 'of', 'asc', 'desc', 'granny-asc', 'granny-desc',
 ]);
@@ -44,7 +44,7 @@ const types = new Set(['string', 'long', 'real', 'dynamic']);
 const operatorCompletions = createCompletions('keyword', [
   ['let', 'Declare a scalar or tabular value'],
   ['where', 'Filter rows'], ['filter', 'Filter rows'], ['search', 'Search visible columns'],
-  ['project', 'Select columns'], ['project-away', 'Remove columns'], ['project-keep', 'Keep columns'],
+  ['getschema', 'Describe output columns and types'], ['project', 'Select columns'], ['project-away', 'Remove columns'], ['project-keep', 'Keep columns'],
   ['project-rename', 'Rename columns'], ['project-reorder', 'Reorder columns'],
   ['extend', 'Add a calculated column'],
   ['summarize', 'Aggregate rows'], ['distinct', 'Return unique rows'],

@@ -269,7 +269,7 @@ ai_embed_text ai_chat_completion ai_chat_completion_prompt ai_embeddings
 const coreEquivalent = `
 source.table source.print source.range source.datatable source.union statement.let statement.expression
 operator.where operator.project operator.extend operator.summarize
-operator.distinct operator.count operator.sort operator.take operator.top
+operator.distinct operator.count operator.getschema operator.sort operator.take operator.top
 operator.join operator.lookup operator.union operator.as operator.sample
 operator.sample-distinct operator.project-away operator.project-keep
 operator.project-rename operator.project-reorder operator.search

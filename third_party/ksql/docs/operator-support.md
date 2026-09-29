@@ -9,6 +9,7 @@ positioned diagnostic and no partial SQL.
 | `where`, `project`, `extend`, `distinct` | Yes | Yes | Yes with catalog | Yes | SQLite; renderer tests for PostgreSQL/MySQL/SQL Server | Equivalent for covered scalar expressions |
 | `summarize` core aggregates | Yes | Yes | Yes with catalog | Yes | SQLite core; renderer tests elsewhere | Equivalent subject to database null/numeric behavior |
 | `make_list` | Yes | Yes | Yes | Yes | SQLite; PostgreSQL rendering | Lossy: result order is arbitrary without an explicit database order |
+| `getschema` | Yes | Operator | Bound schema | Inline value table | SQLite; renderer tests elsewhere | Standard four-column schema; rejects unknown types and unsupported parameters |
 | `sort`, `top`, `take`, `count` | Yes | Yes | Yes | Yes | SQLite and renderer tests | Equivalent; configured constant row bounds are enforced |
 | `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Exact names and case-sensitive `*` patterns; input column order retained |
 | `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
@@ -73,3 +74,5 @@ return a diagnostic; they are never lowered to `LIKE`.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
 - `MaxInputRowsPerStage` and `MaxParseCaptures` are reserved until supported
   operators can enforce them without claiming execution guarantees.
+
+SQLite inline `datatable` values use a derived VALUES relation with explicit column aliases. Empty value tables preserve their declared columns and return no rows. `getschema` reports the bound schema without reading input rows; `kind=csl` remains unsupported.

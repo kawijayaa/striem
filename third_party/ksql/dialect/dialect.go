@@ -247,8 +247,15 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 		}
 		return result, nil
 	case *sqlast.Values:
+		if len(s.Columns) == 0 {
+			return "", fmt.Errorf("values source requires columns")
+		}
 		if len(s.Rows) == 0 {
-			return "", fmt.Errorf("values source has no rows")
+			items := make([]string, len(s.Columns))
+			for i, column := range s.Columns {
+				items[i] = "NULL AS " + r.dialect.QuoteIdentifier(column)
+			}
+			return "(SELECT " + strings.Join(items, ", ") + " WHERE 1 = 0) AS " + r.dialect.QuoteIdentifier(s.Alias), nil
 		}
 		rows := make([]string, len(s.Rows))
 		for i, row := range s.Rows {
@@ -261,6 +268,13 @@ func (r renderer) source(source sqlast.Source) (string, error) {
 		columns := make([]string, len(s.Columns))
 		for i, column := range s.Columns {
 			columns[i] = r.dialect.QuoteIdentifier(column)
+		}
+		if r.dialect.Name() == "sqlite" {
+			items := make([]string, len(s.Columns))
+			for i, column := range s.Columns {
+				items[i] = r.dialect.QuoteIdentifier(fmt.Sprintf("column%d", i+1)) + " AS " + r.dialect.QuoteIdentifier(column)
+			}
+			return "(SELECT " + strings.Join(items, ", ") + " FROM (VALUES " + strings.Join(rows, ", ") + ")) AS " + r.dialect.QuoteIdentifier(s.Alias), nil
 		}
 		return "(VALUES " + strings.Join(rows, ", ") + ") AS " + r.dialect.QuoteIdentifier(s.Alias) + "(" + strings.Join(columns, ", ") + ")", nil
 	case *sqlast.Series:
