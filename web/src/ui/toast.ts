@@ -17,6 +17,7 @@ export function createToast(
   let actionHandler: (() => void) | undefined;
 
   function hide(): void {
+    window.clearTimeout(timer);
     root.classList.add('hidden');
     actionHandler = undefined;
   }
@@ -32,8 +33,9 @@ export function createToast(
   }
 
   actionButton.addEventListener('click', () => {
-    actionHandler?.();
+    const handler = actionHandler;
     hide();
+    handler?.();
   });
 
   return { show, hide };

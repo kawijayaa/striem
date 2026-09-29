@@ -25,9 +25,12 @@ export function addTimeRangeFilter(query: string, start: Date, end: Date): strin
 
 function kqlLiteral(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  return JSON.stringify(String(value));
 }
 
 export function addValueFilter(query: string, column: string, value: unknown, negate = false): string {
-  return insertAfterSource(query, `| where ${column} ${negate ? '!=' : '=='} ${kqlLiteral(value)}`);
+  if (value === null || value === undefined) {
+    return `${query.trimEnd()}\n| where ${negate ? 'isnotnull' : 'isnull'}(${column})`;
+  }
+  return `${query.trimEnd()}\n| where ${column} ${negate ? '!=' : '=='} ${kqlLiteral(value)}`;
 }

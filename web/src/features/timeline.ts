@@ -43,8 +43,10 @@ export function createTimeline(
 
     elements.bars.replaceChildren();
     buckets.forEach((count, index) => {
-      const start = new Date(minimum + (width * index) / bucketCount);
-      const end = new Date(minimum + (width * (index + 1)) / bucketCount);
+      // Dates have integer millisecond precision. Round boundaries up so the
+      // half-open filter selects exactly the timestamps counted in this bucket.
+      const start = new Date(minimum + Math.ceil((width * index) / bucketCount));
+      const end = new Date(minimum + Math.ceil((width * (index + 1)) / bucketCount));
       const bar = document.createElement('button');
       bar.type = 'button';
       bar.className = 'timeline-bar';

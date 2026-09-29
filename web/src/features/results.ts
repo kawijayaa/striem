@@ -54,6 +54,7 @@ export function resultValue(value: unknown): string {
 
 function compareValues(left: unknown, right: unknown): number {
   if (left === right) return 0;
+  if ((left === null || left === undefined) && (right === null || right === undefined)) return 0;
   if (left === null || left === undefined) return 1;
   if (right === null || right === undefined) return -1;
   if (typeof left === 'number' && typeof right === 'number') return left - right;

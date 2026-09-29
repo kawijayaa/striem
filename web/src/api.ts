@@ -8,9 +8,15 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
   if (!SAFE_METHODS.has(method)) headers.set('X-Striem-Request', '1');
 
   const response = await fetch(url, { ...options, headers });
-  const body: T | QueryError | null = response.status === 204
-    ? null
-    : await response.json().catch(() => ({ error: 'Invalid server response' }));
+  let body: T | QueryError | null = null;
+  if (response.status !== 204) {
+    try {
+      body = await response.json();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      throw new Error('Invalid server response');
+    }
+  }
   if (!response.ok) throw body;
   return body as T;
 }
