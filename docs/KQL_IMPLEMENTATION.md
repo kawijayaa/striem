@@ -31,6 +31,8 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 - Column-selection patterns: `project-away`, `project-keep`, and `project-reorder` accept case-sensitive `*` patterns. Reordering supports ordinal and natural numeric sorting, first-match deduplication, and retention of unspecified columns. Execution tests cover metadata, quoted literal names, ASCII numeric runs beyond integer range, missing patterns, and expansion limits. Reference: [Microsoft project-reorder](https://learn.microsoft.com/en-us/kusto/query/project-reorder-operator?view=microsoft-fabric). Unicode digit collation, zero-column results, and case-sensitive exact-name binding remain open.
 
+- Typed function adapters expose argument types and return types, preserving metadata through projections and allowing predicate validation. Bag aggregation now implements `make_bag`, `make_bag_if`, and legacy `make_dictionary`: null/non-bag skipping, duplicate-key selection, empty objects, optional size limits, nested values, integer precision, and explicit resource errors. SQLite execution and HTTP JSON tests cover the runtime. [Reference](https://learn.microsoft.com/en-us/kusto/query/make-bag-aggregation-function?view=microsoft-fabric). Unknown types and dynamic strings extracted through SQLite JSON still need a tagged dynamic-value representation to remove all string/object ambiguity.
+
 ## Remaining workstreams (all stay in scope)
 
 1. **Scalar semantics and types:** complete function catalog, Unicode/string behavior, all casts and null-on-failure behavior, dynamic values/literals, GUID/decimal/timespan types, scalar `let`/function definitions, datetime arithmetic, formatting/timezones, Boolean and null semantics.

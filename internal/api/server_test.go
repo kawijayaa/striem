@@ -736,3 +736,28 @@ func TestNotAndHuntingFunctionsThroughAPI(t *testing.T) {
 		t.Fatalf("bucketed distinct counts: %#v", rows)
 	}
 }
+
+func TestBagAggregatesThroughAPI(t *testing.T) {
+	store := testStore(t)
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:00:00Z","bag":{"a":1,"nested":[true,null]},"keep":true}
+{"ts":"2024-01-01T00:01:00Z","bag":{"b":2},"keep":false}`), false, ingest.Mapping{Name: "bags", Table: "Bags", Source: "fixture", TimestampPath: "ts"}); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+	rows := queryRows(t, server.URL, `Bags | summarize Result=make_bag_if(bag,keep) | project Renamed=Result`)
+	if len(rows) != 1 {
+		t.Fatal(rows)
+	}
+	bag, ok := rows[0]["Renamed"].(map[string]any)
+	if !ok || len(bag) != 2 || bag["a"] != float64(1) {
+		t.Fatalf("expected object, got %#v", rows)
+	}
+	nested, ok := bag["nested"].([]any)
+	if !ok || len(nested) != 2 || nested[0] != true || nested[1] != nil {
+		t.Fatalf("nested values lost: %#v", bag)
+	}
+	rows = queryRows(t, server.URL, `Bags | where keep == false and keep == true | summarize Result=make_bag(bag)`)
+	if bag, ok := rows[0]["Result"].(map[string]any); !ok || len(bag) != 0 {
+		t.Fatalf("expected empty object, got %#v", rows)
+	}
+}

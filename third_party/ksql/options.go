@@ -16,6 +16,27 @@ type Option func(*Compiler)
 // arguments and must return a dialect-neutral SQL expression.
 type FunctionRule func(arguments []sqlast.Expr) (sqlast.Expr, error)
 
+// TypedExpression pairs a lowered SQL expression with its KQL scalar type.
+type TypedExpression struct {
+	SQL  sqlast.Expr
+	Type ScalarType
+}
+
+// TypedFunctionRule can validate argument types and specify the result type.
+type TypedFunctionRule func(arguments []TypedExpression) (TypedExpression, error)
+
+// WithTypedFunction registers a typed function mapping. The last registration
+// for a name wins, including registrations using WithFunction.
+func WithTypedFunction(name string, rule TypedFunctionRule) Option {
+	return func(compiler *Compiler) {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && rule != nil {
+			compiler.typedFunctionRules[name] = rule
+			delete(compiler.functionRules, name)
+		}
+	}
+}
+
 // LoweringContext exposes safe, per-compilation services to extension rules.
 // A context must not be retained after a rule returns.
 type LoweringContext interface {
@@ -53,6 +74,7 @@ func WithFunction(name string, rule FunctionRule) Option {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name != "" && rule != nil {
 			compiler.functionRules[name] = rule
+			delete(compiler.typedFunctionRules, name)
 		}
 	}
 }

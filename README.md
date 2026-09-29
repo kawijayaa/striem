@@ -283,7 +283,7 @@ mv-expand, mv-apply, union, join, lookup
 
 Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or`, membership with `in`, `!in`, `in~`, and `!in~`, ranges with `between`, and `contains`, `startswith`, and `endswith` string matching. Striem's bounded SQLite regular-expression adapter also supports literal alphanumeric terms with `has`, `has_cs`, `hasprefix`, `hassuffix`, their negated forms, `has_any`, and `has_all`.
 
-The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, and `take_any`.
+The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, `make_bag`, `make_bag_if`, and `take_any`.
 
 Additional hunting functions include `not`, `bin`, `startofday`, `endofday`, `startofweek`, `endofweek`, `startofmonth`, `endofmonth`, `startofyear`, `endofyear`, `dcount`, `dcountif`, `count_distinct`, `count_distinctif`, `avgif`, `minif`, and `maxif`.
 
@@ -297,6 +297,8 @@ Events
 `not(expression)` preserves null and returns a Boolean value. `bin` supports numeric values and UTC datetimes with a constant duration (including a scalar `let` binding); timespan-valued bins are not yet supported. Calendar functions accept an optional integer period offset, weeks begin on Sunday, and end-of-period values use Kusto's 100 ns precision. Null or invalid datetime values return null.
 
 Distinct counts ignore nulls. Striem computes `dcount`/`dcountif` **exactly**, unlike Kusto's approximate implementation; their optional constant accuracy argument accepts 0–4 but does not change the exact result. Distinct state is limited to 100,000 values or 4 MiB per group, returning an error instead of a partial count when exceeded. Conditional average/minimum/maximum return null when no non-null values satisfy the predicate.
+
+`make_bag(expr [, maxSize])` and `make_bag_if(expr, predicate [, maxSize])` merge dynamic property bags and skip non-bag values. Duplicate keys keep an unspecified input value. Empty groups return `{}`. `maxSize` must be a constant integer from 1 to 1,048,576 (the default); the deprecated `make_dictionary` alias defaults to 128. Each input bag and aggregate result is limited to 4 MiB; exceeding the byte limit returns a query error.
 
 Reference semantics: [Kusto `not()`](https://learn.microsoft.com/en-us/kusto/query/not-function), [time buckets](https://learn.microsoft.com/en-us/kusto/query/bin-function), and [distinct count](https://learn.microsoft.com/kusto/query/dcount-aggfunction).
 

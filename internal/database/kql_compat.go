@@ -20,6 +20,9 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
+	if err := c.RegisterAggregator("kql_make_bag", func() *bagAggregate { return &bagAggregate{} }, true); err != nil {
+		return err
+	}
 	return c.RegisterAggregator("kql_count_distinct", func() *distinctCount { return &distinctCount{seen: make(map[string]struct{})} }, true)
 }
 

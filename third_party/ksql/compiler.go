@@ -15,13 +15,14 @@ import (
 // Compiler translates KQL into one configured SQL dialect. A Compiler is safe
 // for concurrent use after construction.
 type Compiler struct {
-	dialect          dialect.Dialect
-	functionRules    map[string]FunctionRule
-	operatorRules    map[string]OperatorRule
-	sourceRules      map[string]SourceRule
-	catalog          Catalog
-	parameterization ParameterizationMode
-	limits           Limits
+	dialect            dialect.Dialect
+	functionRules      map[string]FunctionRule
+	typedFunctionRules map[string]TypedFunctionRule
+	operatorRules      map[string]OperatorRule
+	sourceRules        map[string]SourceRule
+	catalog            Catalog
+	parameterization   ParameterizationMode
+	limits             Limits
 }
 
 // New constructs a compiler for target. A nil target selects ANSI SQL.
@@ -30,7 +31,7 @@ func New(target dialect.Dialect, options ...Option) *Compiler {
 		target = dialect.ANSI()
 	}
 	compiler := &Compiler{
-		dialect: target, functionRules: make(map[string]FunctionRule),
+		dialect: target, functionRules: make(map[string]FunctionRule), typedFunctionRules: make(map[string]TypedFunctionRule),
 		operatorRules: make(map[string]OperatorRule), sourceRules: make(map[string]SourceRule),
 	}
 	for _, option := range options {
@@ -996,6 +997,25 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 		}
 	}
 	s.use("function."+function, "equivalent", value.Span)
+	if rule, ok := s.compiler.typedFunctionRules[function]; ok {
+		typed := make([]TypedExpression, len(args))
+		for i := range args {
+			typed[i] = TypedExpression{SQL: args[i], Type: argTypes[i]}
+		}
+		result, err := rule(typed)
+		if err != nil {
+			s.error("KQLL0504", value.Span, "function."+function, err.Error())
+			return boundExpr{}
+		}
+		if result.SQL == nil {
+			s.error("KQLL0505", value.Span, "function."+function, "custom function rule returned a nil expression")
+			return boundExpr{}
+		}
+		if result.Type == "" {
+			result.Type = TypeUnknown
+		}
+		return boundExpr{SQL: result.SQL, Type: result.Type}
+	}
 	if rule, ok := s.compiler.functionRules[function]; ok {
 		result, err := rule(args)
 		if err != nil {
@@ -1119,7 +1139,7 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		return TypeDateTime
 	case "not", "tobool", "toboolean":
 		return TypeBool
-	case "make_list", "make_set":
+	case "make_list", "make_set", "make_bag", "make_bag_if", "make_dictionary", "parse_json", "parsejson":
 		return TypeDynamic
 	case "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow":
 		return TypeReal

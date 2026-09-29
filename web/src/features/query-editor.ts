@@ -34,7 +34,7 @@ const functions = new Set([
   'ipv4_is_private', 'ipv4_is_in_range',
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
-  'make_set', 'make_list', 'take_any',
+  'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
   'not', 'bin', 'dcount', 'dcountif', 'count_distinct', 'count_distinctif', 'avgif', 'minif', 'maxif',
   'startofday', 'endofday', 'startofweek', 'endofweek', 'startofmonth', 'endofmonth', 'startofyear', 'endofyear',
 ]);
@@ -80,6 +80,8 @@ const functionCompletions = createCompletions('function', [
   ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
   ['make_set', 'Collect distinct values'], ['make_list', 'Collect values'],
   ['take_any', 'Select a group value'],
+  ['make_bag', 'Merge property bags in a group'], ['make_bag_if', 'Merge property bags matching a predicate'],
+  ['make_dictionary', 'Legacy property bag aggregate'],
   ['not', 'Negate a Boolean expression'], ['bin', 'Round down to a numeric or time bucket'],
   ['dcount', 'Count distinct non-null values (exact in Striem)'],
   ['dcountif', 'Count distinct values matching a predicate'],
