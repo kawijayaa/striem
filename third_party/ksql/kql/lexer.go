@@ -13,6 +13,7 @@ var hyphenatedKeywords = map[string]struct{}{
 	"make-graph": {}, "make-series": {}, "materialized-view-combine": {}, "mv-apply": {}, "mv-expand": {},
 	"parse-kv": {}, "parse-where": {}, "project-away": {}, "project-by-names": {},
 	"project-keep": {}, "project-rename": {}, "project-reorder": {},
+	"granny-asc": {}, "granny-desc": {},
 	"sample-distinct": {}, "top-hitters": {}, "top-nested": {},
 }
 

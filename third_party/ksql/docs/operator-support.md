@@ -10,9 +10,9 @@ positioned diagnostic and no partial SQL.
 | `summarize` core aggregates | Yes | Yes | Yes with catalog | Yes | SQLite core; renderer tests elsewhere | Equivalent subject to database null/numeric behavior |
 | `make_list` | Yes | Yes | Yes | Yes | SQLite; PostgreSQL rendering | Lossy: result order is arbitrary without an explicit database order |
 | `sort`, `top`, `take`, `count` | Yes | Yes | Yes | Yes | SQLite and renderer tests | Equivalent; configured constant row bounds are enforced |
-| `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; wildcard forms unsupported |
+| `project-away`, `project-keep` | Yes | Expression list | Yes | Yes | SQLite | Exact names and case-sensitive `*` patterns; input column order retained |
 | `project-rename` | Yes | Named expressions | Yes | Yes | SQLite | Simultaneous, case-insensitive rename with collision checks |
-| `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Equivalent for exact names; unspecified columns retain input order |
+| `project-reorder` | Yes | Expression list | Yes | Yes | SQLite | Exact names and `*` patterns; ordinal and natural numeric sorting; first match wins; unspecified columns retain input order |
 | `search` | Yes | `SearchSpec` | Yes | Capability-dependent | Yes | SQLite with UDF | Equivalent for one non-empty literal string; regex metacharacters are escaped and wide inputs can be bounded |
 | `join kind=inner` | Yes | `JoinSpec` | Yes | Yes | SQLite | Explicit KQL output aliases; right collisions use deterministic numeric suffixes |
 | `leftouter`, `rightouter`, `fullouter` | Yes | `JoinSpec` | Yes | Yes | Renderer-dependent | Database join behavior; SQLite version must support requested join |
@@ -65,7 +65,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 
 ## Known gaps
 
-- Projection wildcards are not yet typed or bound.
+- Column-selection patterns are supported by `project-away`, `project-keep`, and `project-reorder`. Zero-column outputs remain unsupported; exact-name binding remains case-insensitive. Numeric sorting is verified for ASCII digit runs; Unicode digit collation still needs conformance coverage.
 - Parse operators, schema-declared
   `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
 - Multiple-array expansion is rejected.

@@ -174,6 +174,16 @@ type Expression interface {
 	expressionNode()
 }
 
+// ColumnPatternExpression is only valid in column-selection operators.
+type ColumnPatternExpression struct {
+	Pattern string
+	Order   string
+	Span    Span
+}
+
+func (*ColumnPatternExpression) expressionNode()  {}
+func (e *ColumnPatternExpression) NodeSpan() Span { return e.Span }
+
 type NameExpression struct {
 	Name string
 	Span Span

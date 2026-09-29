@@ -179,3 +179,21 @@ func TestAlignedUnionsUseBundledCompiler(t *testing.T) {
 		})
 	}
 }
+
+func TestColumnPatternsUseBundledCompiler(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`Events | where n == 1 | project-keep h*,u*`, `[[a alice]]`},
+		{`Events | where n == 1 | project host,user,n | project-away h*,u*`, `[[1]]`},
+		{`Events | where n == 1 | project host,user,n | project-reorder * desc`, `[[alice 1 a]]`},
+		{`Events | where n == 1 | project z=host,attr20=n,attr3=user,attr100=message | project-reorder attr* granny-asc`, `[[alice 1 PowerShell alpha a]]`},
+		{`Events | where n == 1 | project ok=not(n == 2), num=n | project-keep o* | where ok | count`, `[[1]]`},
+		{`Events | project host,user,n | project-reorder u*,*,u* | where n == 3`, `[[carol a 3]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+}

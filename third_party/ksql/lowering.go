@@ -307,12 +307,17 @@ func (s *compileState) projectionOperator(from *sqlast.Subquery, input Schema, o
 			renames[strings.ToLower(column.Name)] = named.Name
 			continue
 		}
-		name, ok := expression.(*kql.NameExpression)
-		if !ok || strings.ContainsAny(name.Name, "*") {
-			s.bindError("KQLB0342", expression.NodeSpan(), "operator."+operator.Kind, "only exact bound column names are supported")
+		if pattern, ok := expression.(*kql.ColumnPatternExpression); ok {
+			matches := matchingColumns(input.Columns, pattern.Pattern, pattern.Order)
+			requested = append(requested, matches...)
 			continue
 		}
-		column, _, found, ambiguous := input.Lookup(name.Name)
+		name, ok := expression.(*kql.NameExpression)
+		if !ok {
+			s.bindError("KQLB0342", expression.NodeSpan(), "operator."+operator.Kind, "expected a bound column name or pattern")
+			continue
+		}
+		column, _, found, ambiguous := input.Lookup(unquoteKQL(name.Name))
 		if ambiguous || !found {
 			s.bindError("KQLB0401", name.Span, "operator."+operator.Kind, "unknown column "+name.Name)
 			continue
@@ -336,8 +341,13 @@ func (s *compileState) projectionOperator(from *sqlast.Subquery, input Schema, o
 			}
 		}
 	case "project-reorder":
-		used := nameSet(requested)
+		used := make(map[string]struct{})
 		for _, name := range requested {
+			key := strings.ToLower(name)
+			if _, found := used[key]; found {
+				continue
+			}
+			used[key] = struct{}{}
 			column, _, _, _ := input.Lookup(name)
 			output.Columns = append(output.Columns, column)
 		}
@@ -356,6 +366,10 @@ func (s *compileState) projectionOperator(from *sqlast.Subquery, input Schema, o
 	}
 	if len(output.Columns) == 0 {
 		s.bindError("KQLB0343", operator.Span, "operator."+operator.Kind, "projection cannot remove every column")
+		return Relation{}
+	}
+	if maximum := s.compiler.limits.MaxProjectionItems; maximum > 0 && len(output.Columns) > maximum {
+		s.bindError("KQLB0344", operator.Span, "operator."+operator.Kind, fmt.Sprintf("expanded projection exceeds MaxProjectionItems (%d)", maximum))
 		return Relation{}
 	}
 	s.validateUnique(output.Columns, operator.Span, "operator."+operator.Kind)

@@ -20,7 +20,7 @@ const keywords = new Set([
   'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
   'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
   'lookup', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
-  'on', 'by', 'of', 'asc', 'desc',
+  'on', 'by', 'of', 'asc', 'desc', 'granny-asc', 'granny-desc',
 ]);
 const logicalOperators = new Set([
   'and', 'or', 'not', '=~', '!~', 'in', 'in~', '!in', '!in~', 'between', '!between', 'contains', 'contains_cs',

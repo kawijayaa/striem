@@ -259,7 +259,9 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		expr, errs := parseExpressionTokens(body)
 		op.Body = SearchSpec{Term: expr}
 		return op, errs
-	case "project", "project-away", "project-by-names", "project-keep", "project-rename", "project-reorder", "extend", "distinct", "serialize":
+	case "project-away", "project-keep", "project-reorder":
+		return parseColumnSelection(op, body)
+	case "project", "project-by-names", "project-rename", "extend", "distinct", "serialize":
 		exprs, errs := parseExpressionList(body)
 		op.Body = ExpressionSpec{Expressions: exprs}
 		return op, errs

@@ -277,6 +277,8 @@ order by, sort by, top, take, limit, sample, sample-distinct, as,
 mv-expand, mv-apply, union, join, lookup
 ```
 
+`project-away`, `project-keep`, and `project-reorder` accept case-sensitive `*` column patterns. Reordering supports `asc`, `desc`, `granny-asc`, and `granny-desc`; the latter two sort embedded ASCII numbers numerically. Overlapping reorder patterns keep each column at its first matching position. Zero-column results remain unsupported.
+
 `join` supports `innerunique` (the KQL default), `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, `leftanti`, `rightsemi`, and `rightanti`. The default deduplicates the left side by the complete equality-key tuple and keeps one complete representative row; duplicate representatives are unspecified. Use `kind=inner` to retain all matching left rows. Semi/anti joins return only columns from the retained side. `lookup` supports `inner` and `leftouter`. `union` aligns columns by name and type. The default `kind=outer` includes every column, fills missing cells with null, and suffixes conflicting types (for example, `value_long` and `value_string`). `kind=inner` retains common name/type pairs. Standalone `union TableA, TableB` and pipeline unions both work. Wildcard inputs, `withsource`, fuzzy resolution, and zero-column results remain unsupported.
 
 Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or`, membership with `in`, `!in`, `in~`, and `!in~`, ranges with `between`, and `contains`, `startswith`, and `endswith` string matching. Striem's bounded SQLite regular-expression adapter also supports literal alphanumeric terms with `has`, `has_cs`, `hasprefix`, `hassuffix`, their negated forms, `has_any`, and `has_all`.

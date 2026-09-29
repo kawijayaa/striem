@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Implement wildcard column selections and sorted `project-reorder` patterns, preserving types and deduplicating overlapping matches. Enforce projection limits after wildcard expansion and resolve quoted literal column names.
+
 - Align union inputs by name and scalar type, pad missing cells with null, and disambiguate type suffixes. Support standalone unions and tabular union bindings; diagnose unsupported union options instead of ignoring them.
 
 - Implement right semi/anti joins and default `innerunique` joins over column equality keys.
