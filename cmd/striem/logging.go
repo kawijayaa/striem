@@ -14,7 +14,7 @@ type consoleHandler struct {
 	output io.Writer
 	level  slog.Leveler
 	mutex  *sync.Mutex
-	attrs  []slog.Attr
+	attrs  string
 	groups []string
 }
 
@@ -33,9 +33,7 @@ func (h *consoleHandler) Enabled(_ context.Context, level slog.Level) bool {
 func (h *consoleHandler) Handle(_ context.Context, record slog.Record) error {
 	var line strings.Builder
 	fmt.Fprintf(&line, "%s %-5s %s", record.Time.Format("15:04:05"), record.Level.String(), record.Message)
-	for _, attr := range h.attrs {
-		h.appendAttr(&line, attr, h.groups)
-	}
+	line.WriteString(h.attrs)
 	record.Attrs(func(attr slog.Attr) bool {
 		h.appendAttr(&line, attr, h.groups)
 		return true
@@ -50,7 +48,12 @@ func (h *consoleHandler) Handle(_ context.Context, record slog.Record) error {
 
 func (h *consoleHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	clone := *h
-	clone.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
+	var formatted strings.Builder
+	formatted.WriteString(h.attrs)
+	for _, attr := range attrs {
+		h.appendAttr(&formatted, attr, h.groups)
+	}
+	clone.attrs = formatted.String()
 	return &clone
 }
 
