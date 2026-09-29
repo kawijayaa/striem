@@ -220,12 +220,102 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		From:  &sqlast.Subquery{Query: result.Query, Alias: "result"},
 		Limit: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: fmt.Sprint(resultLimit)},
 	}
+	normalizeDateTimeLiterals(query)
 	sqlText, err := dialect.Render(target, query)
 	if err != nil {
 		return CompiledQuery{}, err
 	}
 	sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
 	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans}, nil
+}
+
+// KSQL emits ANSI TIMESTAMP literals, which SQLite cannot evaluate. Convert
+// them in the AST so quoted SQL text is never rewritten accidentally.
+func normalizeDateTimeLiterals(query sqlast.Query) {
+	switch node := query.(type) {
+	case *sqlast.Select:
+		for index := range node.Projections {
+			node.Projections[index].Expr = normalizeDateTimeExpr(node.Projections[index].Expr)
+		}
+		normalizeDateTimeSource(node.From)
+		node.Where = normalizeDateTimeExpr(node.Where)
+		for index := range node.GroupBy {
+			node.GroupBy[index] = normalizeDateTimeExpr(node.GroupBy[index])
+		}
+		for index := range node.OrderBy {
+			node.OrderBy[index].Expr = normalizeDateTimeExpr(node.OrderBy[index].Expr)
+		}
+		node.Limit = normalizeDateTimeExpr(node.Limit)
+	case *sqlast.Union:
+		for _, child := range node.Queries {
+			normalizeDateTimeLiterals(child)
+		}
+	}
+}
+
+func normalizeDateTimeSource(source sqlast.Source) {
+	switch node := source.(type) {
+	case *sqlast.Subquery:
+		normalizeDateTimeLiterals(node.Query)
+	case *sqlast.Join:
+		normalizeDateTimeSource(node.Left)
+		normalizeDateTimeSource(node.Right)
+		node.On = normalizeDateTimeExpr(node.On)
+	case *sqlast.Values:
+		for _, row := range node.Rows {
+			for index := range row {
+				row[index] = normalizeDateTimeExpr(row[index])
+			}
+		}
+	case *sqlast.Series:
+		node.From = normalizeDateTimeExpr(node.From)
+		node.To = normalizeDateTimeExpr(node.To)
+		node.Step = normalizeDateTimeExpr(node.Step)
+	case *sqlast.JSONEach:
+		node.Value = normalizeDateTimeExpr(node.Value)
+	}
+}
+
+func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
+	switch node := expr.(type) {
+	case *sqlast.Literal:
+		if node.Kind == sqlast.DateTimeLiteral {
+			return &sqlast.Call{Name: "kql_todatetime", Args: []sqlast.Expr{stringLiteral(node.Value)}}
+		}
+	case *sqlast.Unary:
+		node.Operand = normalizeDateTimeExpr(node.Operand)
+	case *sqlast.Binary:
+		node.Left = normalizeDateTimeExpr(node.Left)
+		node.Right = normalizeDateTimeExpr(node.Right)
+	case *sqlast.Call:
+		for index := range node.Args {
+			node.Args[index] = normalizeDateTimeExpr(node.Args[index])
+		}
+	case *sqlast.List:
+		for index := range node.Items {
+			node.Items[index] = normalizeDateTimeExpr(node.Items[index])
+		}
+	case *sqlast.Case:
+		for index := range node.Branches {
+			node.Branches[index].Condition = normalizeDateTimeExpr(node.Branches[index].Condition)
+			node.Branches[index].Result = normalizeDateTimeExpr(node.Branches[index].Result)
+		}
+		node.Else = normalizeDateTimeExpr(node.Else)
+	case *sqlast.Cast:
+		node.Expr = normalizeDateTimeExpr(node.Expr)
+	case *sqlast.Index:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		node.Index = normalizeDateTimeExpr(node.Index)
+	case *sqlast.Regex:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.Exists:
+		normalizeDateTimeLiterals(node.Query)
+	case *sqlast.Filtered:
+		node.Expr = normalizeDateTimeExpr(node.Expr)
+		node.Where = normalizeDateTimeExpr(node.Where)
+	}
+	return expr
 }
 
 func newCatalog(tables TableCatalog) ksql.Catalog {

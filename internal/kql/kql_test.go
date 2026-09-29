@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/kawijayaa/striem/internal/database"
+	"github.com/kawijayaa/striem/internal/eventtime"
 )
 
 var logicalEventCatalog = TableCatalog{"Fixture": {ID: 1, Fields: []Field{
@@ -80,6 +81,53 @@ func TestCompiledQueryExecutes(t *testing.T) {
 	}
 	if _, err := database.Query(compiled.SQL, compiled.Args...); err != nil {
 		t.Fatalf("query error = %v\nSQL: %s\nArgs: %#v", err, compiled.SQL, compiled.Args)
+	}
+}
+
+func TestCompileTimeRangeWithDatetimeLiteral(t *testing.T) {
+	query := `Events
+| where TimeGenerated >= datetime("2022-07-27T10:42:06.410Z") and TimeGenerated < datetime("2022-07-27T10:42:41.195Z")
+| order by TimeGenerated desc
+| take 100`
+	compiled, err := Compile(query, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("striem_sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`CREATE TABLE events (time_generated TEXT, source TEXT, raw_data TEXT, dataset_id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, timestamp := range []string{"2022-07-27T10:42:06.409Z", "2022-07-27T10:42:06.410Z", "2022-07-27T10:42:41.194Z", "2022-07-27T10:42:41.195Z"} {
+		parsed, err := time.Parse(time.RFC3339Nano, timestamp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO events (time_generated, source, raw_data, dataset_id) VALUES (?, 'fixture', '{}', 1)`, eventtime.Format(parsed)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := database.Query(compiled.SQL, compiled.Args...)
+	if err != nil {
+		t.Fatalf("query error = %v\nSQL: %s", err, compiled.SQL)
+	}
+	defer rows.Close()
+	var timestamps []string
+	for rows.Next() {
+		var timestamp, source, rawData string
+		if err := rows.Scan(&timestamp, &source, &rawData); err != nil {
+			t.Fatal(err)
+		}
+		timestamps = append(timestamps, timestamp)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(timestamps, ","); got != "2022-07-27T10:42:41.194000000Z,2022-07-27T10:42:06.410000000Z" {
+		t.Fatalf("timestamps = %q", got)
 	}
 }
 
