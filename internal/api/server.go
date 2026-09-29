@@ -8,6 +8,8 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/kql"
@@ -323,7 +326,7 @@ func (s *Server) questions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
 		return
 	}
@@ -340,7 +343,7 @@ func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Answer = strings.TrimSpace(request.Answer)
-	if request.Answer == "" || len(request.Answer) > 512 {
+	if request.Answer == "" || utf8.RuneCountInString(request.Answer) > 512 {
 		writeError(w, http.StatusBadRequest, "answer must contain 1 to 512 characters", nil)
 		return
 	}
@@ -405,7 +408,7 @@ func (s *Server) validateQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bool) (kql.CompiledQuery, bool) {
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
 		return kql.CompiledQuery{}, false
 	}
@@ -488,6 +491,11 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 		row := make(map[string]any, len(columns))
 		for index, column := range columns {
 			value := values[index]
+			// SQLite can produce infinity from overflow. JSON has no nonfinite
+			// numbers, so preserve the row with a null value instead.
+			if number, ok := value.(float64); ok && (math.IsInf(number, 0) || math.IsNaN(number)) {
+				value = nil
+			}
 			if _, boolean := booleanColumns[column]; boolean {
 				switch current := value.(type) {
 				case int64:

@@ -19,7 +19,7 @@ const keywords = new Set([
   'let', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
   'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
   'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
-  'lookup', 'kind', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
+  'lookup', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
   'on', 'by', 'of', 'asc', 'desc',
 ]);
 const logicalOperators = new Set([
@@ -35,6 +35,8 @@ const functions = new Set([
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'replace_string',
   'make_set', 'make_list', 'take_any',
+  'not', 'bin', 'dcount', 'dcountif', 'count_distinct', 'count_distinctif', 'avgif', 'minif', 'maxif',
+  'startofday', 'endofday', 'startofweek', 'endofweek', 'startofmonth', 'endofmonth', 'startofyear', 'endofyear',
 ]);
 const literals = new Set(['true', 'false', 'null']);
 const types = new Set(['string', 'long', 'real', 'dynamic']);
@@ -78,6 +80,15 @@ const functionCompletions = createCompletions('function', [
   ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
   ['make_set', 'Collect distinct values'], ['make_list', 'Collect values'],
   ['take_any', 'Select a group value'],
+  ['not', 'Negate a Boolean expression'], ['bin', 'Round down to a numeric or time bucket'],
+  ['dcount', 'Count distinct non-null values (exact in Striem)'],
+  ['dcountif', 'Count distinct values matching a predicate'],
+  ['count_distinct', 'Count distinct non-null values'], ['count_distinctif', 'Conditional distinct count'],
+  ['avgif', 'Conditional average'], ['minif', 'Conditional minimum'], ['maxif', 'Conditional maximum'],
+  ['startofday', 'UTC start of day'], ['endofday', 'UTC end of day'],
+  ['startofweek', 'UTC start of week (Sunday)'], ['endofweek', 'UTC end of week'],
+  ['startofmonth', 'UTC start of month'], ['endofmonth', 'UTC end of month'],
+  ['startofyear', 'UTC start of year'], ['endofyear', 'UTC end of year'],
 ], label => `${label}()`);
 
 function createCompletions(
@@ -111,7 +122,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
 
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
-    const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.\[\]"-]*(?:\s+[A-Za-z_][A-Za-z0-9_-]*)?/);
+    const word = context.matchBefore(/(?:order|sort)\s+[A-Za-z_]*|[A-Za-z_][A-Za-z0-9_.\[\]"-]*/i);
     if (!context.explicit && (!word || word.from === word.to)) return null;
     return {
       from: word?.from ?? context.pos,

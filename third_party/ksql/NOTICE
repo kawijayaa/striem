@@ -1,0 +1,11 @@
+ksql
+
+The Kusto Query Language syntax and built-in feature inventory used by this
+project is based on Microsoft's Kusto-Query-Language repository:
+https://github.com/microsoft/Kusto-Query-Language
+
+That repository is licensed under the Apache License, Version 2.0 and carries
+the notice: Copyright 2019 Microsoft Corporation.
+
+This project is an independent Go implementation. It is not affiliated with,
+endorsed by, or supported by Microsoft.

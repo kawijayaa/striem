@@ -661,3 +661,78 @@ func contains(values []string, target string) bool {
 	}
 	return false
 }
+
+func TestScanRowsNormalizesNonFiniteNumbers(t *testing.T) {
+	store := testStore(t)
+	rows, err := store.DB().QueryContext(t.Context(), `SELECT 1e999 AS PositiveInfinity, -1e999 AS NegativeInfinity, 2.5 AS Finite`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	_, results, err := scanRows(rows, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0]["PositiveInfinity"] != nil || results[0]["NegativeInfinity"] != nil || results[0]["Finite"] != 2.5 {
+		t.Fatalf("unexpected numeric results: %#v", results)
+	}
+	recorder := httptest.NewRecorder()
+	writeJSON(recorder, http.StatusOK, results)
+	if !json.Valid(recorder.Body.Bytes()) {
+		t.Fatalf("invalid JSON response: %q", recorder.Body.String())
+	}
+}
+
+func TestJSONEndpointsRequireExactMediaType(t *testing.T) {
+	_, server := testServer(t)
+	for _, path := range []string{"/api/query", "/api/query/validate", "/api/questions/missing/answer"} {
+		for _, contentType := range []string{"application/jsonp", "application/json-invalid", "application/json; charset"} {
+			t.Run(path+"/"+contentType, func(t *testing.T) {
+				request, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(`{"query":"Events | take 1"}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Content-Type", contentType)
+				request.Header.Set("X-Striem-Request", "1")
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+				if response.StatusCode != http.StatusUnsupportedMediaType {
+					t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusUnsupportedMediaType)
+				}
+			})
+		}
+	}
+}
+
+func TestNotAndHuntingFunctionsThroughAPI(t *testing.T) {
+	store := testStore(t)
+	if _, err := ingest.New(store).Import(t.Context(), strings.NewReader(`{"ts":"2024-01-01T00:15:00Z","host":"one"}
+{"ts":"2024-01-01T00:45:00Z","host":"two"}`), false, ingest.Mapping{Name: "not fixture", Table: "Audit", Source: "fixture", TimestampPath: "ts"}); err != nil {
+		t.Fatal(err)
+	}
+	server := serveStore(t, store)
+	for _, query := range []string{
+		`Audit | project Negated=not(host == "one") | order by Negated asc`,
+		`Audit | extend Negated=not(host == "one") | where not(false) | project Renamed=Negated | order by Renamed asc`,
+	} {
+		rows := queryRows(t, server.URL, query)
+		key := "Negated"
+		if strings.Contains(query, "Renamed") {
+			key = "Renamed"
+		}
+		if len(rows) != 2 || rows[0][key] != false || rows[1][key] != true {
+			t.Fatalf("Boolean metadata lost: %#v", rows)
+		}
+	}
+	rows := queryRows(t, server.URL, `Audit | extend X=not(true) | extend X=2 | project X | take 1`)
+	if rows[0]["X"] != float64(2) {
+		t.Fatalf("stale Boolean metadata: %#v", rows)
+	}
+	rows = queryRows(t, server.URL, `Audit | where not(host == "missing") | summarize N=dcount(host) by bin(TimeGenerated,1h)`)
+	if len(rows) != 1 || rows[0]["N"] != float64(2) {
+		t.Fatalf("bucketed distinct counts: %#v", rows)
+	}
+}

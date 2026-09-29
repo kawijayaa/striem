@@ -48,3 +48,39 @@ INSERT INTO events(id, dataset_id, time_generated, source, raw_data) VALUES
 		}
 	}
 }
+
+func TestLeadingSearchFullTextPrefilterPreservesEscapedJSONMatches(t *testing.T) {
+	store, err := database.Open(filepath.Join(t.TempDir(), "escaped.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.ConfigureEventStorage(t.Context(), nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`
+INSERT INTO datasets(id, name, source, timestamp_path, created_at)
+VALUES (1, 'fixture', 'fixture', 'ts', '2026-07-29T00:00:00Z');
+INSERT INTO events(dataset_id, time_generated, source, raw_data)
+VALUES (1, '2026-07-29T00:00:00Z', 'fixture', '{"message":"power\u0073hell"}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncFullTextIndex(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		compiled, err := Compile(`Fixture | search "powershell" | count`, time.Now(), CompileConfig{
+			Tables: TableCatalog{"Fixture": {ID: 1, Fields: []Field{{Name: "message", Type: "string"}}}}, FullTextIndex: enabled,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err := store.DB().QueryRow(compiled.SQL, compiled.Args...).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("FullTextIndex=%v: count = %d, want 1", enabled, count)
+		}
+	}
+}

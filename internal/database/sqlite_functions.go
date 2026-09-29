@@ -37,6 +37,9 @@ func init() {
 				return fmt.Errorf("configure SQLite connection: %w", err)
 			}
 		}
+		if err := registerKQLCompatibility(connection); err != nil {
+			return err
+		}
 		if err := connection.RegisterFunc("kql_has", kqlHas, true); err != nil {
 			return err
 		}
@@ -686,6 +689,9 @@ func kqlBagHasKey(bagValue, keyValue any) any {
 		if index == len(path)-1 {
 			return true
 		}
+		// Unmarshal merges into an existing map, which would retain ancestor
+		// properties and incorrectly find them in the nested object.
+		current = nil
 		if err := json.Unmarshal(encoded, &current); err != nil || current == nil {
 			return false
 		}

@@ -550,6 +550,9 @@ func TestKQLBagHasKey(t *testing.T) {
 		{name: "single quoted path with double quote", bag: `{"quote\"d":1}`, key: `$['quote\"d']`, want: int64(1)},
 		{name: "escaped Unicode path", bag: `{"snow☃":1}`, key: `$["snow\u2603"]`, want: int64(1)},
 		{name: "missing nested property", bag: `{"a":{}}`, key: "$.a.b", want: int64(0)},
+		{name: "ancestor key is not nested", bag: `{"a":{},"b":1}`, key: "$.a.b", want: int64(0)},
+		{name: "ancestor object is not nested", bag: `{"a":{}}`, key: "$.a.a", want: int64(0)},
+		{name: "intermediate keys are not inherited", bag: `{"a":{"b":{},"c":1}}`, key: "$.a.b.c", want: int64(0)},
 		{name: "non-object intermediate", bag: `{"a":1}`, key: "$.a.b", want: int64(0)},
 		{name: "maximum depth", bag: deepBag, key: deepPath, want: int64(1)},
 		{name: "maximum path bytes", bag: maximumKeyBag, key: maximumKey, want: int64(1)},
@@ -773,5 +776,48 @@ func TestCollectionAggregatesAreBounded(t *testing.T) {
 	}
 	if len(values) != maxCollectionValues {
 		t.Fatalf("values = %d, want %d", len(values), maxCollectionValues)
+	}
+}
+
+func TestKQLCompatibilityBounds(t *testing.T) {
+	store, err := Open(t.TempDir() + "/compat.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, c := range []struct {
+		sql  string
+		want any
+	}{
+		{`SELECT kql_bin(-3,2)`, int64(-4)},
+		{`SELECT kql_bin(9223372036854775807,2)`, int64(9223372036854775806)},
+		{`SELECT kql_bin(-9223372036854775808,3)`, nil},
+		{`SELECT kql_bin(NULL,2)`, nil},
+		{`SELECT kql_bin(2,-1)`, nil},
+		{`SELECT kql_bin(2,0)`, nil},
+		{`SELECT kql_bin_datetime('not a date',1000000000)`, nil},
+		{`SELECT kql_calendar('2024-01-01','year',9223372036854775807,0)`, nil},
+		{`SELECT kql_calendar(NULL,'day',0,0)`, nil},
+		{`SELECT kql_calendar('2024-01-01','day',0.5,0)`, nil},
+		{`SELECT kql_count_distinct(v) FROM (SELECT NULL AS v UNION ALL SELECT '' UNION ALL SELECT '' UNION ALL SELECT 1 UNION ALL SELECT 1.0)`, int64(2)},
+	} {
+		if got := querySQLiteFunction(t, store.DB(), c.sql); got != c.want {
+			t.Errorf("%s = %#v, want %#v", c.sql, got, c.want)
+		}
+	}
+	aggregate := &distinctCount{seen: make(map[string]struct{})}
+	if err := aggregate.Step(strings.Repeat("x", maxDistinctBytes)); err == nil {
+		t.Fatal("unbounded distinct allocation accepted")
+	}
+	for i := 0; i < maxDistinctValues; i++ {
+		if err := aggregate.Step(int64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := aggregate.Step(int64(0)); err != nil {
+		t.Fatal("duplicate at capacity rejected:", err)
+	}
+	if err := aggregate.Step(int64(maxDistinctValues)); err == nil {
+		t.Fatal("distinct count overflow silently accepted")
 	}
 }

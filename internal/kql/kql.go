@@ -16,7 +16,12 @@ import (
 )
 
 const resultLimit = 1000
-const fullTextPredicate = `"rowid" IN (SELECT "rowid" FROM "events_fts" WHERE "events_fts" MATCH ?)`
+const maxSourceBytes = 32 << 10
+
+// The index stores serialized JSON, while search also examines decoded fields.
+// Escaped JSON can therefore match without containing the term in the index;
+// retain those rows for the ordinary search predicate to check.
+const fullTextPredicate = `("rowid" IN (SELECT "rowid" FROM "events_fts" WHERE "events_fts" MATCH ?) OR instr("raw_data", '\') > 0)`
 
 var systemSchema = ksql.Schema{Columns: []ksql.Column{
 	{Name: "TimeGenerated", Type: ksql.TypeDateTime},
@@ -170,6 +175,11 @@ func (e *Error) Error() string {
 }
 
 func Compile(source string, now time.Time, compileOptions ...CompileOption) (CompiledQuery, error) {
+	// The FTS optimization parses before the compiler does, so enforce the
+	// source limit here as well as in the compiler configuration.
+	if len(source) > maxSourceBytes {
+		return CompiledQuery{}, &Error{Message: fmt.Sprintf("query exceeds MaxSourceBytes (%d)", maxSourceBytes), Line: 1, Column: 1}
+	}
 	var settings compileSettings
 	for _, option := range compileOptions {
 		if option != nil {
@@ -182,12 +192,12 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		fullTextTerms = leadingSearchTerms(source)
 	}
 	catalog := newCatalog(tables)
-	options := compilerOptions(now.UTC())
+	options := append(compilerOptions(now.UTC()), compatibilityOptions()...)
 	options = append(options,
 		ksql.WithCatalog(catalog),
 		ksql.WithSource("table", tableSource(tables, fullTextTerms)),
 		ksql.WithLimits(ksql.Limits{
-			MaxSourceBytes:     32 << 10,
+			MaxSourceBytes:     maxSourceBytes,
 			MaxOutputRows:      resultLimit,
 			MaxProjectionItems: 32,
 			MaxExpansionItems:  1,
@@ -287,6 +297,25 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	case *sqlast.Binary:
 		node.Left = normalizeDateTimeExpr(node.Left)
 		node.Right = normalizeDateTimeExpr(node.Right)
+		// KSQL represents BETWEEN bounds as an AND expression. SQLite cannot
+		// execute the renderer's parenthesized "BETWEEN (lower AND upper)".
+		if node.Operator == "BETWEEN" {
+			if bounds, ok := node.Right.(*sqlast.Binary); ok && bounds.Operator == "AND" {
+				return &sqlast.Binary{
+					Left:     &sqlast.Binary{Left: node.Left, Operator: ">=", Right: bounds.Left},
+					Operator: "AND",
+					Right:    &sqlast.Binary{Left: node.Left, Operator: "<=", Right: bounds.Right},
+				}
+			}
+		}
+	case *sqlast.Window:
+		node.Expr = normalizeDateTimeExpr(node.Expr)
+		for index := range node.PartitionBy {
+			node.PartitionBy[index] = normalizeDateTimeExpr(node.PartitionBy[index])
+		}
+		for index := range node.OrderBy {
+			node.OrderBy[index].Expr = normalizeDateTimeExpr(node.OrderBy[index].Expr)
+		}
 	case *sqlast.Call:
 		for index := range node.Args {
 			node.Args[index] = normalizeDateTimeExpr(node.Args[index])

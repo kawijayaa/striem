@@ -530,3 +530,15 @@ func TestCompileOrdersMultipleFullTextArgumentsBySQLPosition(t *testing.T) {
 		t.Fatalf("args = %s, want SQL rendering order", got)
 	}
 }
+
+func TestCompileRejectsOversizedSourceBeforeFullTextParsing(t *testing.T) {
+	// Deeply nested oversized input must be rejected before either parser runs.
+	source := "Events | where " + strings.Repeat("(", maxSourceBytes)
+	for _, fullText := range []bool{false, true} {
+		_, err := Compile(source, time.Now(), CompileConfig{FullTextIndex: fullText})
+		queryError, ok := err.(*Error)
+		if !ok || !strings.Contains(queryError.Message, "MaxSourceBytes") || queryError.Line != 1 || queryError.Column != 1 {
+			t.Fatalf("FullTextIndex=%v: error = %#v", fullText, err)
+		}
+	}
+}

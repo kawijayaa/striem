@@ -5,12 +5,14 @@ RUN npm ci
 COPY tsconfig.json vite.config.js ./
 COPY web/index.html ./web/index.html
 COPY web/src ./web/src
+COPY web/public ./web/public
 RUN npm run build
 
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache gcc musl-dev
 COPY go.mod go.sum ./
+COPY third_party/ksql ./third_party/ksql
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist

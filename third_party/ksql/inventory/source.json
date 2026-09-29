@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/microsoft/Kusto-Query-Language",
+  "commit": "c94c9e761b3d095e2b9c21e3ec3e92afa0af4856",
+  "commit_date": "2026-07-19T20:00:31Z",
+  "license": "Apache-2.0",
+  "grammar_sources": [
+    "src/Kusto.Language/Parser/QueryGrammar.cs",
+    "src/Kusto.Language/Parser/QueryParser.cs",
+    "src/Kusto.Language/Syntax/SyntaxKind.cs",
+    "src/Kusto.Language.Generators/SyntaxNodeInfos.cs"
+  ],
+  "catalog_sources": [
+    "src/Kusto.Language/Functions.cs",
+    "src/Kusto.Language/Functions.Convert.cs",
+    "src/Kusto.Language/Aggregates.cs",
+    "src/Kusto.Language/PlugIns.cs",
+    "src/Kusto.Language/Operators.cs",
+    "src/Kusto.Language/QueryOperatorParameters.cs"
+  ]
+}
