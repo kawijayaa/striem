@@ -8,3 +8,6 @@
 /testdata/
 /deploy/
 /.impeccable/
+
+/test-results/
+/playwright-report/

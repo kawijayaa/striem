@@ -78,7 +78,7 @@ Routine HTTP access messages are logged at debug level and are omitted from the 
 
 ## Provision datasets
 
-The browser interface has no ingestion or dataset-management controls. Set `STRIEM_CONFIG` to a manifest mounted alongside the prepared logs. Striem imports every configured dataset before opening its HTTP listener and exits if provisioning fails.
+The browser interface has no ingestion or dataset-management controls. Set `STRIEM_CONFIG` to a manifest mounted alongside the prepared logs. Striem opens its HTTP listener while datasets are imported. The loading screen remains visible until provisioning finishes; failures show an error screen and keep readiness at HTTP 503.
 
 Example manifest:
 
@@ -128,7 +128,7 @@ datasets:
 
 The former `fieldPaths` dataset option is no longer supported. Root fields are discovered and exposed automatically; remove `fieldPaths` from older manifests before upgrading. The normalized `EventType`, `Host`, `User`, and `Message` columns have also been removed; query the corresponding discovered root fields instead. Existing raw event data is preserved when the legacy physical columns are dropped.
 
-The deployment schema change causes configured datasets to be re-ingested on the first upgraded start so their logical field catalogues can be rebuilt. With `fullTextIndex: true`, this also rebuilds the FTS5 index and can take several minutes for a large deployment. Striem opens its HTTP listener after provisioning completes; later starts reuse unchanged imported data.
+The deployment schema change causes configured datasets to be re-ingested on the first upgraded start so their logical field catalogues can be rebuilt. With `fullTextIndex: true`, this also rebuilds the FTS5 index and can take several minutes for a large deployment. The workspace becomes available after provisioning completes; later starts reuse unchanged imported data.
 
 `indexedPaths` adds SQLite expression indexes for frequently filtered JSON paths. Paths are unioned, deduplicated, and sorted across all datasets, and each segment must be a KQL identifier. Use these indexes for selective equality predicates such as `src_ip == "198.51.100.77"` or `AuditData.ActorIpAddress == "198.51.100.77"`; an explicit cast changes the SQLite expression and cannot use the index. Striem does not push ordinary predicates through the KQL pipeline because SQLite already flattens the generated subqueries.
 
@@ -268,7 +268,7 @@ Press `Shift+Enter` in the query editor to run the current query. Press `Ctrl+En
 
 The navigation bar shows the project and challenge names. The browser keeps recent hunts, named saved hunts, and answer drafts in local storage. Copy link creates a URL containing the current query. Results that include `TimeGenerated` display a selectable histogram of the visible rows.
 
-KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) v0.4.0. Supported tabular operators are:
+KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) with a bundled development snapshot in `third_party/ksql` (based on v0.4.0). Supported tabular operators are:
 
 ```text
 where, filter, search, project, project-away, project-keep, project-rename,
@@ -277,11 +277,26 @@ order by, sort by, top, take, limit, sample, sample-distinct, as,
 mv-expand, mv-apply, union, join, lookup
 ```
 
-`join` supports `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`. Specify `kind=inner` when an inner join is intended because KQL's default `innerunique` behavior is not yet supported. `lookup` supports `inner` and `leftouter`. SQL unions align columns by position, so union inputs must project the same columns in the same order.
+`join` supports `innerunique` (the KQL default), `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, `leftanti`, `rightsemi`, and `rightanti`. The default deduplicates the left side by the complete equality-key tuple and keeps one complete representative row; duplicate representatives are unspecified. Use `kind=inner` to retain all matching left rows. Semi/anti joins return only columns from the retained side. `lookup` supports `inner` and `leftouter`. SQL unions align columns by position, so union inputs must project the same columns in the same order.
 
 Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or`, membership with `in`, `!in`, `in~`, and `!in~`, ranges with `between`, and `contains`, `startswith`, and `endswith` string matching. Striem's bounded SQLite regular-expression adapter also supports literal alphanumeric terms with `has`, `has_cs`, `hasprefix`, `hassuffix`, their negated forms, `has_any`, and `has_all`.
 
 The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, and `take_any`.
+
+Additional hunting functions include `not`, `bin`, `startofday`, `endofday`, `startofweek`, `endofweek`, `startofmonth`, `endofmonth`, `startofyear`, `endofyear`, `dcount`, `dcountif`, `count_distinct`, `count_distinctif`, `avgif`, `minif`, and `maxif`.
+
+```kusto
+Events
+| where not(Source == "noise")
+| summarize Events=count(), Sources=dcount(Source) by Hour=bin(TimeGenerated, 1h)
+| order by Hour asc
+```
+
+`not(expression)` preserves null and returns a Boolean value. `bin` supports numeric values and UTC datetimes with a constant duration (including a scalar `let` binding); timespan-valued bins are not yet supported. Calendar functions accept an optional integer period offset, weeks begin on Sunday, and end-of-period values use Kusto's 100 ns precision. Null or invalid datetime values return null.
+
+Distinct counts ignore nulls. Striem computes `dcount`/`dcountif` **exactly**, unlike Kusto's approximate implementation; their optional constant accuracy argument accepts 0–4 but does not change the exact result. Distinct state is limited to 100,000 values or 4 MiB per group, returning an error instead of a partial count when exceeded. Conditional average/minimum/maximum return null when no non-null values satisfy the predicate.
+
+Reference semantics: [Kusto `not()`](https://learn.microsoft.com/en-us/kusto/query/not-function), [time buckets](https://learn.microsoft.com/en-us/kusto/query/bin-function), and [distinct count](https://learn.microsoft.com/kusto/query/dcount-aggfunction).
 
 Dynamic object properties can use dot or bracket access, and arrays support zero-based bracket indexing:
 
@@ -341,7 +356,14 @@ State-changing API requests require `Content-Type: application/json` and `X-Stri
 ```bash
 npm run check
 npm run build
+npm test
+npx playwright install chromium
+npm run test:e2e
 go test ./...
 go test -tags sqlite_fts5 ./...
 go test -race ./...
 ```
+
+Browser tests use temporary databases and fixtures on ports 18081 and 18082. They do not modify the configured deployment. See [TESTING.md](TESTING.md) for feature coverage and remaining limits.
+
+The compiler snapshot is portable across local and Docker builds. Refresh it from the companion checkout with `python3 scripts/sync-ksql.py ../ksql`; the snapshot retains its license and records source hashes in `third_party/ksql/SNAPSHOT.json`. Run its tests separately with `cd third_party/ksql && go test ./...`. Full-language implementation progress is tracked in [docs/KQL_IMPLEMENTATION.md](docs/KQL_IMPLEMENTATION.md).
