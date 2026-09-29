@@ -205,6 +205,8 @@ func (s *compileState) source(source kql.Source) Relation {
 			}
 		}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Table{Parts: splitName(name)}}, Schema: schema}
+	case "union":
+		return s.union(Relation{}, kql.Operator{Kind: "union", Body: *source.Union, Span: source.Span})
 	case "print":
 		items, schema := s.projectItems(source.Items, true, Schema{})
 		return Relation{Query: &sqlast.Select{Projections: items}, Schema: schema}
@@ -539,35 +541,6 @@ func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 		projections = joinProjections(input.Schema, right.Schema, output, leftAlias, rightAlias, operator.Kind == "lookup")
 	}
 	return Relation{Query: &sqlast.Select{From: join, Projections: projections}, Schema: output}
-}
-
-func (s *compileState) union(input Relation, operator kql.Operator) Relation {
-	spec := operator.Body.(kql.UnionSpec)
-	queries := []sqlast.Query{input.Query}
-	schema := input.Schema.Clone()
-	for _, pipeline := range spec.Inputs {
-		relation := s.pipeline(pipeline)
-		if relation.Query == nil {
-			return Relation{}
-		}
-		queries = append(queries, relation.Query)
-		if !schemasEqual(schema, relation.Schema) {
-			s.bindError("KQLB0320", pipeline.Span, "operator.union", "union inputs must have the same ordered schema")
-			return Relation{}
-		}
-		if schema.Unknown || relation.Schema.Unknown {
-			schema = Schema{Unknown: true}
-		}
-	}
-	if spec.Kind == "outer" {
-		s.warn("KQLL0320", operator.Span, "operator.union.outer", "SQL UNION aligns columns by position; KQL outer union aligns and qualifies them by name and type")
-	} else if spec.Kind != "inner" {
-		s.error("KQLL0321", operator.Span, "operator.union."+spec.Kind, "unknown union kind "+spec.Kind)
-		return Relation{}
-	} else {
-		s.warn("KQLL0322", operator.Span, "operator.union.inner", "SQL UNION requires inputs to already have the same projected schema")
-	}
-	return Relation{Query: &sqlast.Union{All: true, Queries: queries}, Schema: schema}
 }
 
 func (s *compileState) mvExpand(input Relation, spec kql.MvExpandSpec, operator kql.Operator) Relation {

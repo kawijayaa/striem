@@ -20,7 +20,7 @@ positioned diagnostic and no partial SQL.
 | `rightsemi`, `rightanti` | Yes | `JoinSpec` | Yes | `EXISTS`/`NOT EXISTS` | SQLite | Right-only schema; right duplicates preserved; null keys do not match |
 | `innerunique` (default join) | Yes | `JoinSpec` | Bound left schema | Partitioned `ROW_NUMBER` then inner join | SQLite; other dialect renderer checks | One complete left representative per equality-key tuple; representative is unspecified |
 | `lookup` | Yes | `JoinSpec` | Yes | Yes | Renderer tests | Right same-name columns are omitted; size hints are not enforced |
-| `union` | Yes | `UnionSpec` | Ordered-schema validation | Positional `UNION ALL` | SQLite | Equivalent only for equal ordered schemas; KQL outer type/name merging unsupported |
+| `union` (pipeline or standalone) | Yes | `UnionSpec` | Bound schemas | Name/type-aligned `UNION ALL` | SQLite | Outer null padding and type suffixes with collision avoidance; inner intersects name/type pairs; preserves duplicates |
 | `mv-expand` | Yes | `MvExpandSpec` | Yes | One JSON value | SQLite JSON1 | Lossy SQLite casts; arrays/objects tested, multiple expansions unsupported |
 | `mv-apply` row-wise | Yes | `MvApplySpec` | Yes | `where`, `extend`, `serialize` | SQLite JSON1 | Equivalent for documented row-wise subset |
 | `mv-apply` aggregating | Yes | `MvApplySpec` | No | No | None | Unsupported with `KQLL0334` |
@@ -69,7 +69,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 - Parse operators, schema-declared
   `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
 - Multiple-array expansion is rejected.
-- KQL outer-union name/type merging is not implemented.
+- Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates int/long, decimal/real, and guid/string; those distinctions remain pending.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
 - `MaxInputRowsPerStage` and `MaxParseCaptures` are reserved until supported
   operators can enforce them without claiming execution guarantees.

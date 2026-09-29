@@ -601,21 +601,6 @@ func parseScalarType(value string) ScalarType {
 	}
 }
 
-func schemasEqual(left, right Schema) bool {
-	if left.Unknown || right.Unknown {
-		return true
-	}
-	if len(left.Columns) != len(right.Columns) {
-		return false
-	}
-	for i := range left.Columns {
-		if !strings.EqualFold(left.Columns[i].Name, right.Columns[i].Name) || left.Columns[i].Type != TypeUnknown && right.Columns[i].Type != TypeUnknown && left.Columns[i].Type != right.Columns[i].Type {
-			return false
-		}
-	}
-	return true
-}
-
 func spanOfExpressions(expressions []kql.Expression) kql.Span {
 	if len(expressions) == 0 {
 		return kql.Span{}

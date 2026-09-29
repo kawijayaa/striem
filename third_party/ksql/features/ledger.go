@@ -112,7 +112,7 @@ func initEntries() {
 }
 
 const sourceNames = `
-table expression print range datatable externaldata inline_external_table
+table expression print range datatable union externaldata inline_external_table
 entity_group contextual_datatable materialized_view_combine
 `
 
@@ -267,7 +267,7 @@ ai_embed_text ai_chat_completion ai_chat_completion_prompt ai_embeddings
 `
 
 const coreEquivalent = `
-source.table source.print source.range source.datatable statement.let statement.expression
+source.table source.print source.range source.datatable source.union statement.let statement.expression
 operator.where operator.project operator.extend operator.summarize
 operator.distinct operator.count operator.sort operator.take operator.top
 operator.join operator.lookup operator.union operator.as operator.sample

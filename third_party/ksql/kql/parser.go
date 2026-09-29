@@ -37,7 +37,7 @@ var sourceKeywords = map[string]string{
 	"datatable": "datatable", "externaldata": "externaldata",
 	"external_data": "externaldata", "inline_external_table": "inline_external_table",
 	"inline-external-table": "inline_external_table", "print": "print",
-	"range": "range", "entity_group": "entity_group",
+	"range": "range", "entity_group": "entity_group", "union": "union",
 	"__contextual_datatable":    "contextual_datatable",
 	"materialized-view-combine": "materialized_view_combine",
 }
@@ -122,6 +122,12 @@ func parsePipeline(tokens []Token) (*Pipeline, []ParseError) {
 
 func parseSource(tokens []Token) (Source, []ParseError) {
 	source := Source{Kind: "expression", Raw: tokens, Span: tokensSpan(tokens)}
+	if lower(tokens[0]) == "union" {
+		op, errs := parseUnion(Operator{Kind: "union", Span: source.Span}, tokens[1:])
+		spec := op.Body.(UnionSpec)
+		source.Kind, source.Union = "union", &spec
+		return source, errs
+	}
 	if kind, ok := sourceKeywords[lower(tokens[0])]; ok {
 		source.Kind = kind
 		if kind == "print" {
@@ -491,17 +497,20 @@ func parseJoin(op Operator, tokens []Token) (Operator, []ParseError) {
 
 func parseUnion(op Operator, tokens []Token) (Operator, []ParseError) {
 	spec := UnionSpec{Kind: "outer"}
+	var errs []ParseError
 	position := 0
 	for position+2 < len(tokens) && tokens[position].Kind == IdentifierToken && tokens[position+1].Text == "=" {
 		if lower(tokens[position]) == "kind" {
 			spec.Kind = lower(tokens[position+2])
+		} else {
+			errs = append(errs, ParseError{Code: "KQLP0320", Message: "unsupported union parameter " + tokens[position].Text, Span: tokens[position].Span})
 		}
 		position += 3
 	}
-	var errs []ParseError
 	for _, inputTokens := range splitTopLevel(tokens[position:], ",") {
 		inputTokens = trimParentheses(inputTokens)
 		if len(inputTokens) == 0 {
+			errs = append(errs, ParseError{Code: "KQLP0321", Message: "union requires a table expression", Span: op.Span})
 			continue
 		}
 		input, inputErrs := parsePipeline(inputTokens)

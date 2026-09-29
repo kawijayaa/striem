@@ -161,3 +161,21 @@ func TestExtendedJoinsUseBundledCompiler(t *testing.T) {
 		})
 	}
 }
+
+func TestAlignedUnionsUseBundledCompiler(t *testing.T) {
+	db := featureDatabase(t)
+	for _, c := range []struct{ query, want string }{
+		{`LeftEvents | project user,n | union (RightEvents | project n,user) | order by n asc`, `[[alice 1] [bob 2] [carol 3]]`},
+		{`union (LeftEvents | project host), (RightEvents | project user) | count`, `[[3]]`},
+		{`LeftEvents | project host,n | union kind=inner (RightEvents | project user,n) | order by n asc`, `[[1] [2] [3]]`},
+		{`let U=union (LeftEvents | project host), (RightEvents | project user); U | where isnull(host) | project user`, `[[carol]]`},
+		{`LeftEvents | project value=n | union (RightEvents | project value=user) | where isnotnull(value_string) | project value_long,value_string`, `[[<nil> carol]]`},
+		{`union (LeftEvents | project ok=not(n == 1)), (RightEvents | project n) | where isnull(n) | summarize countif(ok)`, `[[1]]`},
+	} {
+		t.Run(c.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, c.query)); got != c.want {
+				t.Fatalf("got %s want %s", got, c.want)
+			}
+		})
+	}
+}

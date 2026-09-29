@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Align union inputs by name and scalar type, pad missing cells with null, and disambiguate type suffixes. Support standalone unions and tabular union bindings; diagnose unsupported union options instead of ignoring them.
+
 - Implement right semi/anti joins and default `innerunique` joins over column equality keys.
 - Add SQL window expressions and parameter normalization for subsequent window-based lowering.
 

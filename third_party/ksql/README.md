@@ -81,7 +81,7 @@ The built-in relational compiler currently lowers:
 - `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`
   joins where supported by the selected database; bound joins emit explicit,
   deterministic collision aliases
-- executable positional `union`, including ordered or limited operands
+- name/type-aligned outer and inner `union`, including standalone queries and ordered or limited operands
 - single-array SQLite `mv-expand` and row-wise `mv-apply` subqueries using
   `where`, `extend`, and `serialize`; unsupported replacement, multi-array,
   and aggregating forms return diagnostics

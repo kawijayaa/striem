@@ -60,8 +60,9 @@ type Pipeline struct {
 func (p *Pipeline) NodeSpan() Span { return p.Span }
 
 // Source is the left-most pipeline input. Kind is table, print, range,
-// datatable, externaldata, inline_external_table, entity_group, or expression.
+// datatable, union, externaldata, inline_external_table, entity_group, or expression.
 type Source struct {
+	Union   *UnionSpec
 	Kind    string
 	Name    string
 	Expr    Expression
