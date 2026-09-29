@@ -285,6 +285,8 @@ Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or
 
 The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, `make_bag`, `make_bag_if`, and `take_any`.
 
+`toint`, `tolong`, `toreal`, and `todouble` return null for invalid numeric text or overflow. Integer conversions truncate toward zero; `toint` enforces signed 32-bit bounds and `tolong` enforces signed 64-bit bounds. `tobool` and `toboolean` accept Boolean text and numeric inputs.
+
 Additional hunting functions include `not`, `bin`, `startofday`, `endofday`, `startofweek`, `endofweek`, `startofmonth`, `endofmonth`, `startofyear`, `endofyear`, `dcount`, `dcountif`, `count_distinct`, `count_distinctif`, `avgif`, `minif`, and `maxif`.
 
 ```kusto

@@ -845,6 +845,8 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		resultType = TypeBool
 	} else if left.Type == TypeReal || right.Type == TypeReal {
 		resultType = TypeReal
+	} else if left.Type == TypeLong || right.Type == TypeLong {
+		resultType = TypeLong
 	}
 	return boundExpr{SQL: &sqlast.Binary{Left: left.SQL, Operator: op, Right: right.SQL}, Type: resultType}
 }
@@ -1089,7 +1091,7 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 		if len(args) != 2 {
 			return s.arity(value, function, 2)
 		}
-		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[1], Result: args[0]}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: argTypes[0]}
+		return boundExpr{SQL: &sqlast.Call{Name: "sum", Args: []sqlast.Expr{&sqlast.Case{Branches: []sqlast.When{{Condition: args[1], Result: args[0]}}, Else: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"}}}}, Type: functionType(function, argTypes)}
 	case "count":
 		if len(args) == 0 {
 			args = []sqlast.Expr{&sqlast.Star{}}
@@ -1129,7 +1131,9 @@ func (s *compileState) arity(value *kql.CallExpression, function string, expecte
 
 func functionType(function string, arguments []ScalarType) ScalarType {
 	switch function {
-	case "int", "int32", "long", "int64", "toint", "tolong", "strlen", "count", "countif":
+	case "int", "int32", "toint":
+		return TypeInt
+	case "long", "int64", "tolong", "strlen", "count", "countif":
 		return TypeLong
 	case "real", "double", "decimal", "toreal", "todouble", "todecimal", "avg":
 		return TypeReal
@@ -1145,8 +1149,11 @@ func functionType(function string, arguments []ScalarType) ScalarType {
 		return TypeReal
 	}
 	if len(arguments) > 0 {
+		if (function == "sum" || function == "sumif") && arguments[0] == TypeInt {
+			return TypeLong
+		}
 		switch function {
-		case "sum", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "sign":
+		case "sum", "sumif", "min", "max", "coalesce", "abs", "ceiling", "ceil", "floor", "round", "sign":
 			return arguments[0]
 		}
 	}

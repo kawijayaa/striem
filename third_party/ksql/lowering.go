@@ -600,7 +600,9 @@ func parseScalarType(value string) ScalarType {
 	switch strings.ToLower(value) {
 	case "bool", "boolean":
 		return TypeBool
-	case "int", "int32", "long", "int64":
+	case "int", "int32":
+		return TypeInt
+	case "long", "int64":
 		return TypeLong
 	case "real", "double", "decimal":
 		return TypeReal

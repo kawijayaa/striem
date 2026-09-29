@@ -69,7 +69,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 - Parse operators, schema-declared
   `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
 - Multiple-array expansion is rejected.
-- Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates int/long, decimal/real, and guid/string; those distinctions remain pending.
+- Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string; those distinctions remain pending.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
 - `MaxInputRowsPerStage` and `MaxParseCaptures` are reserved until supported
   operators can enforce them without claiming execution guarantees.

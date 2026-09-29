@@ -126,6 +126,8 @@ func fieldScalarType(value string) ksql.ScalarType {
 	switch value {
 	case "bool":
 		return ksql.TypeBool
+	case "int":
+		return ksql.TypeInt
 	case "long":
 		return ksql.TypeLong
 	case "real":
@@ -570,10 +572,12 @@ func compilerOptions(now time.Time) []ksql.Option {
 			return stringLiteral(eventtime.Format(now.Add(-duration))), nil
 		}),
 		ksql.WithFunction("datetime", datetimeFunction),
-		ksql.WithFunction("toint", castFunction("INTEGER")),
-		ksql.WithFunction("tolong", castFunction("INTEGER")),
-		ksql.WithFunction("toreal", castFunction("REAL")),
-		ksql.WithFunction("todouble", castFunction("REAL")),
+		ksql.WithFunction("toint", conversionFunction("kql_toint")),
+		ksql.WithFunction("tolong", conversionFunction("kql_tolong")),
+		ksql.WithFunction("toreal", conversionFunction("kql_toreal")),
+		ksql.WithFunction("todouble", conversionFunction("kql_toreal")),
+		ksql.WithFunction("tobool", conversionFunction("kql_tobool")),
+		ksql.WithFunction("toboolean", conversionFunction("kql_tobool")),
 		ksql.WithFunction("todatetime", ksql.SQLFunction("kql_todatetime")),
 		ksql.WithFunction("parse_json", ksql.SQLFunction("json")),
 		ksql.WithFunction("parsejson", ksql.SQLFunction("json")),
@@ -641,12 +645,12 @@ func emptyFunction(negative bool) ksql.FunctionRule {
 	}
 }
 
-func castFunction(target string) ksql.FunctionRule {
+func conversionFunction(target string) ksql.FunctionRule {
 	return func(arguments []sqlast.Expr) (sqlast.Expr, error) {
 		if len(arguments) != 1 {
 			return nil, fmt.Errorf("cast requires one argument")
 		}
-		return &sqlast.Cast{Expr: arguments[0], Type: target}, nil
+		return &sqlast.Call{Name: target, Args: arguments}, nil
 	}
 }
 

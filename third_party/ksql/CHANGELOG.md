@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Distinguish int from long in schema binding, conversion metadata, and union output; promote mixed int/long arithmetic and integer sums correctly.
+
 - Add typed function adapters for argument validation and explicit result metadata, with registration precedence shared with untyped adapters. Preserve dynamic metadata for mapped bag aggregates and JSON parsers.
 
 - Implement wildcard column selections and sorted `project-reorder` patterns, preserving types and deduplicating overlapping matches. Enforce projection limits after wildcard expansion and resolve quoted literal column names.

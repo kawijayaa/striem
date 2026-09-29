@@ -12,6 +12,7 @@ type ScalarType string
 const (
 	TypeUnknown  ScalarType = "unknown"
 	TypeBool     ScalarType = "bool"
+	TypeInt      ScalarType = "int"
 	TypeLong     ScalarType = "long"
 	TypeReal     ScalarType = "real"
 	TypeString   ScalarType = "string"

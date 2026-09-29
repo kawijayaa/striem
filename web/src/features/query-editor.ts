@@ -28,7 +28,7 @@ const logicalOperators = new Set([
   'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'todouble', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element',
   'ipv4_is_private', 'ipv4_is_in_range',
