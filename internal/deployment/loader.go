@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/ingest"
@@ -71,6 +72,11 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest directory: %w", err)
 	}
+	root, err := os.OpenRoot(baseDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("open manifest directory: %w", err)
+	}
+	defer root.Close()
 	seen := make(map[string]struct{}, len(manifest.Datasets))
 	seenTables := make(map[string]string, len(manifest.Datasets))
 	indexedPathSet := make(map[string]struct{})
@@ -108,22 +114,26 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 			path = filepath.Join(baseDirectory, path)
 		}
 		path = filepath.Clean(path)
-		if !strings.HasPrefix(path, baseDirectory+string(filepath.Separator)) && path != baseDirectory {
+		relativePath, err := filepath.Rel(baseDirectory, path)
+		if err != nil || !filepath.IsLocal(relativePath) {
 			return nil, fmt.Errorf("dataset %q path %q escapes the base directory", configured.Name, configured.Path)
 		}
 		format, err := datasetFormat(path, configured.Format)
 		if err != nil {
 			return nil, fmt.Errorf("dataset %q: %w", configured.Name, err)
 		}
-		info, err := os.Stat(path)
+		info, err := root.Stat(relativePath)
 		if err != nil {
 			return nil, fmt.Errorf("stat dataset %q: %w", configured.Name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("dataset %q must be a regular file", configured.Name)
 		}
 		signature, err := datasetSignature(configured, path, info)
 		if err != nil {
 			return nil, fmt.Errorf("sign dataset %q: %w", configured.Name, err)
 		}
-		prepared = append(prepared, preparedDataset{configured: configured, path: path, format: format, signature: signature})
+		prepared = append(prepared, preparedDataset{configured: configured, path: relativePath, format: format, signature: signature})
 	}
 	indexedPaths := make([]string, 0, len(indexedPathSet))
 	for path := range indexedPathSet {
@@ -179,7 +189,7 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 			loaded = append(loaded, existing)
 			continue
 		}
-		input, err := os.Open(dataset.path)
+		input, err := root.Open(dataset.path)
 		if err != nil {
 			return nil, fmt.Errorf("open dataset %q: %w", configured.Name, err)
 		}
@@ -254,7 +264,7 @@ func readManifest(manifestPath string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("decode deployment manifest: %w", err)
 	}
 	manifest.ChallengeName = strings.TrimSpace(manifest.ChallengeName)
-	if len(manifest.ChallengeName) > 120 {
+	if utf8.RuneCountInString(manifest.ChallengeName) > 120 {
 		return Manifest{}, fmt.Errorf("challengeName cannot exceed 120 characters")
 	}
 	return manifest, nil
@@ -278,7 +288,7 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 	if len(manifest.Questions) > 0 && flag == "" {
 		return database.ChallengeDefinition{}, fmt.Errorf("flag is required when questions are configured")
 	}
-	if len(flag) > 512 {
+	if utf8.RuneCountInString(flag) > 512 {
 		return database.ChallengeDefinition{}, fmt.Errorf("flag cannot exceed 512 characters")
 	}
 	if len(manifest.Questions) > 100 {
@@ -302,11 +312,11 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 			return database.ChallengeDefinition{}, fmt.Errorf("question %q revision must be positive", configured.ID)
 		}
 		configured.Title = strings.TrimSpace(configured.Title)
-		if configured.Title == "" || len(configured.Title) > 120 {
+		if configured.Title == "" || utf8.RuneCountInString(configured.Title) > 120 {
 			return database.ChallengeDefinition{}, fmt.Errorf("question %q title must contain 1 to 120 characters", configured.ID)
 		}
 		configured.Prompt = strings.TrimSpace(configured.Prompt)
-		if configured.Prompt == "" || len(configured.Prompt) > 8192 {
+		if configured.Prompt == "" || utf8.RuneCountInString(configured.Prompt) > 8192 {
 			return database.ChallengeDefinition{}, fmt.Errorf("question %q prompt must contain 1 to 8192 characters", configured.ID)
 		}
 		if len(configured.AcceptedAnswers) == 0 || len(configured.AcceptedAnswers) > 20 {
@@ -316,7 +326,7 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 		answerSet := make(map[string]struct{}, len(configured.AcceptedAnswers))
 		for _, answer := range configured.AcceptedAnswers {
 			answer = strings.TrimSpace(answer)
-			if answer == "" || len(answer) > 512 {
+			if answer == "" || utf8.RuneCountInString(answer) > 512 {
 				return database.ChallengeDefinition{}, fmt.Errorf("question %q acceptedAnswers must contain 1 to 512 characters", configured.ID)
 			}
 			key := answer

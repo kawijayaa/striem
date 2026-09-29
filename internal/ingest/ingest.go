@@ -1200,7 +1200,25 @@ func decodeNDJSONRecords(ctx context.Context, reader *bufio.Reader, consume func
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		line, err := reader.ReadBytes('\n')
+		// ReadBytes allocates the entire line before parseRecord can enforce
+		// maxEventSize. Bound accumulation so malformed input cannot exhaust
+		// memory with a single oversized record.
+		var line []byte
+		var err error
+		for {
+			var fragment []byte
+			fragment, err = reader.ReadSlice('\n')
+			if len(line)+len(fragment) > maxEventSize+2 {
+				return 0, fmt.Errorf("record %d exceeds the %d byte event limit", count+1, maxEventSize)
+			}
+			line = append(line, fragment...)
+			if !errors.Is(err, bufio.ErrBufferFull) {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return 0, fmt.Errorf("read record %d: %w", count+1, err)
 		}

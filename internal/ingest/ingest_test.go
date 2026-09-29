@@ -675,3 +675,17 @@ func openTestStore(t testing.TB) *database.Store {
 	t.Cleanup(func() { store.Close() })
 	return store
 }
+
+func TestDecodeNDJSONRejectsOversizedLineBeforeReadingItAll(t *testing.T) {
+	input := strings.NewReader(strings.Repeat("x", maxEventSize*3))
+	_, err := decodeJSONRecords(t.Context(), input, func(_ int, _ json.RawMessage) error {
+		t.Fatal("oversized record reached consumer")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "event limit") {
+		t.Fatalf("expected event limit error, got %v", err)
+	}
+	if input.Len() < maxEventSize {
+		t.Fatalf("read too much of oversized record: %d bytes remain", input.Len())
+	}
+}

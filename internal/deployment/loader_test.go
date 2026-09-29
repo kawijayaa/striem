@@ -429,3 +429,65 @@ func TestLoadRejectsInvalidIndexedPathBeforeImport(t *testing.T) {
 		t.Fatalf("datasets imported before validation = %d", datasets)
 	}
 }
+
+func TestLoadConfinesDatasetPaths(t *testing.T) {
+	for _, kind := range []string{"outside symlink", "outside directory symlink", "directory", "inside symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			directory := t.TempDir()
+			outside := t.TempDir()
+			data := []byte(`{"ts":"2024-01-01T00:00:00Z"}`)
+			for _, base := range []string{directory, outside} {
+				if err := os.WriteFile(filepath.Join(base, "events.ndjson"), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := "link.ndjson"
+			switch kind {
+			case "outside symlink":
+				if err := os.Symlink(filepath.Join(outside, "events.ndjson"), filepath.Join(directory, path)); err != nil {
+					t.Fatal(err)
+				}
+			case "outside directory symlink":
+				if err := os.Symlink(outside, filepath.Join(directory, "linked")); err != nil {
+					t.Fatal(err)
+				}
+				path = "linked/events.ndjson"
+			case "directory":
+				path = "."
+			case "inside symlink":
+				if err := os.Symlink("events.ndjson", filepath.Join(directory, path)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			manifestPath := filepath.Join(directory, "datasets.yaml")
+			manifest := "datasets:\n  - name: test\n    table: Test\n    path: " + path + "\n    source: fixture\n    timestampPath: ts\n"
+			if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store, err := database.Open(filepath.Join(directory, "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			loaded, err := Load(t.Context(), store, manifestPath)
+			if kind == "inside symlink" {
+				if err != nil || len(loaded) != 1 || loaded[0].EventCount != 1 {
+					t.Fatalf("internal symlink: loaded=%v, err=%v", loaded, err)
+				}
+			} else if err == nil {
+				t.Fatal("expected unsafe dataset path to be rejected")
+			}
+		})
+	}
+}
+
+func TestChallengeLimitsCountUnicodeCharacters(t *testing.T) {
+	manifest := Manifest{Flag: strings.Repeat("界", 512), Questions: []Question{{ID: "unicode", Title: strings.Repeat("界", 120), Prompt: strings.Repeat("界", 8192), AcceptedAnswers: []string{strings.Repeat("界", 512)}}}}
+	if _, err := validateChallenge(manifest); err != nil {
+		t.Fatalf("valid Unicode challenge rejected: %v", err)
+	}
+	manifest.Questions[0].AcceptedAnswers[0] += "界"
+	if _, err := validateChallenge(manifest); err == nil {
+		t.Fatal("513 character answer accepted")
+	}
+}
