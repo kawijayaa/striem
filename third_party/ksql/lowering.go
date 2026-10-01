@@ -113,7 +113,7 @@ func valueLiteral(value any) sqlast.Expr {
 func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 	text := value.Text
 	if value.Kind == kql.StringToken {
-		return boundExpr{SQL: s.bind(unquoteKQL(text)), Type: TypeString}
+		return boundExpr{SQL: s.bind(stringLiteralValue(value)), Type: TypeString}
 	}
 	if strings.EqualFold(text, "true") || strings.EqualFold(text, "false") {
 		parsed := strings.EqualFold(text, "true")
@@ -403,7 +403,7 @@ func (s *compileState) search(from *sqlast.Subquery, input Schema, operator kql.
 		s.bindError("KQLB0351", spec.Term.NodeSpan(), "operator.search", "search currently requires one literal term")
 		return Relation{}
 	}
-	term := unquoteKQL(literal.Text)
+	term := stringLiteralValue(literal)
 	if term == "" {
 		s.bindError("KQLB0352", literal.Span, "operator.search", "search term must be non-empty")
 		return Relation{}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -278,7 +277,7 @@ func (s *compileState) entityCall(call *kql.CallExpression) *sqlast.Table {
 	if !ok || literal.Kind != kql.StringToken {
 		return nil
 	}
-	return &sqlast.Table{Parts: []string{unquoteKQL(literal.Text)}}
+	return &sqlast.Table{Parts: []string{stringLiteralValue(literal)}}
 }
 
 func (s *compileState) operator(input Relation, operator kql.Operator) Relation {
@@ -483,9 +482,16 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 		return s.literal(value)
 	case *kql.DynamicExpression:
 		var text strings.Builder
-		for i, token := range value.Tokens {
+		for i := 0; i < len(value.Tokens); i++ {
+			token := value.Tokens[i]
 			if token.Kind == kql.StringToken {
-				encoded, _ := json.Marshal(unquoteKQL(token.Text))
+				var decoded strings.Builder
+				decoded.WriteString(unquoteKQL(token.Text))
+				for i+1 < len(value.Tokens) && value.Tokens[i+1].Kind == kql.StringToken {
+					i++
+					decoded.WriteString(unquoteKQL(value.Tokens[i].Text))
+				}
+				encoded, _ := json.Marshal(decoded.String())
 				text.Write(encoded)
 			} else {
 				text.WriteString(token.Text)
@@ -926,7 +932,7 @@ func (s *compileState) termMatchExpression(left sqlast.Expr, expression kql.Expr
 	if !ok || literal.Kind != kql.StringToken {
 		return nil, false
 	}
-	term := unquoteKQL(literal.Text)
+	term := stringLiteralValue(literal)
 	if !isAlphaNumeric(term) {
 		return nil, false
 	}
@@ -1006,7 +1012,7 @@ func termMatch(left, right sqlast.Expr, mode string, caseSensitive, negative boo
 func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
 	text := value.Text
 	if value.Kind == kql.StringToken {
-		return &sqlast.Literal{Kind: sqlast.StringLiteral, Value: unquoteKQL(text)}
+		return &sqlast.Literal{Kind: sqlast.StringLiteral, Value: stringLiteralValue(value)}
 	}
 	if strings.EqualFold(text, "true") || strings.EqualFold(text, "false") {
 		return &sqlast.Literal{Kind: sqlast.BooleanLiteral, Value: strings.ToLower(text)}
@@ -1256,34 +1262,15 @@ func lastName(name string) string {
 }
 
 func unquoteKQL(value string) string {
-	hidden := false
-	if len(value) > 1 && (value[0] == 'h' || value[0] == 'H') && (value[1] == '\'' || value[1] == '"' || value[1] == '@') {
-		hidden = true
-		value = value[1:]
+	if decoded, err := kql.DecodeString(value); err == nil {
+		return decoded
 	}
-	_ = hidden
-	verbatim := strings.HasPrefix(value, "@")
-	if verbatim {
-		value = value[1:]
-	}
-	if len(value) >= 6 && ((strings.HasPrefix(value, "```") && strings.HasSuffix(value, "```")) || (strings.HasPrefix(value, "~~~") && strings.HasSuffix(value, "~~~"))) {
-		return value[3 : len(value)-3]
-	}
-	if len(value) < 2 {
-		return value
-	}
-	quote := value[0]
-	if (quote != '\'' && quote != '"') || value[len(value)-1] != quote {
-		return value
-	}
-	value = value[1 : len(value)-1]
-	if verbatim {
-		return strings.ReplaceAll(value, string([]byte{quote, quote}), string(quote))
-	}
-	if unquoted, err := strconv.Unquote(string(quote) + value + string(quote)); err == nil {
-		return unquoted
-	}
-	return strings.ReplaceAll(value, "\\"+string(quote), string(quote))
+	return value
+}
+
+func stringLiteralValue(value *kql.LiteralExpression) string {
+	decoded, _ := kql.StringValue(value)
+	return decoded
 }
 
 func isTimespan(value string) bool {
@@ -1297,7 +1284,7 @@ func isTimespan(value string) bool {
 func expressionText(expression kql.Expression) string {
 	switch value := expression.(type) {
 	case *kql.LiteralExpression:
-		return unquoteKQL(value.Text)
+		return stringLiteralValue(value)
 	case *kql.NameExpression:
 		return value.Name
 	default:

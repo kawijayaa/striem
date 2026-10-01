@@ -91,7 +91,19 @@ func (p *expressionParser) parsePrefix() Expression {
 	case token.Text == "*":
 		p.position++
 		expr = &StarExpression{Span: token.Span}
-	case token.Kind == NumberToken || token.Kind == StringToken || strings.EqualFold(token.Text, "true") || strings.EqualFold(token.Text, "false") || strings.EqualFold(token.Text, "null"):
+	case token.Kind == StringToken:
+		start := p.position
+		for p.position < len(p.tokens) && p.tokens[p.position].Kind == StringToken {
+			p.position++
+		}
+		literal := &LiteralExpression{Text: token.Text, Kind: StringToken, Span: tokensSpan(p.tokens[start:p.position])}
+		if p.position-start > 1 {
+			for _, part := range p.tokens[start:p.position] {
+				literal.Parts = append(literal.Parts, part.Text)
+			}
+		}
+		expr = literal
+	case token.Kind == NumberToken || strings.EqualFold(token.Text, "true") || strings.EqualFold(token.Text, "false") || strings.EqualFold(token.Text, "null"):
 		p.position++
 		expr = &LiteralExpression{Text: token.Text, Kind: token.Kind, Span: token.Span}
 	case token.Text == "(":

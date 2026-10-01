@@ -189,9 +189,10 @@ type NameExpression struct {
 	Span Span
 }
 type LiteralExpression struct {
-	Text string
-	Kind TokenKind
-	Span Span
+	Parts []string // Original tokens for concatenated strings.
+	Text  string
+	Kind  TokenKind
+	Span  Span
 }
 type StarExpression struct{ Span Span }
 type UnaryExpression struct {

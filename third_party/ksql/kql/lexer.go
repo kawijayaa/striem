@@ -260,6 +260,8 @@ func (l *lexer) scanString(start, line, column int) bool {
 	l.emit(StringToken, start, line, column)
 	if !terminated {
 		l.errors = append(l.errors, LexError{Message: "unterminated string", Span: l.span(start, line, column)})
+	} else if _, err := DecodeString(l.source[start:l.offset]); err != nil {
+		l.errors = append(l.errors, LexError{Message: err.Error(), Span: l.span(start, line, column)})
 	}
 	return true
 }

@@ -505,41 +505,16 @@ func leadingSearchTerms(source string) map[int]string {
 		if !ok || literal.Kind != ksqlkql.StringToken {
 			continue
 		}
-		term := unquoteKQLLiteral(literal.Text)
+		term, err := ksqlkql.StringValue(literal)
+		if err != nil {
+			continue
+		}
 		if !utf8.ValidString(term) || utf8.RuneCountInString(term) < 3 || strings.ContainsRune(term, '\x00') {
 			continue
 		}
 		terms[pipeline.Source.Span.Offset] = `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
 	}
 	return terms
-}
-
-func unquoteKQLLiteral(value string) string {
-	if len(value) > 1 && (value[0] == 'h' || value[0] == 'H') && (value[1] == '\'' || value[1] == '"' || value[1] == '@') {
-		value = value[1:]
-	}
-	verbatim := strings.HasPrefix(value, "@")
-	if verbatim {
-		value = value[1:]
-	}
-	if len(value) >= 6 && ((strings.HasPrefix(value, "```") && strings.HasSuffix(value, "```")) || (strings.HasPrefix(value, "~~~") && strings.HasSuffix(value, "~~~"))) {
-		return value[3 : len(value)-3]
-	}
-	if len(value) < 2 {
-		return value
-	}
-	quote := value[0]
-	if (quote != '\'' && quote != '"') || value[len(value)-1] != quote {
-		return value
-	}
-	value = value[1 : len(value)-1]
-	if verbatim {
-		return strings.ReplaceAll(value, string([]byte{quote, quote}), string(quote))
-	}
-	if unquoted, err := strconv.Unquote(string(quote) + value + string(quote)); err == nil {
-		return unquoted
-	}
-	return strings.ReplaceAll(value, "\\"+string(quote), string(quote))
 }
 
 func datasetIDs(tables TableCatalog, name string) ([]int64, bool) {
