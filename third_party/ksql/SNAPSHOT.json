@@ -1,5 +1,5 @@
 {
-  "baseCommit": "d2fbc146a8b6dfe21a3c7a7ae8a67d86a58a82f9",
+  "baseCommit": "2688e50c0155d9aed9cc1a7ed7d8b2e30a77f769",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
@@ -22,7 +22,7 @@
     "doc.go": "47210251e86e8c8391e6fa6f254a279e459e0618015e44e174632397e289bf4b",
     "docs/architecture.md": "ac34d020e7afad880614184bd6135ec12392a0a39847b6ac5266d56f06322012",
     "docs/operator-support.md": "a844453c650fdb478fe5f0d745fed77a98c447a19b288ee65be7a1d78ab8986e",
-    "dynamic_literal_test.go": "47d07cd06dd297cefa5360bb0e661b1128937817e3d932b080e84645482b2be7",
+    "dynamic_literal_test.go": "a159ef2775ec3cbdd8dd6e464c28c7f27afe39464d48d58eaa298a37fd03c323",
     "examples/basic/main.go": "7b0cc564f2bb0772e13ec478bbef1e4c1d93b1ae189eff1f5b4f719a4e65b7e4",
     "features/README.md": "a7140754d08bf7c2cc268ca64d9f5448d354b45e6cfb29c12fdfa6264587df2c",
     "features/ledger.go": "a6150f2a52100491ec35a857e6a5720c1c064a200d94d60b226951c8c239a1da",
@@ -42,8 +42,8 @@
     "kql/lexer_test.go": "74374fa7eaa4a50225cd44f076c58d0c0edc28f163f95847fd247582aed22b14",
     "kql/parser.go": "358f02311ea5a050d597ad122d7c4bb5e5607d0fa4e703878e3e283b0647c54f",
     "kql/parser_columns.go": "52e241ac3a9ab7a72a03b90aed70c976b9e6114b284cfae0a18dd5d88a5029f7",
-    "kql/parser_expr.go": "7d30c012df17b325ff8d71767999190a368b9f6b5a6d938c2d2b0d5deccf88bf",
-    "kql/parser_test.go": "0e938e6ea907f5f35620ec0f1451f8b2a721275490636bb2928c58ecc59ae8cb",
+    "kql/parser_expr.go": "be675099dd0848900e34d400f326aae1e145fdc0b93bacf5fb7c966e0c1c7e4d",
+    "kql/parser_test.go": "e1e8faeb74ab4c12d1dc71a6a569c31439eaf987e0fdab2d47dbb17d58691349",
     "kql/strings.go": "29cf0dc91785337793d6192351e9b83a4011b759605ae2a740b770d268041a89",
     "kql/strings_test.go": "c85ae025f7ba1a713fdf3694c65d70c26fafc4fda41f8971ac054d13c313ebe2",
     "kql/token.go": "959857fb5773b7a46a82b11662b29db4f785205cfa9fc1f17786193533ba25a4",

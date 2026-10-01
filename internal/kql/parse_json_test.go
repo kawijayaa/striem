@@ -44,6 +44,10 @@ func TestParseJSONContracts(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ query, want string }{
+		{`print d=parse_json('{"where":{"a.b":47}}').['where'].["a.b"]`, `[[47]]`},
+		{`Events | where n == 1 | project user=RawData.['user']`, `[[alice]]`},
+		{`print d=dynamic({"é":53}).[@'é']`, `[[53]]`},
+
 		{`let d=@'{"a":123,"b":"{\"c\":456}"}'; print d_b_c=parse_json(tostring(parse_json(d).b)).c`, `[[456]]`},
 		{`print d=parse_json('{"a":[{"b":23}]}').a[0].b + 1`, `[[24]]`},
 		{`print d=bag_pack("a",dynamic({"b":17})).a.b`, `[[17]]`},

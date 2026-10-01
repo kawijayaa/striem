@@ -183,3 +183,38 @@ func TestPostfixPropertiesPreserveExpression(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotedDotProperty(t *testing.T) {
+	for _, source := range []string{`d.['where']`, `f().["where"]`, `d.[@'where']`} {
+		tokens, errs := Lex(source)
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		expr, parseErrs := parseExpressionTokens(tokens[:len(tokens)-1])
+		if len(parseErrs) != 0 {
+			t.Fatal(parseErrs)
+		}
+		index, ok := expr.(*IndexExpression)
+		if !ok {
+			t.Fatalf("%s: got %T", source, expr)
+		}
+		key, ok := index.Index.(*LiteralExpression)
+		if !ok {
+			t.Fatalf("key: %#v", index.Index)
+		}
+		value, err := DecodeString(key.Text)
+		if err != nil || value != "where" {
+			t.Fatalf("key=%s err=%v", value, err)
+		}
+		if index.Span.Offset+index.Span.Length != len(source) {
+			t.Fatalf("span=%#v", index.Span)
+		}
+	}
+	for _, source := range []string{`d.[key]`, `d.['where'`, `d.[]`, `d.`, `d.['where']junk`} {
+		tokens, _ := Lex(source)
+		_, errs := parseExpressionTokens(tokens[:len(tokens)-1])
+		if len(errs) == 0 {
+			t.Fatalf("accepted %s", source)
+		}
+	}
+}

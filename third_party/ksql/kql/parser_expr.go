@@ -184,6 +184,15 @@ func (p *expressionParser) parsePrefix() Expression {
 				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(start, index.NodeSpan())}
 			}
 		case ".":
+			// A quoted entity name after a dot denotes one literal property,
+			// including keys containing dots or reserved words.
+			if p.position+3 < len(p.tokens) && p.tokens[p.position+1].Text == "[" && p.tokens[p.position+2].Kind == StringToken && p.tokens[p.position+3].Text == "]" {
+				key, close := p.tokens[p.position+2], p.tokens[p.position+3]
+				p.position += 4
+				index := &LiteralExpression{Text: key.Text, Kind: StringToken, Span: key.Span}
+				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(expr.NodeSpan(), close.Span)}
+				continue
+			}
 			if p.position+1 >= len(p.tokens) || p.tokens[p.position+1].Kind != IdentifierToken {
 				return expr
 			}
