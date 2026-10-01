@@ -38,6 +38,37 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			shift := strings.HasPrefix(name, "array_shift_")
+			maximum := 2
+			if shift {
+				maximum = 3
+			}
+			if len(args) < 2 || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 2 to %d arguments", name, maximum)
+			}
+			if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a dynamic array", name)
+			}
+			if args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s count must be an integer", name)
+			}
+			values := []sqlast.Expr{args[0].SQL, args[1].SQL}
+			if shift {
+				var padding sqlast.Expr = &sqlast.Literal{Kind: sqlast.NullLiteral}
+				kind := "__array_default"
+				if len(args) == 3 {
+					padding = args[2].SQL
+					kind = string(args[2].Type)
+				}
+				values = append(values, padding, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: kind})
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
+		}))
+	}
+
 	options = append(options, ksql.WithTypedFunction("array_slice", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 3 {
 			return ksql.TypedExpression{}, fmt.Errorf("array_slice requires 3 arguments")

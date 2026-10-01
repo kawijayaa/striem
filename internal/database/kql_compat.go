@@ -16,11 +16,20 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_bin": kqlBin, "kql_bin_datetime": kqlBinDatetime,
 		"kql_calendar":  kqlCalendar,
 		"kql_substring": kqlSubstring, "kql_strlen": kqlStringLength,
-		"kql_replace_string":  kqlReplaceString,
-		"kql_replace_strings": kqlReplaceStrings,
-		"kql_pack_array":      kqlPackArray,
-		"kql_array_concat":    kqlArrayConcat,
-		"kql_array_reverse":   kqlArrayReverse,
+		"kql_replace_string":     kqlReplaceString,
+		"kql_replace_strings":    kqlReplaceStrings,
+		"kql_pack_array":         kqlPackArray,
+		"kql_array_concat":       kqlArrayConcat,
+		"kql_array_reverse":      kqlArrayReverse,
+		"kql_array_rotate_left":  func(value, count any) (any, error) { return kqlArrayRotate(value, count, false) },
+		"kql_array_rotate_right": func(value, count any) (any, error) { return kqlArrayRotate(value, count, true) },
+		"kql_array_shift_left": func(value, count, padding any, kind string) (any, error) {
+			return kqlArrayShift(value, count, padding, kind, false)
+		},
+		"kql_array_shift_right": func(value, count, padding any, kind string) (any, error) {
+			return kqlArrayShift(value, count, padding, kind, true)
+		},
+
 		"kql_array_slice":     kqlArraySlice,
 		"kql_bag_pack":        kqlBagPack,
 		"kql_bag_merge":       kqlBagMerge,

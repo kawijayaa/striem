@@ -911,3 +911,33 @@ func TestArraySliceThroughAPI(t *testing.T) {
 		t.Fatalf("slice=%#v", result)
 	}
 }
+
+func TestArrayMovementThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=array_rotate_right(pack_array(true,9223372036854775807,null),1),b=array_shift_left(pack_array(true,9223372036854775807),1,bag_pack("bool",false))`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := result.Rows[0]["a"].([]any)
+	if !ok || len(a) != 3 || a[0] != nil || a[1] != true || a[2] != json.Number("9223372036854775807") {
+		t.Fatalf("rotation=%#v", result)
+	}
+	b, ok := result.Rows[0]["b"].([]any)
+	if !ok || len(b) != 2 || b[0] != json.Number("9223372036854775807") {
+		t.Fatalf("shift=%#v", result)
+	}
+	bag, ok := b[1].(map[string]any)
+	if !ok || bag["bool"] != false {
+		t.Fatalf("padding=%#v", b)
+	}
+}

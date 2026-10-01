@@ -29,7 +29,7 @@ const logicalOperators = new Set([
 ]);
 const functions = new Set([
   'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
-  'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'array_concat', 'array_reverse', 'array_slice', 'bag_keys', 'todatetime',
+  'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'array_concat', 'array_reverse', 'array_slice', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element',
   'ipv4_is_private', 'ipv4_is_in_range',
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
@@ -68,6 +68,8 @@ const functionCompletions = createCompletions('function', [
   ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'], ['dynamic', 'Construct a dynamic literal'],
   ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
   ['array_length', 'Number of array elements'], ['array_concat', 'Concatenate dynamic arrays in order'], ['array_reverse', 'Reverse the elements of a dynamic array'], ['array_slice', 'Select an inclusive range of array elements'], ['bag_keys', 'Keys of a dynamic object'],
+  ['array_rotate_left', 'Rotate array elements to the left'], ['array_rotate_right', 'Rotate array elements to the right'],
+  ['array_shift_left', 'Shift array elements left with optional padding'], ['array_shift_right', 'Shift array elements right with optional padding'],
   ['pack_array', 'Construct a dynamic array from values or all columns'], ['bag_pack', 'Construct a dynamic bag from key/value pairs'], ['pack', 'Legacy bag constructor'], ['pack_dictionary', 'Legacy bag constructor'],
   ['bag_merge', 'Merge bags with leftmost values taking precedence'], ['bag_remove_keys', 'Remove root keys or nested object properties'], ['bag_set_key', 'Set a root key or nested object property'],
   ['bag_has_key', 'Test for a dynamic object key'], ['set_has_element', 'Test dynamic array membership'],
