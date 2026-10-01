@@ -25,6 +25,17 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
+	for _, config := range []struct {
+		name             string
+		population, root bool
+	}{
+		{"kql_variance", false, false}, {"kql_variancep", true, false}, {"kql_stdev", false, true}, {"kql_stdevp", true, true},
+	} {
+		config := config
+		if err := c.RegisterAggregator(config.name, func() *statistic { return &statistic{population: config.population, root: config.root} }, true); err != nil {
+			return err
+		}
+	}
 	if err := c.RegisterAggregator("kql_make_bag", func() *bagAggregate { return &bagAggregate{} }, true); err != nil {
 		return err
 	}

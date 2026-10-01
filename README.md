@@ -302,6 +302,8 @@ Events
 
 Distinct counts ignore nulls. Striem computes `dcount`/`dcountif` **exactly**, unlike Kusto's approximate implementation; their optional constant accuracy argument accepts 0–4 but does not change the exact result. Distinct state is limited to 100,000 values or 4 MiB per group, returning an error instead of a partial count when exceeded. Conditional average/minimum/maximum return null when no non-null values satisfy the predicate.
 
+`variance`, `variancep`, `stdev`, and `stdevp`, together with their `if` variants, accept numeric values and ignore nulls. Sample statistics use Bessel’s correction; population statistics divide by the number of values. Empty groups return null, and sample statistics require at least two values. Non-finite inputs and accumulation overflow return explicit query errors.
+
 `make_bag(expr [, maxSize])` and `make_bag_if(expr, predicate [, maxSize])` merge dynamic property bags and skip non-bag values. Duplicate keys keep an unspecified input value. Empty groups return `{}`. `maxSize` must be a constant integer from 1 to 1,048,576 (the default); the deprecated `make_dictionary` alias defaults to 128. Each input bag and aggregate result is limited to 4 MiB; exceeding the byte limit returns a query error.
 
 Reference semantics: [Kusto `not()`](https://learn.microsoft.com/en-us/kusto/query/not-function), [time buckets](https://learn.microsoft.com/en-us/kusto/query/bin-function), and [distinct count](https://learn.microsoft.com/kusto/query/dcount-aggfunction).

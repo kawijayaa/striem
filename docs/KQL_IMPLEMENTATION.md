@@ -2,7 +2,7 @@
 
 ## Objective and completion standard
 
-Implement all of KQL. This objective remains **incomplete**. No subset of operators, passing test suite, or syntax-only recognition establishes completion.
+Implement all of the Microsoft KQL specification robustly with no bugs. This objective remains **incomplete**. No subset of operators, passing test suite, or syntax-only recognition establishes completion.
 
 For each construct, evidence must cover syntax, binding/type inference, execution semantics (including nulls and invalid inputs), output schema/types, errors, and integration with Striem. Operator combinations, parameterized expressions, and boundary cases must be exercised. Documented approximation is not proof of exact Kusto compatibility.
 
@@ -38,6 +38,8 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 - Standard `getschema` returns the four documented metadata columns without scanning input rows. Tests cover transformations, empty inputs, wide schemas, parameter pruning, and pipeline composition. SQLite inline values now support valid aliases and empty tables. Unknown schema/types and `kind=csl` remain unsupported. [Reference](https://learn.microsoft.com/en-us/kusto/query/getschema-operator?view=microsoft-fabric).
 
 - String indexing adapters now use zero-based Unicode character offsets, negative offsets from the end, and optional lengths. `strlen` counts Unicode codepoints including embedded NUL characters. Tests cover documented examples, non-ASCII text, large offsets, and argument diagnostics. [Substring reference](https://learn.microsoft.com/en-us/kusto/query/substring-function?view=microsoft-fabric). Full string null/coercion behavior and differential edge-case conformance remain open.
+
+- Numeric variance/standard deviation families now execute with sample/population and conditional forms, null skipping, real metadata, and stable centered accumulation of large integers. Tests cover grouping, empty/singleton groups, nulls, integer extremes, and argument diagnostics. [Variance reference](https://learn.microsoft.com/en-us/kusto/query/variance-aggregation-function?view=microsoft-fabric). Non-finite inputs and accumulation overflow currently return explicit query errors. Kusto-compatible non-finite result representation, timespan statistics, and differential numerical conformance remain open. A documented range example also confirmed that SQLite range sources remain unsupported; range execution stays in the source workstream.
 
 ## Remaining workstreams (all stay in scope)
 

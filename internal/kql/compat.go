@@ -11,6 +11,31 @@ import (
 
 func compatibilityOptions() []ksql.Option {
 	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	for _, name := range []string{"variance", "variancep", "varianceif", "variancepif", "stdev", "stdevp", "stdevif", "stdevpif"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			required := 1
+			if strings.HasSuffix(name, "if") {
+				required = 2
+			}
+			if len(args) != required {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d arguments", name, required)
+			}
+			switch args[0].Type {
+			case ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeUnknown:
+			default:
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a numeric expression", name)
+			}
+			value := args[0].SQL
+			if required == 2 {
+				if args[1].Type != ksql.TypeBool && args[1].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s predicate must be Boolean", name)
+				}
+				value = conditionalValue(value, args[1].SQL)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_" + strings.TrimSuffix(name, "if"), Args: []sqlast.Expr{value}}}, nil
+		}))
+	}
 	for _, name := range []string{"substring", "strlen"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
