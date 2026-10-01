@@ -70,6 +70,33 @@ test('filters on calculated result columns preserve the producing pipeline', asy
   await run(page, 3);
 });
 
+test('JSON viewer searches full phrases and Unicode without dismissing keyboard actions', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await open(page, 'print details=dynamic({"action":"login","message":"İprefixTarget [a.b]+?"})');
+  await run(page, 1);
+  await page.getByRole('button', { name: 'Open details JSON', exact: true }).click();
+  const json = page.locator('#raw-json');
+  const original = await json.textContent();
+  await page.locator('#raw-search').fill('"action": "login"');
+  await expect(page.locator('#raw-search-status')).toHaveText('1 match');
+  expect(await json.locator('mark').allTextContents()).toEqual(['"action":', ' ', '"login"']);
+  await page.locator('#raw-search').fill('target');
+  await expect(page.locator('#raw-search-status')).toHaveText('1 match');
+  await expect(json.locator('mark')).toHaveText('Target');
+  await page.locator('#raw-search').fill('[a.b]+?');
+  await expect(json.locator('mark')).toHaveText('[a.b]+?');
+  await page.locator('#raw-search').fill('not present');
+  await expect(page.locator('#raw-search-status')).toHaveText('0 matches');
+  await expect(json).toHaveText(original!);
+  await page.locator('#copy-raw').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#toast-message')).toHaveText('JSON copied');
+  await expect(page.locator('#raw-dialog')).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(original);
+  await page.mouse.click(1, 1);
+  await expect(page.locator('#raw-dialog')).toBeHidden();
+});
+
 test('query diagnostics, empty results, keyboard shortcuts, Vim toggle and cancellation', async ({ page }) => {
   await open(page);
   await edit(page, 'Telemetry | where unknown_field ==');

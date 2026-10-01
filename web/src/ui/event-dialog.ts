@@ -1,3 +1,5 @@
+import { findJSONSearchMatches } from './json-search';
+
 export interface EventDialogController {
   show(value: unknown): void;
   isOpen(): boolean;
@@ -9,30 +11,6 @@ function required<T extends Element>(root:ParentNode, selector: string, construc
   const element = root.querySelector(selector);
   if (!(element instanceof constructor)) throw new Error(`Missing element ${selector}`);
   return element;
-}
-
-function appendSearchText(parent: Node, text: string, query: string): number {
-  if (!query) {
-    parent.appendChild(document.createTextNode(text));
-    return 0;
-  }
-
-  const lower = text.toLowerCase();
-  const needle = query.toLowerCase();
-  let cursor = 0;
-  let count = 0;
-  while (cursor < text.length) {
-    const index = lower.indexOf(needle, cursor);
-    if (index < 0) break;
-    parent.appendChild(document.createTextNode(text.slice(cursor, index)));
-    const mark = document.createElement('mark');
-    mark.textContent = text.slice(index, index + needle.length);
-    parent.appendChild(mark);
-    cursor = index + needle.length;
-    count++;
-  }
-  parent.appendChild(document.createTextNode(text.slice(cursor)));
-  return count;
 }
 
 export function createEventDialog(
@@ -50,20 +28,45 @@ export function createEventDialog(
   function renderJson(): void {
     const query = search.value.trim();
     const json = JSON.stringify(currentValue, null, 2) ?? String(currentValue);
+    const matches = findJSONSearchMatches(json, query);
+    let matchIndex = 0;
+    // Walk the matches once across syntax segments, preserving highlighting
+    // even when a search spans a key, punctuation, and its value.
+    function appendSearchText(parent: Node, text: string, offset: number): void {
+      let cursor = 0;
+      const end = offset + text.length;
+      while (matchIndex < matches.length) {
+        const match = matches[matchIndex]!;
+        if (match.start >= end) break;
+        if (match.end <= offset) {
+          matchIndex++;
+          continue;
+        }
+        const start = Math.max(match.start, offset) - offset;
+        const stop = Math.min(match.end, end) - offset;
+        parent.appendChild(document.createTextNode(text.slice(cursor, start)));
+        const mark = document.createElement('mark');
+        mark.textContent = text.slice(start, stop);
+        parent.appendChild(mark);
+        cursor = stop;
+        if (match.end > end) break;
+        matchIndex++;
+      }
+      parent.appendChild(document.createTextNode(text.slice(cursor)));
+    }
     const tokenPattern = /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
     let cursor = 0;
-    let matches = 0;
     output.replaceChildren();
     for (const token of json.matchAll(tokenPattern)) {
-      matches += appendSearchText(output, json.slice(cursor, token.index), query);
+      appendSearchText(output, json.slice(cursor, token.index), cursor);
       const span = document.createElement('span');
       span.className = token[1] ? 'json-key' : token[2] ? 'json-string' : token[3] ? 'json-literal' : 'json-number';
-      matches += appendSearchText(span, token[0], query);
+      appendSearchText(span, token[0], token.index);
       output.append(span);
       cursor = token.index + token[0].length;
     }
-    matches += appendSearchText(output, json.slice(cursor), query);
-    searchStatus.textContent = query ? `${matches} match${matches === 1 ? '' : 'es'}` : '';
+    appendSearchText(output, json.slice(cursor), cursor);
+    searchStatus.textContent = query ? `${matches.length} match${matches.length === 1 ? '' : 'es'}` : '';
   }
 
   function show(value: unknown): void {
@@ -84,6 +87,7 @@ export function createEventDialog(
     }
   });
   dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
     const bounds = dialog.getBoundingClientRect();
     const outside = event.clientX < bounds.left || event.clientX > bounds.right
       || event.clientY < bounds.top || event.clientY > bounds.bottom;
