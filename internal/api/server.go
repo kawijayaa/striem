@@ -294,7 +294,7 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		"tables":        tables,
 		"statements":    []string{"let"},
 		"operators":     []string{"where", "filter", "search", "project", "project-away", "project-keep", "project-rename", "project-reorder", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "sample", "sample-distinct", "count", "serialize", "as", "mv-expand", "mv-apply", "union", "join", "lookup"},
-		"functions":     []string{"now", "ago", "datetime", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "array_concat", "array_reverse", "bag_keys", "bag_has_key", "bag_merge", "bag_remove_keys", "bag_set_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "max", "avg", "make_set", "make_list", "take_any"},
+		"functions":     []string{"now", "ago", "datetime", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "array_length", "array_concat", "array_reverse", "array_slice", "bag_keys", "bag_has_key", "bag_merge", "bag_remove_keys", "bag_set_key", "set_has_element", "base64_decode_tostring", "url_decode", "ipv4_is_private", "ipv4_is_in_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "max", "avg", "make_set", "make_list", "take_any"},
 	})
 }
 

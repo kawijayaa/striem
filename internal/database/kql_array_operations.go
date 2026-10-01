@@ -117,3 +117,45 @@ func kqlArrayReverse(value any) (any, error) {
 	result.WriteByte(']')
 	return result.String(), nil
 }
+
+func kqlArraySlice(value, startValue, endValue any) (any, error) {
+	elements, ok, err := dynamicArray(value)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	start, startOK := startValue.(int64)
+	end, endOK := endValue.(int64)
+	if !startOK || !endOK {
+		return nil, nil
+	}
+	count := int64(len(elements))
+	// Adding the nonnegative bounded length to a negative index cannot overflow.
+	if start < 0 {
+		start += count
+	}
+	if end < 0 {
+		end += count
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end >= count {
+		end = count - 1
+	}
+	if end < 0 || start >= count || start > end {
+		return "[]", nil
+	}
+	var result bytes.Buffer
+	result.WriteByte('[')
+	// Clamp before making the inclusive end exclusive, including MaxInt64 input.
+	for _, element := range elements[int(start) : int(end)+1] {
+		if err := appendArrayElement(&result, element); err != nil {
+			return nil, err
+		}
+	}
+	result.WriteByte(']')
+	return result.String(), nil
+}

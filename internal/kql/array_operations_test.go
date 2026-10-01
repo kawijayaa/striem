@@ -49,3 +49,44 @@ func TestArrayOperations(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestArraySlice(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print arr=dynamic([1,2,3]) | extend sliced=array_slice(arr,1,2)`, `[[[1,2,3] [2,3]]]`},
+		{`print arr=dynamic([1,2,3,4,5]) | extend sliced=array_slice(arr,2,-1)`, `[[[1,2,3,4,5] [3,4,5]]]`},
+		{`print arr=dynamic([1,2,3,4,5]) | extend sliced=array_slice(arr,-3,-2)`, `[[[1,2,3,4,5] [3,4]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),-10,10)`, `[[[1,2,3]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),0,0)`, `[[[1]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),-1,-1)`, `[[[3]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),2,1)`, `[[[]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),4,10)`, `[[[]]]`},
+		{`print a=array_slice(dynamic([1,2,3]),0,-10)`, `[[[]]]`},
+		{`print a=array_slice(dynamic([]),0,-1)`, `[[[]]]`},
+		{`print a=array_slice(dynamic([null,true,{"long":9223372036854775807},[1,2],"é\u0000"]),1,-1)`, `[[[true,{"long":9223372036854775807},[1,2],"é\u0000"]]]`},
+		{`print a=array_slice(dynamic([1,2]),tolong("-9223372036854775808"),9223372036854775807)`, `[[[1,2]]]`},
+		{`let first=1; let last=-1; Events | where n == 1 | project a=array_slice(items,first,last) | mv-expand a | project n=tolong(a)`, `[[2]]`},
+		{`print a=array_slice(array_reverse(pack_array(1,2,3)),0,1)[1]`, `[[2]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+	compiled, err := Compile(`print array_slice(dynamic([]),0,1)`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(compiled.Columns, []string{"Column1"}) {
+		t.Fatal(compiled.Columns)
+	}
+	if _, ok := compiled.DynamicColumns["Column1"]; !ok {
+		t.Fatal("dynamic metadata lost")
+	}
+	for _, expr := range []string{`array_slice()`, `array_slice(dynamic([]),0)`, `array_slice("[]",0,1)`, `array_slice(dynamic([]),0.5,1)`, `array_slice(dynamic([]),0,true)`, `array_slice(dynamic([]),0,1,2)`} {
+		if _, err := Compile(`print a=`+expr, time.Now()); err == nil {
+			t.Errorf("accepted %s", expr)
+		}
+	}
+}

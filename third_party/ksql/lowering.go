@@ -593,7 +593,7 @@ func inferredName(expression kql.Expression, boundName string) string {
 			// These Microsoft signatures use ResultNameKind.None.
 			// Leaving the name empty lets projection binding generate ColumnN.
 			switch strings.ToLower(lastName(function.Name)) {
-			case "indexof", "array_concat", "array_reverse":
+			case "indexof", "array_concat", "array_reverse", "array_slice":
 				return ""
 			}
 			return lastName(function.Name) + "_"

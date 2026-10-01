@@ -1,6 +1,7 @@
 package database
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -53,5 +54,42 @@ func TestArrayOperationsInvalidInputs(t *testing.T) {
 	got, err := kqlArrayReverse(` [ 9007199254740993, { "a" : [true, null] } ] `)
 	if err != nil || got != `[{"a":[true,null]},9007199254740993]` {
 		t.Fatalf("raw JSON: %v %v", got, err)
+	}
+}
+
+func TestArraySliceResourceAndIntegerBounds(t *testing.T) {
+	for _, value := range []string{strings.Repeat("x", maxReplacementBytes+1), `[` + strings.Repeat("0,", maxReplacementParts) + `0]`} {
+		if _, err := kqlArraySlice(value, int64(0), int64(0)); err == nil {
+			t.Fatal("expected resource diagnostic")
+		}
+	}
+	for _, tc := range []struct {
+		start, end int64
+		want       string
+	}{
+		{math.MinInt64, math.MaxInt64, "[1,2,3]"},
+		{math.MaxInt64, math.MaxInt64, "[]"},
+		{math.MinInt64, math.MinInt64, "[]"},
+		{-3, -3, "[1]"},
+		{-4, 0, "[1]"},
+	} {
+		got, err := kqlArraySlice("[1,2,3]", tc.start, tc.end)
+		if err != nil || got != tc.want {
+			t.Fatalf("slice(%d,%d): %v %v", tc.start, tc.end, got, err)
+		}
+	}
+	// These null/invalid-index cases remain characterization pending Kusto evidence.
+	for _, index := range []any{nil, "1", float64(1)} {
+		if got, err := kqlArraySlice("[1,2,3]", index, int64(2)); err != nil || got != nil {
+			t.Fatalf("invalid start: %v %v", got, err)
+		}
+		if got, err := kqlArraySlice("[1,2,3]", int64(0), index); err != nil || got != nil {
+			t.Fatalf("invalid end: %v %v", got, err)
+		}
+	}
+	for _, value := range []any{nil, "null", "{}", "invalid"} {
+		if got, err := kqlArraySlice(value, int64(0), int64(2)); err != nil || got != nil {
+			t.Fatalf("invalid array: %v %v", got, err)
+		}
 	}
 }

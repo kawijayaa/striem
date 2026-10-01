@@ -889,3 +889,25 @@ func TestArrayOperationsThroughAPI(t *testing.T) {
 		t.Fatalf("nested bag=%#v", values)
 	}
 }
+
+func TestArraySliceThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=array_slice(pack_array(0,true,9223372036854775807,null),1,-1) | project renamed=a`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	values, ok := result.Rows[0]["renamed"].([]any)
+	if !ok || len(values) != 3 || values[0] != true || values[1] != json.Number("9223372036854775807") || values[2] != nil {
+		t.Fatalf("slice=%#v", result)
+	}
+}

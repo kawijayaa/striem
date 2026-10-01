@@ -38,6 +38,21 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("array_slice", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 3 {
+			return ksql.TypedExpression{}, fmt.Errorf("array_slice requires 3 arguments")
+		}
+		if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("array_slice requires a dynamic array")
+		}
+		for _, arg := range args[1:] {
+			if arg.Type != ksql.TypeInt && arg.Type != ksql.TypeLong && arg.Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("array_slice indices must be integers")
+			}
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_array_slice", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}}, nil
+	}))
+
 	for _, name := range []string{"array_concat", "array_reverse"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
