@@ -271,6 +271,46 @@ test('saved hunts persist, reopen, remove and undo; history clears; query links 
   await expect(page.locator('.cm-content')).toHaveText('Telemetry | count');
 });
 
+test('filter Undo preserves newer editor changes', async ({ page }) => {
+  const original = 'Telemetry | project host,score | order by score asc';
+  await open(page, original);
+  await run(page, 3);
+  await page.locator('#result-body tr').first().locator('[data-result-column-index="0"]').click();
+  await page.locator('#filter-result-value').click();
+  const filtered = await page.locator('.cm-content').innerText();
+  const newer = `${filtered}\n| take 1`;
+  await edit(page, newer);
+  await page.locator('#toast-action').click();
+  await expect(page.locator('.cm-content')).toHaveText(newer, { useInnerText: true });
+  await expect(page.locator('#toast-message')).toHaveText('Your newer edits were kept. Use Undo in the editor to step back.');
+  await expect(page.locator('.cm-content')).toBeFocused();
+  await run(page, 1);
+});
+
+test('undo clearing history keeps newer runs and persists both histories', async ({ page }) => {
+  const previous = 'Telemetry | count';
+  const newer = 'Telemetry | project host';
+  await open(page, previous);
+  await run(page, 1);
+  await page.locator('#hunts-tab').click();
+  await page.locator('#history-view').click();
+  await page.locator('#clear-history').click();
+  await page.locator('#confirm-form button[type="submit"]').click();
+  await expect(page.locator('#history-count')).toHaveText('0');
+  await run(page, 1);
+  const rerun = await page.evaluate(() => JSON.parse(localStorage.getItem('striem.queryHistory')!)[0]);
+  await edit(page, newer);
+  await run(page, 3);
+  await page.locator('#toast-action').click();
+  await expect(page.locator('#history-count')).toHaveText('2');
+  await expect(page.locator('#query-history .query-preview')).toHaveText([newer, previous]);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('striem.queryHistory')!)[1])).toEqual(rerun);
+  await page.reload();
+  await page.locator('#hunts-tab').click();
+  await page.locator('#history-view').click();
+  await expect(page.locator('#query-history .query-preview')).toHaveText([newer, previous]);
+});
+
 test('source selection, field filtering/insertion, autocomplete and timeline filtering', async ({ page }) => {
   await open(page);
   await page.locator('#source-list button').filter({ hasText: 'CSV' }).click();

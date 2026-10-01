@@ -621,10 +621,19 @@ function addTimelineFilter(start: Date, end: Date): void {
 function pivotOnValue(column: string, value: unknown, negate: boolean): void {
   const previous = editor.state.doc.toString();
   if (window.matchMedia('(max-width: 900px)').matches) mobileWorkspace.show('query');
-  replaceQuery(addValueFilter(previous, column, value, negate));
+  const filtered = addValueFilter(previous, column, value, negate);
+  replaceQuery(filtered);
   showToast(`${negate ? 'Excluded' : 'Included'} ${column}: ${String(value).slice(0, 40)}`, {
     label: 'Undo',
-    handler: () => replaceQuery(previous),
+    handler: () => {
+      if (editor.state.doc.toString() !== filtered) {
+        showToast('Your newer edits were kept. Use Undo in the editor to step back.');
+        mobileWorkspace.show('query');
+        editor.focus();
+        return;
+      }
+      replaceQuery(previous);
+    },
   });
 }
 
@@ -1277,7 +1286,8 @@ $('#confirm-form').addEventListener('submit', event => {
   $<HTMLDialogElement>('#confirm-dialog').close();
   if (persisted) {
     showToast('Recent hunts cleared', { label: 'Undo', handler: () => {
-      queryHistory = previous;
+      const recentQueries = new Set(queryHistory.map(item => item.query));
+      queryHistory = [...queryHistory, ...previous.filter(item => !recentQueries.has(item.query))].slice(0, 10);
       writeStored(storageKeys.history, queryHistory);
       renderQueryLibrary();
     } });
