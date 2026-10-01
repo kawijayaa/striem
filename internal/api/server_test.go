@@ -778,3 +778,50 @@ func TestSplitArraysThroughAPI(t *testing.T) {
 		t.Fatalf("expected indexed JSON array, got %#v", rows)
 	}
 }
+
+func TestConstructedDynamicValuesThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print a=pack_array(true,null,bag_pack("x",1)),b=bag_pack("nested",pack_array("a","b"))`)
+	array, ok := rows[0]["a"].([]any)
+	if !ok || len(array) != 3 || array[0] != true || array[1] != nil {
+		t.Fatalf("array=%#v", rows)
+	}
+	nested, ok := array[2].(map[string]any)
+	if !ok || nested["x"] != float64(1) {
+		t.Fatalf("nested bag=%#v", array)
+	}
+	bag, ok := rows[0]["b"].(map[string]any)
+	if !ok {
+		t.Fatal(rows)
+	}
+	values, ok := bag["nested"].([]any)
+	if !ok || len(values) != 2 || values[0] != "a" || values[1] != "b" {
+		t.Fatalf("nested array=%#v", bag)
+	}
+}
+
+func TestConstructedLongPrecisionThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=pack_array(9223372036854775807),b=bag_pack("long",9223372036854775807)`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	array := result.Rows[0]["a"].([]any)
+	bag := result.Rows[0]["b"].(map[string]any)
+	for _, value := range []any{array[0], bag["long"]} {
+		number, ok := value.(json.Number)
+		if !ok || number.String() != "9223372036854775807" {
+			t.Fatalf("long precision lost: %#v", result)
+		}
+	}
+}

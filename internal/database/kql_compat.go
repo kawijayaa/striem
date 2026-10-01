@@ -18,6 +18,8 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_substring": kqlSubstring, "kql_strlen": kqlStringLength,
 		"kql_replace_string":  kqlReplaceString,
 		"kql_replace_strings": kqlReplaceStrings,
+		"kql_pack_array":      kqlPackArray,
+		"kql_bag_pack":        kqlBagPack,
 		"kql_trim_start":      kqlTrimStart,
 		"kql_trim_end":        kqlTrimEnd,
 		"kql_replace_regex":   kqlReplaceRegex,

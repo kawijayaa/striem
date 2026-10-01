@@ -35,7 +35,7 @@ const functions = new Set([
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'trim_start', 'trim_end', 'replace_string', 'replace_strings', 'replace_regex',
   'variance', 'variancep', 'varianceif', 'variancepif', 'stdev', 'stdevp', 'stdevif', 'stdevpif',
-  'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
+  'pack_array', 'bag_pack', 'pack', 'pack_dictionary', 'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
   'not', 'bin', 'dcount', 'dcountif', 'count_distinct', 'count_distinctif', 'avgif', 'minif', 'maxif',
   'startofday', 'endofday', 'startofweek', 'endofweek', 'startofmonth', 'endofmonth', 'startofyear', 'endofyear',
 ]);
@@ -68,6 +68,7 @@ const functionCompletions = createCompletions('function', [
   ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'], ['dynamic', 'Construct a dynamic literal'],
   ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
   ['array_length', 'Number of array elements'], ['bag_keys', 'Keys of a dynamic object'],
+  ['pack_array', 'Construct a dynamic array from values or all columns'], ['bag_pack', 'Construct a dynamic bag from key/value pairs'], ['pack', 'Legacy bag constructor'], ['pack_dictionary', 'Legacy bag constructor'],
   ['bag_has_key', 'Test for a dynamic object key'], ['set_has_element', 'Test dynamic array membership'],
   ['base64_decode_tostring', 'Decode Base64 text'], ['url_decode', 'Decode URL-escaped text'],
   ['ipv4_is_private', 'Test for an RFC1918 address'],

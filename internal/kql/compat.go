@@ -38,6 +38,36 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"pack_array", "bag_pack", "pack", "pack_dictionary"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			array := name == "pack_array"
+			if len(args) == 0 || (array && len(args) > 64) || (!array && (len(args)%2 != 0 || len(args) > 128)) {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %s", name, map[bool]string{true: "1 to 64 values", false: "1 to 64 key/value pairs"}[array])
+			}
+			values := make([]sqlast.Expr, 1, len(args)+1)
+			kinds := make([]string, 0, len(args))
+			for i, arg := range args {
+				if _, star := arg.SQL.(*sqlast.Star); star {
+					return ksql.TypedExpression{}, fmt.Errorf("pack_array wildcard must be the sole argument")
+				}
+				if !array && i%2 == 0 {
+					if arg.Type != ksql.TypeString && arg.Type != ksql.TypeUnknown {
+						return ksql.TypedExpression{}, fmt.Errorf("%s keys must be strings", name)
+					}
+				} else {
+					kinds = append(kinds, string(arg.Type))
+				}
+				values = append(values, arg.SQL)
+			}
+			values[0] = &sqlast.Literal{Kind: sqlast.StringLiteral, Value: strings.Join(kinds, ",")}
+			function := "kql_bag_pack"
+			if array {
+				function = "kql_pack_array"
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: function, Args: values}}, nil
+		}))
+	}
 	for _, name := range []string{"trim", "trim_start", "trim_end"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

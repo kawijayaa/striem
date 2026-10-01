@@ -1053,7 +1053,21 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 	}
 	args := make([]sqlast.Expr, 0, len(value.Args))
 	argTypes := make([]ScalarType, 0, len(value.Args))
-	for _, argument := range value.Args {
+	arguments := value.Args
+	if function == "pack_array" && len(arguments) == 1 {
+		if _, ok := arguments[0].(*kql.StarExpression); ok {
+			if s.input.Unknown || len(s.input.Columns) == 0 {
+				s.bindError("KQLB0512", value.Span, "function.pack_array", "pack_array(*) requires a known non-empty input schema")
+				return boundExpr{}
+			}
+			for _, column := range s.input.Columns {
+				args = append(args, s.columnIdentifier(column.Name))
+				argTypes = append(argTypes, column.Type)
+			}
+			arguments = nil
+		}
+	}
+	for _, argument := range arguments {
 		bound := s.expression(argument)
 		if bound.SQL != nil {
 			args = append(args, bound.SQL)
