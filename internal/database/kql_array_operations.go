@@ -159,3 +159,55 @@ func kqlArraySlice(value, startValue, endValue any) (any, error) {
 	result.WriteByte(']')
 	return result.String(), nil
 }
+
+func kqlZip(values ...any) (any, error) {
+	if len(values) < 2 || len(values) > 64 {
+		return nil, fmt.Errorf("zip requires 2 to 64 arrays")
+	}
+	arrays := make([][]json.RawMessage, 0, len(values))
+	length, work := 0, maxReplacementWork
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			work -= len(text)
+			if work < 0 {
+				return nil, fmt.Errorf("zip work limit exceeded")
+			}
+		}
+		elements, ok, err := dynamicArray(value)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, nil
+		}
+		if len(elements) > length {
+			length = len(elements)
+		}
+		// Count padded cells as well as real elements, before multiplying lengths.
+		if length > maxReplacementParts/len(values) {
+			return nil, fmt.Errorf("zip cell limit exceeded")
+		}
+		arrays = append(arrays, elements)
+	}
+	var result bytes.Buffer
+	result.WriteByte('[')
+	for i := 0; i < length; i++ {
+		var row bytes.Buffer
+		row.WriteByte('[')
+		for _, array := range arrays {
+			element := json.RawMessage("null")
+			if i < len(array) {
+				element = array[i]
+			}
+			if err := appendArrayElement(&row, element); err != nil {
+				return nil, err
+			}
+		}
+		row.WriteByte(']')
+		if err := appendArrayElement(&result, row.Bytes()); err != nil {
+			return nil, err
+		}
+	}
+	result.WriteByte(']')
+	return result.String(), nil
+}

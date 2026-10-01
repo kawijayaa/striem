@@ -941,3 +941,37 @@ func TestArrayMovementThroughAPI(t *testing.T) {
 		t.Fatalf("padding=%#v", b)
 	}
 }
+
+func TestZipThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print z=zip(pack_array(true,9223372036854775807),pack_array(bag_pack("x",false))) | project renamed=z`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	rows, ok := result.Rows[0]["renamed"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("zip=%#v", result)
+	}
+	first, ok := rows[0].([]any)
+	if !ok || len(first) != 2 || first[0] != true {
+		t.Fatalf("first=%#v", rows)
+	}
+	bag, ok := first[1].(map[string]any)
+	if !ok || bag["x"] != false {
+		t.Fatalf("bag=%#v", first)
+	}
+	second, ok := rows[1].([]any)
+	if !ok || len(second) != 2 || second[0] != json.Number("9223372036854775807") || second[1] != nil {
+		t.Fatalf("second=%#v", rows)
+	}
+}

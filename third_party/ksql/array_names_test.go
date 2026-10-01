@@ -39,3 +39,14 @@ func TestArrayMoveUnnamedResultColumns(t *testing.T) {
 		t.Fatalf("result=%#v want=%#v", result, want)
 	}
 }
+
+func TestZipUnnamedResultColumn(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithTypedFunction("zip", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		return ksql.TypedExpression{SQL: &sqlast.Call{Name: "zip", Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}, Type: ksql.TypeDynamic}, nil
+	}))
+	result := compiler.Compile(`print zip(dynamic([1]),dynamic([2]))`)
+	want := []ksql.Column{{Name: "Column1", Type: ksql.TypeDynamic}}
+	if !result.OK() || !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("result=%#v want=%#v", result, want)
+	}
+}

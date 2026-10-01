@@ -84,15 +84,19 @@ func compatibilityOptions() []ksql.Option {
 		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_array_slice", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}}, nil
 	}))
 
-	for _, name := range []string{"array_concat", "array_reverse"} {
+	for _, name := range []string{"array_concat", "array_reverse", "zip"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			maximum := 64
 			if name == "array_reverse" {
 				maximum = 1
 			}
-			if len(args) < 1 || len(args) > maximum {
-				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 to %d dynamic arrays", name, maximum)
+			minimum := 1
+			if name == "zip" {
+				minimum = 2
+			}
+			if len(args) < minimum || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d to %d dynamic arrays", name, minimum, maximum)
 			}
 			values := make([]sqlast.Expr, len(args))
 			for i, arg := range args {

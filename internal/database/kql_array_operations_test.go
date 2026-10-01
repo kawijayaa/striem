@@ -93,3 +93,40 @@ func TestArraySliceResourceAndIntegerBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestZipBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func() (any, error)
+	}{
+		{"arity", func() (any, error) { return kqlZip("[]") }},
+		{"input", func() (any, error) { return kqlZip(strings.Repeat("x", maxReplacementBytes+1), "[]") }},
+		{"cells", func() (any, error) {
+			v := `[` + strings.TrimSuffix(strings.Repeat("0,", maxReplacementParts/2+1), ",") + `]`
+			return kqlZip(v, "[]")
+		}},
+		{"output", func() (any, error) {
+			v := `["` + strings.Repeat("x", maxReplacementBytes/2) + `"]`
+			return kqlZip(v, v)
+		}},
+		{"work", func() (any, error) {
+			v := make([]any, 64)
+			for i := range v {
+				v[i] = "[]" + strings.Repeat(" ", maxReplacementBytes-2)
+			}
+			return kqlZip(v...)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.run(); err == nil {
+				t.Fatal("expected resource diagnostic")
+			}
+		})
+	}
+	// Invalid input behavior is characterized pending differential Kusto evidence.
+	for _, value := range []any{nil, "null", "{}", "invalid", int64(1)} {
+		if got, err := kqlZip("[]", value); err != nil || got != nil {
+			t.Fatalf("invalid zip: %v %v", got, err)
+		}
+	}
+}

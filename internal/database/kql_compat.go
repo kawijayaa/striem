@@ -20,6 +20,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_replace_strings":    kqlReplaceStrings,
 		"kql_pack_array":         kqlPackArray,
 		"kql_array_concat":       kqlArrayConcat,
+		"kql_zip":                kqlZip,
 		"kql_array_reverse":      kqlArrayReverse,
 		"kql_array_rotate_left":  func(value, count any) (any, error) { return kqlArrayRotate(value, count, false) },
 		"kql_array_rotate_right": func(value, count any) (any, error) { return kqlArrayRotate(value, count, true) },
