@@ -37,6 +37,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_array_index_of":        kqlArrayIndexOf,
 		"kql_set_has_element_typed": kqlSetHasElementTyped,
 		"kql_array_iff":             kqlArrayIff,
+		"kql_repeat":                kqlRepeat,
 		"kql_bag_pack":              kqlBagPack,
 		"kql_bag_merge":             kqlBagMerge,
 		"kql_bag_set_key":           kqlBagSetKey,

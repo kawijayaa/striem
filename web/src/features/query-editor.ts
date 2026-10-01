@@ -35,7 +35,7 @@ const functions = new Set([
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'trim_start', 'trim_end', 'replace_string', 'replace_strings', 'replace_regex',
   'variance', 'variancep', 'varianceif', 'variancepif', 'stdev', 'stdevp', 'stdevif', 'stdevpif',
-  'pack_array', 'bag_pack', 'pack', 'pack_dictionary', 'bag_merge', 'bag_remove_keys', 'bag_set_key', 'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
+  'pack_array', 'repeat', 'bag_pack', 'pack', 'pack_dictionary', 'bag_merge', 'bag_remove_keys', 'bag_set_key', 'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
   'not', 'bin', 'dcount', 'dcountif', 'count_distinct', 'count_distinctif', 'avgif', 'minif', 'maxif',
   'startofday', 'endofday', 'startofweek', 'endofweek', 'startofmonth', 'endofmonth', 'startofyear', 'endofyear',
 ]);
@@ -75,6 +75,7 @@ const functionCompletions = createCompletions('function', [
   ['zip', 'Combine array elements by index with null padding'],
   ['array_rotate_left', 'Rotate array elements to the left'], ['array_rotate_right', 'Rotate array elements to the right'],
   ['array_shift_left', 'Shift array elements left with optional padding'], ['array_shift_right', 'Shift array elements right with optional padding'],
+  ['repeat', 'Construct an array by repeating a scalar value'],
   ['pack_array', 'Construct a dynamic array from values or all columns'], ['bag_pack', 'Construct a dynamic bag from key/value pairs'], ['pack', 'Legacy bag constructor'], ['pack_dictionary', 'Legacy bag constructor'],
   ['bag_merge', 'Merge bags with leftmost values taking precedence'], ['bag_remove_keys', 'Remove root keys or nested object properties'], ['bag_set_key', 'Set a root key or nested object property'],
   ['bag_has_key', 'Test for a dynamic object key'], ['set_has_element', 'Test dynamic array membership'],

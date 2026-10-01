@@ -316,3 +316,39 @@ func kqlArraySum(value any) (any, error) {
 	}
 	return sum, nil
 }
+
+func kqlRepeat(value, countValue any, kind string) (any, error) {
+	count, ok := countValue.(int64)
+	if !ok || count < 0 {
+		return nil, nil
+	}
+	if count == 0 {
+		return "[]", nil
+	}
+	if count > maxReplacementParts {
+		return nil, fmt.Errorf("repeat element limit exceeded")
+	}
+	if kind == "datetime" {
+		return nil, fmt.Errorf("repeat datetime values require tagged dynamic types")
+	}
+	encoded, err := packJSONValue(value, kind)
+	if err != nil {
+		return nil, err
+	}
+	// For a nonempty result, total bytes = 1 + count * (value bytes + comma).
+	// Divide before multiplying to bound allocation and prevent integer overflow.
+	if count > int64((maxReplacementBytes-1)/(len(encoded)+1)) {
+		return nil, fmt.Errorf("repeat result exceeds %d bytes", maxReplacementBytes)
+	}
+	var result bytes.Buffer
+	result.Grow(1 + int(count)*(len(encoded)+1))
+	result.WriteByte('[')
+	for i := int64(0); i < count; i++ {
+		if i > 0 {
+			result.WriteByte(',')
+		}
+		result.Write(encoded)
+	}
+	result.WriteByte(']')
+	return result.String(), nil
+}

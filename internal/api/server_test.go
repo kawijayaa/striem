@@ -1051,3 +1051,33 @@ func TestArrayIffThroughAPI(t *testing.T) {
 		t.Fatalf("alias=%#v", result)
 	}
 }
+
+func TestRepeatThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=repeat(true,2),b=repeat(9223372036854775807,2),c=repeat(1,-1),d=repeat(1,0)`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := result.Rows[0]["a"].([]any)
+	if !ok || len(a) != 2 || a[0] != true || a[1] != true {
+		t.Fatalf("bool array=%#v", result)
+	}
+	b, ok := result.Rows[0]["b"].([]any)
+	if !ok || len(b) != 2 || b[0] != json.Number("9223372036854775807") || b[1] != json.Number("9223372036854775807") {
+		t.Fatalf("long array=%#v", result)
+	}
+	d, ok := result.Rows[0]["d"].([]any)
+	if !ok || len(d) != 0 || result.Rows[0]["c"] != nil {
+		t.Fatalf("zero/negative count=%#v", result)
+	}
+}

@@ -38,6 +38,16 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("repeat", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 2 {
+			return ksql.TypedExpression{}, fmt.Errorf("repeat requires 2 arguments")
+		}
+		if args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("repeat count must be an integer")
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_repeat", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[0].Type)}}}}, nil
+	}))
+
 	for _, name := range []string{"array_iff", "array_iif"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

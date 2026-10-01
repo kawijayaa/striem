@@ -184,3 +184,30 @@ func TestArraySumBoundsAndInvalidValues(t *testing.T) {
 		t.Fatalf("real sum: %v %v", got, err)
 	}
 }
+
+func TestRepeatResourceBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		count int64
+		kind  string
+	}{
+		{"count", int64(1), math.MaxInt64, "long"},
+		{"input", strings.Repeat("x", maxReplacementBytes+1), 1, "string"},
+		{"output", strings.Repeat("x", maxReplacementBytes/2), 2, "string"},
+		{"encoded output", strings.Repeat("\x00", maxReplacementBytes/4), 1, "string"},
+		{"datetime", "2025-01-01T00:00:00Z", 1, "datetime"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := kqlRepeat(tc.value, tc.count, tc.kind); err == nil {
+				t.Fatal("expected diagnostic")
+			}
+		})
+	}
+	// Null/invalid count cases remain characterization pending Kusto evidence.
+	for _, count := range []any{nil, "2", float64(2), int64(math.MinInt64)} {
+		if got, err := kqlRepeat(int64(1), count, "long"); err != nil || got != nil {
+			t.Fatalf("invalid/negative count: %v %v", got, err)
+		}
+	}
+}
