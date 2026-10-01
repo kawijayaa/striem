@@ -480,7 +480,7 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 	}
 	switch value := expression.(type) {
 	case *kql.NameExpression:
-		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok {
+		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok && !s.hasInputName(unquoteKQL(value.Name)) {
 			bound.Name = unquoteKQL(value.Name)
 			return bound
 		}
@@ -1033,7 +1033,7 @@ func lowerLiteral(value *kql.LiteralExpression) sqlast.Expr {
 	return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: text}
 }
 
-func (s *compileState) call(value *kql.CallExpression) boundExpr {
+func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	name, ok := value.Function.(*kql.NameExpression)
 	if !ok {
 		s.error("KQLL0501", value.Span, "function.dynamic", "dynamic function references are not supported")
@@ -1060,6 +1060,14 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 	}
 	args := make([]sqlast.Expr, 0, len(value.Args))
 	argTypes := make([]ScalarType, 0, len(value.Args))
+	firstName := ""
+	if firstArgumentResultName(function) {
+		defer func() {
+			if result.SQL != nil {
+				result.Name = firstName
+			}
+		}()
+	}
 	arguments := value.Args
 	if function == "pack_array" && len(arguments) == 1 {
 		if _, ok := arguments[0].(*kql.StarExpression); ok {
@@ -1077,6 +1085,9 @@ func (s *compileState) call(value *kql.CallExpression) boundExpr {
 	for _, argument := range arguments {
 		bound := s.expression(argument)
 		if bound.SQL != nil {
+			if len(args) == 0 {
+				firstName = inferredName(argument, bound.Name)
+			}
 			args = append(args, bound.SQL)
 			argTypes = append(argTypes, bound.Type)
 		}

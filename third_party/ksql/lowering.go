@@ -142,10 +142,15 @@ func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 	return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: text}, Type: TypeLong}
 }
 
+func (s *compileState) hasInputName(name string) bool {
+	_, _, found, ambiguous := s.input.Lookup(name)
+	return found || ambiguous
+}
+
 func (s *compileState) name(value *kql.NameExpression) boundExpr {
 	parts := splitName(unquoteKQL(value.Name))
 	if len(parts) > 1 {
-		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok {
+		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok && !s.hasInputName(parts[0]) && !s.hasInputName(unquoteKQL(value.Name)) {
 			if bound.Type != TypeDynamic && bound.Type != TypeUnknown {
 				s.bindError("KQLB0403", value.Span, "expression.name", parts[0]+" is not dynamic")
 				return boundExpr{}
@@ -619,6 +624,17 @@ func literalIndexName(expression kql.Expression) string {
 	return ""
 }
 
+// ResultNameKind.FirstArgument in Microsoft's scalar function catalog.
+func firstArgumentResultName(function string) bool {
+	switch function {
+	case "parse_json", "parsejson", "todynamic", "toobject", "parse_csv", "parse_xml",
+		"tostring", "tohex", "tolong", "toint", "toreal", "todouble", "todatetime",
+		"totimespan", "totime", "tobool", "toboolean", "todecimal", "toguid":
+		return true
+	}
+	return false
+}
+
 func inferredName(expression kql.Expression, boundName string) string {
 	if boundName != "" {
 		return boundName
@@ -628,6 +644,11 @@ func inferredName(expression kql.Expression, boundName string) string {
 		return lastName(value.Name)
 	case *kql.CallExpression:
 		if function, ok := value.Function.(*kql.NameExpression); ok {
+			if firstArgumentResultName(strings.ToLower(function.Name)) {
+				// Binding supplies the first argument's inferred name. An
+				// unnamed argument must remain unnamed, yielding ColumnN.
+				return ""
+			}
 			// These Microsoft signatures use ResultNameKind.None.
 			// Leaving the name empty lets projection binding generate ColumnN.
 			switch strings.ToLower(lastName(function.Name)) {

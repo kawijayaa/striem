@@ -1177,3 +1177,11 @@ func TestDynamicAccessorNamesThroughAPI(t *testing.T) {
 		t.Fatalf("rows=%#v", rows)
 	}
 }
+
+func TestParseJSONImplicitNameThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let raw='{"a":97}'; print parse_json(raw) | project raw.a`)
+	if len(rows) != 1 || rows[0]["raw_a"] != float64(97) {
+		t.Fatalf("rows=%#v", rows)
+	}
+}

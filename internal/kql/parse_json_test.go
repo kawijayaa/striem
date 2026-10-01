@@ -35,6 +35,16 @@ func TestParseJSONContracts(t *testing.T) {
 				t.Errorf("accepted %s", expr)
 			}
 		}
+		for _, tc := range []struct{ query, want string }{
+			{`print ` + name + `('{"a":73}') | project Column1.a`, `[[73]]`},
+			{`let raw='{"a":79}'; print ` + name + `(raw) | project raw.a`, `[[79]]`},
+			{`print raw='{"a":83}' | project ` + name + `(raw) | project raw.a`, `[[83]]`},
+			{`print d=dynamic({"a":{"b":89}}) | project ` + name + `(d.a) | project d_a.b`, `[[89]]`},
+		} {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("%s: got=%s want=%s", tc.query, got, tc.want)
+			}
+		}
 		compiled, err := Compile(`print d=`+name+`("bad") | project renamed=d`, time.Now())
 		if err != nil {
 			t.Fatal(err)
@@ -44,6 +54,9 @@ func TestParseJSONContracts(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ query, want string }{
+		{`let n=99; Events | where n == 1 | project toint(n) | project n`, `[[1]]`},
+		{`Events | where n == 1 | project tostring(RawData.user) | project RawData_user`, `[[alice]]`},
+		{`print raw=dynamic([1,2]) | project tostring(raw) | project raw`, `[[[1,2]]]`},
 		{`Events | where n == 1 | project RawData.user,items[0] | project RawData_user,items_0`, `[[alice 1]]`},
 		{`let d=dynamic({"a":{"b":61}}); print d.a.b | project d_a_b`, `[[61]]`},
 		{`print d=dynamic({"a.b":67}) | project d.['a.b'] | project ['d_a.b']`, `[[67]]`},

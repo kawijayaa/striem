@@ -1,5 +1,5 @@
 {
-  "baseCommit": "9a4e718f945712d8174d512ee6a37cfcb19c5c55",
+  "baseCommit": "de39c96975aec4ea6867d9daf613dbb6cda0ce4f",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
@@ -10,7 +10,7 @@
     "binding_test.go": "6c8113f6e7e15fa09f8ef4d683c57f17d5d67369a5fc4f15dfaa8d6b20ada76d",
     "column_patterns.go": "c979c55a6e2d9a62e26a276d1744d798e0778933291d8b6a28d7ce2055e2e19d",
     "column_patterns_test.go": "12fa329a75f878cb137f896e146364dd6b70c9351a7101740af10eac74f7656b",
-    "compiler.go": "28f0849de1e7e7d9ec2e170484a772f510181f73a8354261509c42afff262ac7",
+    "compiler.go": "afdff7e850b474b2e4643280ea67ae3dfb6728fb3e414e71bc8f64d29cce6ebc",
     "compiler_test.go": "c665dfa4470cb24da1118f4f63b25df94c9aa9143061bd8f82fc143786814c0f",
     "diagnostic.go": "1bf539e59fba07f2fe7e922177e832da4ae41bd550caac6b04ebd39e69d30e2e",
     "dialect/dialect.go": "4648eacc279afadae21a1f46d326a5b250c90b7337f8f7a92e80676b9a5a87be",
@@ -28,6 +28,7 @@
     "features/README.md": "a7140754d08bf7c2cc268ca64d9f5448d354b45e6cfb29c12fdfa6264587df2c",
     "features/ledger.go": "a6150f2a52100491ec35a857e6a5720c1c064a200d94d60b226951c8c239a1da",
     "features/ledger_test.go": "b803176348e9c6ef7c8c595e8d374844eee9c3321bb68dcadc02b6e68042d4d6",
+    "function_names_test.go": "923f3d55adcf9726a13a2193cc3d9894823751f3399b1b092c1345d109ee29ad",
     "getschema.go": "12d6fe5d82d364fbfb13c2663bbf869f2e550f41a5841ec7807dc765745d2902",
     "getschema_test.go": "30f97308834a88ea72cd4f2d129f06cc08108973dea1d7fc24dec86fcc1c6f14",
     "go.mod": "9f16200a31f28667224713c58c59007ef00e92fe94cfff76d860bedc237828ba",
@@ -48,7 +49,7 @@
     "kql/strings.go": "29cf0dc91785337793d6192351e9b83a4011b759605ae2a740b770d268041a89",
     "kql/strings_test.go": "c85ae025f7ba1a713fdf3694c65d70c26fafc4fda41f8971ac054d13c313ebe2",
     "kql/token.go": "959857fb5773b7a46a82b11662b29db4f785205cfa9fc1f17786193533ba25a4",
-    "lowering.go": "957f6a3550d9c8153b128e1015e7caba198754110290fc13fff1d0694c5bed03",
+    "lowering.go": "494265484edb212cb626d2d572bd24eed45c89bee61c784b1ec822df16ca0e24",
     "not_test.go": "49419d42a6cdd08c4c7cc53d305f1693295a119de461d49edde768c4afed6977",
     "options.go": "8ae2fb9975754e6aac13930226d1ba229985147f0d4545ffc1c08387d7687aeb",
     "pack_array_test.go": "6e4a2a46968402ce10eb52ec03773102aae8f72fcf932711cbe7160596dcc612",
