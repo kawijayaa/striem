@@ -251,6 +251,25 @@ test('results distinguish edited queries, failed runs, cancellation and successf
   await expect(page.locator('#result-body tr')).toHaveCount(2);
 });
 
+test('malformed query responses preserve previous results and recover on the next run', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await open(page, 'Telemetry | project host,score');
+  await run(page, 3);
+  await page.route('**/api/query', route => route.fulfill({
+    json: { columns: ['host'], rows: null, rowCount: 0, durationMs: 0 },
+  }));
+  await page.locator('#run-query').click();
+  await expect(page.locator('#query-error')).toHaveText('The query service did not respond. Your query is unchanged. Run it again.');
+  await expect(page.locator('#results-notice')).toHaveText('Query failed. Showing results from the last successful run.');
+  await expect(page.locator('#result-body tr')).toHaveCount(3);
+  await expect(page.locator('#result-head')).toContainText('score');
+  await page.unroute('**/api/query');
+  await run(page, 3);
+  await expect(page.locator('#results-notice')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('mobile editing cancels a run and labels the retained results', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, 'Telemetry | project host,score');
@@ -541,6 +560,32 @@ test('a stalled readiness request times out and recovers', async ({ page }) => {
   } finally {
     release();
   }
+});
+
+test('malformed task responses leave a retry path and preserve drafts on submission', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  let healthy = false;
+  await page.route('**/api/questions', route => healthy ? route.continue() : route.fulfill({
+    json: { questions: null, totalQuestions: 0, solvedQuestions: 0, completed: false },
+  }));
+  await open(page);
+  await expect(page.locator('#active-task-title')).toHaveText('Could not load investigation tasks');
+  healthy = true;
+  await page.locator('#active-task-next').click();
+  await expect(page.locator('#active-task-title')).toHaveText('Identify the first host');
+  await page.route('**/api/questions/host/answer', route => route.fulfill({ json: { correct: true, state: null } }));
+  await page.locator('#active-task-answer').fill('kept draft');
+  await page.locator('#active-task-submit').click();
+  await expect(page.locator('#active-task-feedback')).toHaveText('The answer service did not respond. Your draft is kept; try again.');
+  await expect(page.locator('#active-task-title')).toHaveText('Identify the first host');
+  await expect(page.locator('#active-task-answer')).toHaveValue('kept draft');
+  await expect(page.locator('#active-task-submit')).toBeEnabled();
+  await page.unroute('**/api/questions/host/answer');
+  await page.locator('#active-task-submit').click();
+  await expect(page.locator('#active-task-feedback')).toContainText('does not match');
+  await expect(page.locator('#active-task-answer')).toHaveValue('kept draft');
+  expect(errors).toEqual([]);
 });
 
 test('pending answer responses preserve editor focus and answer drafts', async ({ page }) => {

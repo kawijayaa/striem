@@ -13,6 +13,7 @@ import {
 import type { ResultSort } from './features/results';
 import { createTimeline } from './features/timeline';
 import { parseFieldsResponse, parseSchemaResponse } from './features/schema';
+import { parseAnswerResponse, parseChallengeState, parseQueryResult } from './features/responses';
 import { addTimeRangeFilter, addValueFilter, querySource, replaceQuerySource } from './kql/query';
 import {
   createBrowserStorage,
@@ -22,7 +23,6 @@ import {
   storageKeys,
 } from './storage';
 import type {
-  AnswerResponse,
   ChallengeState,
   EventRow,
   FieldGroup,
@@ -246,7 +246,7 @@ async function runQuery() {
     $('#query-stats').textContent = `Running KQL query · ${elapsed} s`;
   }, 1000);
   try {
-    const result = await request<QueryResult>('/api/query', {
+    const rawResult = await request<unknown>('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
@@ -255,6 +255,7 @@ async function runQuery() {
     if (controller.signal.aborted || editor.state.doc.toString() !== query) {
       throw new DOMException('Query canceled', 'AbortError');
     }
+    const result = parseQueryResult(rawResult);
     lastResultQuery = query;
     queryOutcome = 'success';
     renderResults(result);
@@ -1076,13 +1077,14 @@ async function submitActiveQuestion(): Promise<void> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 10000);
   try {
-    const result = await request<AnswerResponse>(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
+    const rawResult = await request<unknown>(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ answer }),
       signal: controller.signal,
     });
     if (controller.signal.aborted) throw new DOMException('Answer request timed out', 'AbortError');
+    const result = parseAnswerResponse(rawResult);
     questionRequestGeneration++;
     challengeState = result.state;
     correct = result.correct;
@@ -1108,11 +1110,12 @@ async function submitActiveQuestion(): Promise<void> {
     const queryError = asQueryError(error);
     const retry = Number(queryError.retryAfterMs);
     if (retry > 0) questionCooldowns.set(question.id, Date.now() + retry);
+    const serverMessage = queryError.error || queryError.message;
     const message = retry > 0
       ? 'Too many attempts. Your answer was not submitted; wait for the retry timer, then try again.'
-      : controller.signal.aborted
+      : controller.signal.aborted || !serverMessage || /invalid server response|failed to fetch/i.test(serverMessage)
         ? 'The answer service did not respond. Your draft is kept; try again.'
-        : (queryError.error || queryError.message || 'The answer could not be submitted. Your draft is saved in this browser; try again.');
+        : serverMessage;
     questionFeedback.set(question.id, message);
   } finally {
     window.clearTimeout(timeout);
@@ -1227,9 +1230,10 @@ async function loadQuestions(backgroundRefresh = false) {
   questionController = controller;
   const timeout = window.setTimeout(() => controller.abort(), 10000);
   try {
-    const nextState = await request<ChallengeState>('/api/questions', { signal: controller.signal });
+    const rawState = await request<unknown>('/api/questions', { signal: controller.signal });
     if (generation !== questionRequestGeneration) return;
     if (controller.signal.aborted) throw new DOMException('Task loading timed out', 'AbortError');
+    const nextState = parseChallengeState(rawState);
     if (backgroundRefresh && JSON.stringify(nextState) === JSON.stringify(challengeState)) return;
     challengeState = nextState;
     questionsLoaded = true;
