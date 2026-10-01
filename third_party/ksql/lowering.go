@@ -144,13 +144,26 @@ func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 
 func (s *compileState) name(value *kql.NameExpression) boundExpr {
 	parts := splitName(unquoteKQL(value.Name))
+	if len(parts) > 1 {
+		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok {
+			if bound.Type != TypeDynamic && bound.Type != TypeUnknown {
+				s.bindError("KQLB0403", value.Span, "expression.name", parts[0]+" is not dynamic")
+				return boundExpr{}
+			}
+			expr := bound.SQL
+			for _, property := range parts[1:] {
+				expr = &sqlast.Index{Value: expr, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: property}}
+			}
+			return boundExpr{SQL: expr, Type: TypeDynamic, Name: strings.Join(parts, "_")}
+		}
+	}
 	if len(parts) > 1 && s.qualifiers != nil {
 		if scope, ok := s.qualifiers[strings.ToLower(parts[0])]; ok {
 			return s.qualifiedName(value, scope, parts[1:])
 		}
 	}
 	if !s.input.Unknown {
-		if column, _, ok, ambiguous := s.input.Lookup(value.Name); ambiguous {
+		if column, _, ok, ambiguous := s.input.Lookup(unquoteKQL(value.Name)); ambiguous {
 			s.bindError("KQLB0402", value.Span, "expression.name", "ambiguous column "+value.Name)
 			return boundExpr{}
 		} else if ok {
@@ -169,7 +182,7 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 				for _, property := range parts[1:] {
 					expr = &sqlast.Index{Value: expr, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: property}}
 				}
-				return boundExpr{SQL: expr, Type: TypeDynamic, Name: parts[len(parts)-1]}
+				return boundExpr{SQL: expr, Type: TypeDynamic, Name: strings.Join(append([]string{column.Name}, parts[1:]...), "_")}
 			}
 		}
 		s.bindError("KQLB0401", value.Span, "expression.name", "unknown column "+value.Name)
@@ -207,7 +220,7 @@ func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationSc
 		for _, property := range parts[1:] {
 			expr = &sqlast.Index{Value: expr, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: property}}
 		}
-		return boundExpr{SQL: expr, Type: TypeDynamic, Name: parts[len(parts)-1]}
+		return boundExpr{SQL: expr, Type: TypeDynamic, Name: strings.Join(append([]string{column.Name}, parts[1:]...), "_")}
 	}
 	return boundExpr{SQL: expr, Type: column.Type, Name: column.Name}
 }
@@ -579,6 +592,31 @@ func (s *compileState) validateLimit(expression kql.Expression, operator kql.Ope
 
 func (s *compileState) bindError(code string, span kql.Span, feature, message string) {
 	s.diagnostics = append(s.diagnostics, Diagnostic{Code: code, Severity: SeverityError, Phase: PhaseBind, Message: message, Span: span, Feature: feature})
+}
+
+// Dynamic accessors compose the base expression's name with a literal
+// string/integer selector. Computed selectors have no inferred name.
+func indexedResultName(left, right string) string {
+	if strings.TrimSpace(left) != "" {
+		return left + "_" + right
+	}
+	return right
+}
+
+func literalIndexName(expression kql.Expression) string {
+	literal, ok := expression.(*kql.LiteralExpression)
+	if !ok {
+		return ""
+	}
+	if literal.Kind == kql.StringToken {
+		return stringLiteralValue(literal)
+	}
+	if literal.Kind == kql.NumberToken {
+		if value, err := strconv.ParseInt(literal.Text, 10, 64); err == nil {
+			return strconv.FormatInt(value, 10)
+		}
+	}
+	return ""
 }
 
 func inferredName(expression kql.Expression, boundName string) string {

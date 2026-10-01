@@ -446,6 +446,12 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 			if name == "" {
 				name = bound.Name
 			}
+			if name != "" && item.Alias == "" {
+				if _, identifier := item.Expr.(*sqlast.Identifier); !identifier {
+					item.Alias = name
+					items[len(items)-1].Alias = name
+				}
+			}
 			if name == "" {
 				name = fmt.Sprintf("Column%d", len(schema.Columns)+1)
 				item.Alias = name
@@ -474,7 +480,8 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 	}
 	switch value := expression.(type) {
 	case *kql.NameExpression:
-		if bound, ok := s.scalarLets[strings.ToLower(value.Name)]; ok {
+		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok {
+			bound.Name = unquoteKQL(value.Name)
 			return bound
 		}
 		return s.name(value)
@@ -530,7 +537,7 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 		if base.Type != TypeDynamic && base.Type != TypeUnknown {
 			s.bindError("KQLB0405", value.Span, "expression.index", "property access requires a dynamic value")
 		}
-		return boundExpr{SQL: &sqlast.Index{Value: base.SQL, Index: index.SQL, Numeric: index.Type == TypeInt || index.Type == TypeLong || index.Type == TypeBool}, Type: TypeDynamic}
+		return boundExpr{SQL: &sqlast.Index{Value: base.SQL, Index: index.SQL, Numeric: index.Type == TypeInt || index.Type == TypeLong || index.Type == TypeBool}, Type: TypeDynamic, Name: indexedResultName(inferredName(value.Value, base.Name), literalIndexName(value.Index))}
 	case *kql.NamedExpression:
 		return s.expression(value.Value)
 	case *kql.ListExpression:

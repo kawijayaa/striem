@@ -44,6 +44,10 @@ func TestParseJSONContracts(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ query, want string }{
+		{`Events | where n == 1 | project RawData.user,items[0] | project RawData_user,items_0`, `[[alice 1]]`},
+		{`let d=dynamic({"a":{"b":61}}); print d.a.b | project d_a_b`, `[[61]]`},
+		{`print d=dynamic({"a.b":67}) | project d.['a.b'] | project ['d_a.b']`, `[[67]]`},
+
 		{`print d=dynamic([11,22,33])[toint("-1")]`, `[[33]]`},
 		{`Events | where n == 1 | project d=items[-n],first=items[false],last=items[true]`, `[[2 1 2]]`},
 		{`print d=parse_json('[{"x":1},{"x":9007199254740993}]')[(-1)].x`, `[[9007199254740993]]`},
