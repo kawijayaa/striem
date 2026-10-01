@@ -570,7 +570,6 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("ipv4_is_private", ksql.SQLFunction("kql_ipv4_is_private")),
 		ksql.WithFunction("ipv4_is_in_range", ksql.SQLFunction("kql_ipv4_is_in_range")),
 		ksql.WithFunction("extract", ksql.SQLFunction("kql_extract")),
-		ksql.WithFunction("trim", ksql.SQLFunction("kql_trim")),
 		ksql.WithFunction("isnull", nullFunction(false)),
 		ksql.WithFunction("isnotnull", nullFunction(true)),
 		ksql.WithFunction("isempty", emptyFunction(false)),

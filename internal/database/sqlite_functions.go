@@ -423,17 +423,6 @@ func kqlExtract(pattern string, capture int64, value string) (string, error) {
 	return matches[capture], nil
 }
 
-func kqlTrim(pattern, value string) (string, error) {
-	if len(pattern) > 512 {
-		return "", fmt.Errorf("trim pattern exceeds 512 characters")
-	}
-	expression, err := compileRegexp("^(?:" + pattern + ")+|(?:" + pattern + ")+$")
-	if err != nil {
-		return "", err
-	}
-	return expression.ReplaceAllString(value, ""), nil
-}
-
 func kqlParse(patternValue, typesValue, sourceValue any) any {
 	pattern, patternOK := patternValue.(string)
 	types, typesOK := typesValue.(string)

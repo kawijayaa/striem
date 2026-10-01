@@ -38,6 +38,30 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"trim", "trim_start", "trim_end"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 2 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 2 arguments", name)
+			}
+			for _, arg := range args {
+				if arg.Type != ksql.TypeString && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be strings", name)
+				}
+			}
+			pattern, ok := args[0].SQL.(*sqlast.Literal)
+			if !ok || pattern.Kind != sqlast.StringLiteral {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex must be a constant string", name)
+			}
+			if len(pattern.Value) > 512 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
+			}
+			if _, err := regexp.Compile(pattern.Value); err != nil {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_" + name, Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}}, nil
+		}))
+	}
 	options = append(options, ksql.WithTypedFunction("split", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) < 2 || len(args) > 3 {
 			return ksql.TypedExpression{}, fmt.Errorf("split requires 2 or 3 arguments")

@@ -171,7 +171,7 @@ func TestRegexpCacheIsSharedBoundedAndConcurrent(t *testing.T) {
 	if got := kqlParse(`^(parse)$`, "string", "parse"); got == nil {
 		t.Fatal("kqlParse() returned nil")
 	}
-	for _, pattern := range []string{`^regex$`, `^(extract)$`, `^(?:\s)+|(?:\s)+$`, `^(parse)$`} {
+	for _, pattern := range []string{`^regex$`, `^(extract)$`, `\A(?:\s)+|(?:\s)+\z`, `^(parse)$`} {
 		if !regexpCache.Contains(pattern) {
 			t.Errorf("cache does not contain %q", pattern)
 		}
