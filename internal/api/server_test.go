@@ -1224,3 +1224,19 @@ func TestProjectionWidthLimitThroughAPI(t *testing.T) {
 		t.Fatalf("boundary rows=%#v", rows)
 	}
 }
+
+func TestDynamicGroupingRejectedThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	for _, query := range []string{`print d=dynamic({"a":1}) | summarize n=count() by d`, `print d=dynamic([1]) | distinct d`, `print d=dynamic([1]) | distinct *`} {
+		response := queryAPI(t, server.URL, query)
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "dynamic column") {
+			t.Fatalf("status=%d body=%s", response.StatusCode, body)
+		}
+	}
+	rows := queryRows(t, server.URL, `print d=dynamic({"a":1}) | distinct tostring(d)`)
+	if len(rows) != 1 || rows[0]["d"] != `{"a":1}` {
+		t.Fatalf("cast rows=%#v", rows)
+	}
+}

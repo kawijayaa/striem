@@ -344,6 +344,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		spec := operator.Body.(kql.SummarizeSpec)
 		groups := s.expressions(spec.By)
 		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema, false)
+		if !s.checkNonDynamicColumns(groupSchema.Columns, spanOfExpressions(spec.By), feature) {
+			return Relation{}
+		}
 		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema, false)
 		groupSchema.Columns = append(groupSchema.Columns, aggregateSchema.Columns...)
 		if !s.checkProjectionWidth(len(groupSchema.Columns), operator.Span, feature) {
@@ -354,6 +357,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	case "distinct":
 		spec := operator.Body.(kql.ExpressionSpec)
 		items, schema := s.projectItems(spec.Expressions, false, input.Schema, false)
+		if !s.checkNonDynamicColumns(schema.Columns, spanOfExpressions(spec.Expressions), feature) {
+			return Relation{}
+		}
 		return Relation{Query: &sqlast.Select{Distinct: true, From: from, Projections: items}, Schema: schema}
 	case "getschema":
 		return s.getSchema(input.Schema, operator)
@@ -403,7 +409,21 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		if !s.validateLimit(spec.Count, operator) {
 			return Relation{}
 		}
+		name, isName := spec.Column.(*kql.NameExpression)
+		if !isName {
+			s.bindError("KQLB0304", spec.Column.NodeSpan(), feature, "sample-distinct requires a column reference")
+			return Relation{}
+		}
+		logicalName := unquoteKQL(name.Name)
+		_, scalarLet := s.scalarLets[strings.ToLower(logicalName)]
+		if !s.hasInputName(logicalName) && (!input.Schema.Unknown || scalarLet) {
+			s.bindError("KQLB0304", spec.Column.NodeSpan(), feature, "sample-distinct requires a column reference")
+			return Relation{}
+		}
 		column := s.expression(spec.Column)
+		if !s.checkNonDynamicColumns([]Column{{Name: column.Name, Type: column.Type}}, spec.Column.NodeSpan(), feature) {
+			return Relation{}
+		}
 		inner := &sqlast.Select{Distinct: true, From: from, Projections: []sqlast.SelectItem{{Expr: column.SQL}}}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Subquery{Query: inner, Alias: s.nextAlias()}, OrderBy: []sqlast.Order{{Expr: &sqlast.Random{}}}, Limit: s.expression(spec.Count).SQL}, Schema: Schema{Columns: []Column{{Name: column.Name, Type: column.Type}}}}
 	case "serialize":

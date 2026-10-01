@@ -606,6 +606,17 @@ func (s *compileState) validateUnique(columns []Column, span kql.Span, feature s
 	return valid
 }
 
+func (s *compileState) checkNonDynamicColumns(columns []Column, span kql.Span, feature string) bool {
+	valid := true
+	for _, column := range columns {
+		if column.Type == TypeDynamic {
+			s.bindError("KQLB0303", span, feature, "dynamic column "+column.Name+" requires an explicit scalar cast for "+strings.TrimPrefix(feature, "operator."))
+			valid = false
+		}
+	}
+	return valid
+}
+
 func (s *compileState) checkProjectionWidth(count int, span kql.Span, feature string) bool {
 	limit := s.compiler.limits.MaxProjectionItems
 	if limit > 0 && count > limit {
