@@ -29,7 +29,7 @@ const logicalOperators = new Set([
 ]);
 const functions = new Set([
   'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
-  'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
+  'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
@@ -65,7 +65,7 @@ const functionCompletions = createCompletions('function', [
   ['tostring', 'Convert to string'], ['toint', 'Convert to integer'], ['tolong', 'Convert to long'],
   ['toreal', 'Convert to real'], ['todouble', 'Convert to double'],
   ['tolower', 'Lowercase text'], ['toupper', 'Uppercase text'], ['isnull', 'Test for null'],
-  ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'], ['dynamic', 'Construct a dynamic literal'],
+  ['isnotnull', 'Test for non-null'], ['parse_json', 'Parse JSON text'], ['parsejson', 'Parse JSON text'], ['todynamic', 'Parse JSON text as dynamic'], ['toobject', 'Parse JSON text as dynamic'], ['dynamic', 'Construct a dynamic literal'],
   ['isempty', 'Test for null or empty text'], ['isnotempty', 'Test for non-empty text'],
   ['array_length', 'Number of array elements'], ['array_concat', 'Concatenate dynamic arrays in order'], ['array_reverse', 'Reverse the elements of a dynamic array'], ['array_slice', 'Select an inclusive range of array elements'], ['bag_keys', 'Keys of a dynamic object'],
   ['array_iff', 'Choose array elements using Boolean or numeric conditions'], ['array_iif', 'Alias for conditional array selection'],

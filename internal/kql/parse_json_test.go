@@ -1,0 +1,61 @@
+package kql
+
+import (
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestParseJSONContracts(t *testing.T) {
+	db := featureDatabase(t)
+	for _, name := range []string{"parse_json", "parsejson", "todynamic", "toobject"} {
+		for _, tc := range []struct{ input, want string }{
+			{`"not json"`, `"not json"`},
+			{`"{bad}"`, `"{bad}"`},
+			{`""`, `""`},
+			{`"é\u0000"`, `"é\u0000"`},
+			{`" { \"long\" : 9223372036854775807 } "`, `{"long":9223372036854775807}`},
+			{`" [1, true, null] "`, `[1,true,null]`},
+			{`"\"hello\""`, `"hello"`},
+			{`"false"`, `false`},
+			{`"9223372036854775807"`, `9223372036854775807`},
+			{`dynamic([1,true,null])`, `[1,true,null]`},
+			{`dynamic("[1,2]")`, `"[1,2]"`},
+			{`dynamic("not json")`, `"not json"`},
+		} {
+			query := `print d=` + name + `(` + tc.input + `)`
+			t.Run(query, func(t *testing.T) {
+				if got := fmt.Sprint(featureRows(t, db, query)); got != "[["+tc.want+"]]" {
+					t.Fatalf("got %s want %s", got, tc.want)
+				}
+			})
+		}
+		for _, expr := range []string{name + `()`, name + `(1)`, name + `(true)`, name + `("a","b")`} {
+			if _, err := Compile(`print d=`+expr, time.Now()); err == nil {
+				t.Errorf("accepted %s", expr)
+			}
+		}
+		compiled, err := Compile(`print d=`+name+`("bad") | project renamed=d`, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := compiled.DynamicColumns["renamed"]; !ok {
+			t.Fatal("dynamic metadata lost")
+		}
+	}
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(context_custom_metrics:string)['{"duration":{"value":118.0,"count":5.0,"min":100.0,"max":150.0,"stdDev":0.0,"sampledValue":118.0,"sum":118.0}}'] | extend d=parse_json(context_custom_metrics) | project duration_value=d.duration.value,duration_min=d.duration.min`, `[[118 100]]`},
+		{`let d=@'{"a":123,"b":"{\"c\":456}"}'; print outer=parse_json(d) | extend inner=parse_json(tostring(outer.b)) | project d_b_c=inner.c`, `[[456]]`},
+		{`print d=parse_json("not json") | project missing=d.missing`, `[[<nil>]]`},
+		{`print d=parse_json("not json") | project d=parse_json(d)`, `[["not json"]]`},
+		{`Events | where n == 1 | project d=parse_json(RawData.user)`, `[[alice]]`},
+		{`Events | where n == 1 | project d=parse_json(RawData) | project user=d.user`, `[[alice]]`},
+		{`let input="not json"; print d=parse_json(input) | where isnotnull(d) | count`, `[[1]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+}

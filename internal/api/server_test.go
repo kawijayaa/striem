@@ -347,7 +347,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"tostring", "countif", "parse_json", "array_length"} {
+	for _, value := range []string{"tostring", "countif", "parse_json", "parsejson", "todynamic", "toobject", "array_length"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}
@@ -1141,5 +1141,31 @@ func TestJaccardThroughAPI(t *testing.T) {
 	rows := queryRows(t, server.URL, `print j=jaccard_index(dynamic([1,2,3]),dynamic([1,2,3,4])) | project renamed=j`)
 	if len(rows) != 1 || rows[0]["renamed"] != float64(0.75) {
 		t.Fatalf("real output=%#v", rows)
+	}
+}
+
+func TestParseJSONThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print invalid=parse_json("{bad}"),number=parse_json("9223372036854775807"),b=parse_json("false"),a=todynamic("[1,null]"),s=toobject("\"hello\"")`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	row := result.Rows[0]
+	if row["invalid"] != "{bad}" || row["number"] != json.Number("9223372036854775807") || row["b"] != false || row["s"] != "hello" {
+		t.Fatalf("dynamic scalar values=%#v", row)
+	}
+	values, ok := row["a"].([]any)
+	if !ok || len(values) != 2 || values[0] != json.Number("1") || values[1] != nil {
+		t.Fatalf("array=%#v", row)
 	}
 }
