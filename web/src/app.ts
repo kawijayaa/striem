@@ -390,11 +390,22 @@ function clearSelectedResultValue(): void {
 }
 
 function focusResultCell(row: number, column: number): void {
+  if (column === -1) {
+    focusResultRowAction(row);
+    return;
+  }
   const cell = document.querySelector<HTMLTableCellElement>(`.result-navigation-cell[data-result-row="${row}"][data-result-column-index="${column}"]`);
   if (!cell) return;
   const target = cell.querySelector<HTMLButtonElement>('button') ?? cell;
   target.tabIndex = 0;
   target.focus();
+}
+
+function focusResultRowAction(row: number): void {
+  const action = document.querySelector<HTMLButtonElement>(`.result-row-action[data-result-row="${row}"]`);
+  if (!action) return;
+  action.tabIndex = 0;
+  action.focus();
 }
 
 function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): HTMLElement {
@@ -523,9 +534,34 @@ function renderResults(result: QueryResult, resetSort = true): void {
     tr.addEventListener('click', selectRow);
     const action = document.createElement('td');
     action.className = 'row-action';
-    const view = createRowAction('View event details', 'M2.5 3.5h11v9h-11zM5 6h6M5 8.5h6M5 11h3', () => showRaw(row));
+    const view = createRowAction(`View event details for row ${rowIndex + 1}`, 'M2.5 3.5h11v9h-11zM5 6h6M5 8.5h6M5 11h3', () => {
+      clearSelectedResultValue();
+      showRaw(row);
+    });
     view.classList.add('result-row-action');
+    view.dataset.resultRow = String(rowIndex);
     view.tabIndex = rowIndex === 0 ? 0 : -1;
+    view.addEventListener('focus', () => {
+      document.querySelectorAll<HTMLButtonElement>('.result-row-action').forEach(candidate => {
+        candidate.tabIndex = candidate === view ? 0 : -1;
+      });
+      // Mouse focus happens before the click: hiding the toolbar then would
+      // move the button out from under the pointer and lose that click.
+      if (view.matches(':focus-visible')) clearSelectedResultValue();
+      selectRow();
+    });
+    view.addEventListener('keydown', event => {
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        focusResultCell(rowIndex, 0);
+        return;
+      }
+      const direction = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+      if (!direction && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault();
+      const nextRow = event.key === 'Home' ? 0 : event.key === 'End' ? result.rows.length - 1 : rowIndex + direction;
+      focusResultRowAction(nextRow);
+    });
     action.append(view);
     tr.append(action);
     result.columns.forEach((column, columnIndex) => {
@@ -541,9 +577,12 @@ function renderResults(result: QueryResult, resetSort = true): void {
         dynamic.setAttribute('aria-label', `Open ${column} JSON`);
         dynamic.tabIndex = firstFocusableValue ? 0 : -1;
         firstFocusableValue = false;
-        dynamic.addEventListener('focus', clearSelectedResultValue);
+        dynamic.addEventListener('focus', () => {
+          if (dynamic.matches(':focus-visible')) clearSelectedResultValue();
+        });
         dynamic.addEventListener('click', event => {
           event.stopPropagation();
+          clearSelectedResultValue();
           selectRow();
           showRaw(value);
         });
@@ -1355,29 +1394,6 @@ $('#empty-results-action').addEventListener('click', event => {
     return;
   }
   void runQuery();
-});
-$('#result-body').addEventListener('keydown', event => {
-  if (!(event.target instanceof HTMLButtonElement) || !event.target.classList.contains('result-row-action')) return;
-  const row = event.target.closest('tr');
-  if (!row) return;
-  const actions = Array.from(row.querySelectorAll<HTMLButtonElement>('.result-row-action'));
-  const actionIndex = actions.indexOf(event.target);
-  let target: HTMLButtonElement | undefined;
-  if (event.key === 'ArrowLeft') target = actions[Math.max(0, actionIndex - 1)];
-  if (event.key === 'ArrowRight') target = actions[Math.min(actions.length - 1, actionIndex + 1)];
-  if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Home' || event.key === 'End') {
-    const rows = Array.from($('#result-body').querySelectorAll('tr'));
-    const rowIndex = rows.indexOf(row);
-    const targetRow = event.key === 'Home' ? rows[0]
-      : event.key === 'End' ? rows.at(-1)
-        : rows[rowIndex + (event.key === 'ArrowDown' ? 1 : -1)];
-    target = targetRow?.querySelectorAll<HTMLButtonElement>('.result-row-action')[actionIndex];
-  }
-  if (!target) return;
-  event.preventDefault();
-  document.querySelectorAll<HTMLButtonElement>('.result-row-action').forEach(button => { button.tabIndex = -1; });
-  target.tabIndex = 0;
-  target.focus();
 });
 $('#save-query').addEventListener('click', saveCurrentQuery);
 $('#share-query').addEventListener('click', shareCurrentQuery);

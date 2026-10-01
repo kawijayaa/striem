@@ -101,6 +101,46 @@ test('result keyboard navigation crosses JSON columns and preserves dialog focus
   await rows.last().locator('[data-result-column-index="2"]').click();
   await expect(rows.last().locator('[data-result-column-index="2"]')).toHaveAttribute('tabindex', '0');
   await expect(json).toHaveAttribute('tabindex', '-1');
+  await json.click();
+  await expect(page.locator('#raw-dialog')).toBeVisible();
+  await expect(page.locator('#raw-json')).toContainText('logout');
+});
+
+test('row details are keyboard accessible across all result rows', async ({ page }) => {
+  await open(page, 'Telemetry | project host,score | order by score asc');
+  await run(page, 3);
+  const rows = page.locator('#result-body tr');
+  const actions = rows.locator('.result-row-action');
+  await actions.first().focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(actions.nth(1)).toBeFocused();
+  await expect(rows.nth(1)).toHaveClass('selected');
+  await expect(actions.first()).toHaveAttribute('tabindex', '-1');
+  await expect(actions.nth(1)).toHaveAttribute('tabindex', '0');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#raw-dialog')).toBeVisible();
+  await expect(page.locator('#raw-json')).toContainText('"host": "gamma"');
+  await page.keyboard.press('Escape');
+  await expect(actions.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(rows.nth(1).locator('[data-result-column-index="0"]')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(actions.nth(1)).toBeFocused();
+  await expect(page.locator('#result-value-actions')).toBeHidden();
+  await page.keyboard.press('End');
+  await expect(actions.last()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(actions.last()).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(actions.nth(1)).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(actions.first()).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(actions.first()).toBeFocused();
+  await rows.first().locator('[data-result-column-index="0"]').click();
+  await actions.nth(1).click();
+  await expect(page.locator('#raw-dialog')).toBeVisible();
+  await expect(page.locator('#raw-json')).toContainText('"host": "gamma"');
 });
 
 test('copy result values retains numeric text under a non-English locale', async ({ browser }) => {
