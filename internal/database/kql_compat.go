@@ -18,6 +18,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_substring": kqlSubstring, "kql_strlen": kqlStringLength,
 		"kql_replace_string":  kqlReplaceString,
 		"kql_replace_strings": kqlReplaceStrings,
+		"kql_replace_regex":   kqlReplaceRegex,
 		"kql_scalar_text":     kqlScalarText,
 		"kql_indexof":         kqlIndexOf,
 		"kql_tolower":         func(value any) any { return kqlCase(value, false) },

@@ -19,7 +19,7 @@ func TestLiteralReplacement(t *testing.T) {
 		{`replace_string("ABC","a","X")`, `[[ABC]]`},
 		{`replace_string("abc","","X")`, `[[abc]]`},
 		{`replace_string("abc","b","")`, `[[ac]]`},
-		{`replace(user,"li","X")`, `[[aXce]]`},
+		{`replace("li","X",user)`, `[[aXce]]`},
 	} {
 		t.Run(tc.expression, func(t *testing.T) {
 			if got := fmt.Sprint(featureRows(t, db, `Events | where n==1 | project `+tc.expression)); got != tc.want {

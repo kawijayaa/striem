@@ -2,6 +2,7 @@ package kql
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -54,7 +55,7 @@ func compatibilityOptions() []ksql.Option {
 		}
 		return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_strings", Args: values}}, nil
 	}))
-	for _, name := range []string{"replace_string", "replace"} {
+	for _, name := range []string{"replace_string"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(args) != 3 {
@@ -68,6 +69,39 @@ func compatibilityOptions() []ksql.Option {
 				values[i] = arg.SQL
 			}
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_string", Args: values}}, nil
+		}))
+	}
+	for _, name := range []string{"replace_regex", "replace"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 3 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 3 arguments", name)
+			}
+			if name == "replace" {
+				args = []ksql.TypedExpression{args[2], args[0], args[1]}
+			}
+			values := make([]sqlast.Expr, 3)
+			for i, arg := range args {
+				if arg.Type != ksql.TypeString && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be strings", name)
+				}
+				values[i] = arg.SQL
+				if i > 0 {
+					literal, ok := arg.SQL.(*sqlast.Literal)
+					if !ok || literal.Kind != sqlast.StringLiteral {
+						return ksql.TypedExpression{}, fmt.Errorf("%s regex and rewrite must be constant strings", name)
+					}
+					if i == 1 {
+						if len(literal.Value) > 512 {
+							return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
+						}
+						if _, err := regexp.Compile(literal.Value); err != nil {
+							return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
+						}
+					}
+				}
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_regex", Args: values}}, nil
 		}))
 	}
 	options = append(options, ksql.WithTypedFunction("indexof", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
