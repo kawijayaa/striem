@@ -166,7 +166,7 @@ func compatibilityOptions() []ksql.Option {
 		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_array_slice", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}}, nil
 	}))
 
-	for _, name := range []string{"array_concat", "array_reverse", "zip"} {
+	for _, name := range []string{"array_concat", "array_reverse", "zip", "set_union", "set_intersect", "set_difference"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			maximum := 64
@@ -174,7 +174,7 @@ func compatibilityOptions() []ksql.Option {
 				maximum = 1
 			}
 			minimum := 1
-			if name == "zip" {
+			if name == "zip" || strings.HasPrefix(name, "set_") {
 				minimum = 2
 			}
 			if len(args) < minimum || len(args) > maximum {

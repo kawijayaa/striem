@@ -1103,3 +1103,35 @@ func TestBagZipThroughAPI(t *testing.T) {
 		t.Fatalf("bag=%#v", result)
 	}
 }
+
+func TestSetOperationsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=set_union(pack_array(true,9223372036854775807),pack_array(true,bag_pack("x",false))),b=set_intersect(dynamic([1,2]),dynamic([2,3])),c=set_difference(dynamic([1,2]),dynamic([2]))`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := result.Rows[0]["a"].([]any)
+	if !ok || len(a) != 3 || a[0] != true || a[1] != json.Number("9223372036854775807") {
+		t.Fatalf("union=%#v", result)
+	}
+	bag, ok := a[2].(map[string]any)
+	if !ok || bag["x"] != false {
+		t.Fatalf("nested value=%#v", a)
+	}
+	for key, want := range map[string]json.Number{"b": "2", "c": "1"} {
+		values, ok := result.Rows[0][key].([]any)
+		if !ok || len(values) != 1 || values[0] != want {
+			t.Fatalf("%s=%#v", key, result)
+		}
+	}
+}

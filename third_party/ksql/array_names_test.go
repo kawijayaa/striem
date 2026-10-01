@@ -98,3 +98,18 @@ func TestBagZipUnnamedResultColumn(t *testing.T) {
 		t.Fatalf("result=%#v want=%#v", result, want)
 	}
 }
+
+func TestSetUnnamedResultColumns(t *testing.T) {
+	options := []ksql.Option{}
+	for _, name := range []string{"set_union", "set_intersect", "set_difference"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			return ksql.TypedExpression{SQL: &sqlast.Call{Name: name, Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}, Type: ksql.TypeDynamic}, nil
+		}))
+	}
+	result := ksql.New(dialect.SQLite(), options...).Compile(`print set_union(dynamic([]),dynamic([])),set_intersect(dynamic([]),dynamic([])),set_difference(dynamic([]),dynamic([]))`)
+	want := []ksql.Column{{Name: "Column1", Type: ksql.TypeDynamic}, {Name: "Column2", Type: ksql.TypeDynamic}, {Name: "Column3", Type: ksql.TypeDynamic}}
+	if !result.OK() || !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("result=%#v want=%#v", result, want)
+	}
+}
