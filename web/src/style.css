@@ -530,6 +530,14 @@
 
 .results-title { color: var(--paper); font-size: 13px; font-weight: 600; }
 
+.results-notice {
+  flex: none;
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .results-content {
   position: relative;
   display: flex;

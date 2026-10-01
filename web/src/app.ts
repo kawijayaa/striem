@@ -90,6 +90,8 @@ let savedQueries = readSavedQueries(browserStorage);
 let queryLibraryView: 'saved' | 'history' = 'saved';
 let sidePanelView: 'fields' | 'questions' | 'hunts' = 'fields';
 let lastResult: QueryResult | null = null;
+let lastResultQuery: string | null = null;
+let queryOutcome: 'idle' | 'success' | 'failed' | 'canceled' = 'idle';
 let resultSort: ResultSort = { column: null, direction: 'asc' };
 const resultColumnWidths = new Map<string, number>();
 let selectedResultKey: string | null = null;
@@ -137,6 +139,8 @@ const queryEditor = createQueryEditor({
   getFieldCompletions: () => fieldCompletions,
   onDocumentChange: () => {
     queryController?.abort();
+    queryOutcome = 'idle';
+    updateResultNotice();
     syncActiveTable();
     $('#query-error').classList.add('hidden');
     scheduleQueryValidation(editor.state.doc.toString());
@@ -168,6 +172,19 @@ function cancelQueryValidation(): void {
   validationController?.abort();
   validationController = null;
   validationGeneration++;
+}
+
+function updateResultNotice(): void {
+  const notice = $('#results-notice');
+  let message = '';
+  if (lastResult !== null) {
+    if (queryRunning) message = 'Query running. Showing results from the last successful run.';
+    else if (queryOutcome === 'failed') message = 'Query failed. Showing results from the last successful run.';
+    else if (queryOutcome === 'canceled') message = 'Query canceled. Showing results from the last successful run.';
+    else if (editor.state.doc.toString() !== lastResultQuery) message = 'Query changed. Run it to update these results.';
+  }
+  notice.textContent = message;
+  notice.classList.toggle('hidden', !message);
 }
 
 function scheduleQueryValidation(query: string): void {
@@ -218,6 +235,7 @@ async function runQuery() {
   $('#query-stats').textContent = 'Running KQL query';
   $('#results-content').classList.toggle('query-stale', lastResult !== null);
   $('#results-content').setAttribute('aria-busy', 'true');
+  updateResultNotice();
   recordQuery(query);
   const started = performance.now();
   const elapsedTimer = window.setInterval(() => {
@@ -231,16 +249,23 @@ async function runQuery() {
       body: JSON.stringify({ query }),
       signal: controller.signal,
     });
+    if (controller.signal.aborted || editor.state.doc.toString() !== query) {
+      throw new DOMException('Query canceled', 'AbortError');
+    }
+    lastResultQuery = query;
+    queryOutcome = 'success';
     renderResults(result);
     if (window.matchMedia('(max-width: 900px)').matches) {
       mobileWorkspace.show('results');
     }
     $('#query-stats').textContent = `${formatCount(result.rowCount, 'row')} · ${result.durationMs} ms`;
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      queryOutcome = 'canceled';
       $('#query-stats').textContent = 'Query canceled';
       return;
     }
+    queryOutcome = 'failed';
     const queryError = asQueryError(error);
     const position = queryError.position ? `Line ${queryError.position.line}, column ${queryError.position.column}: ` : '';
     const serverMessage = queryError.error || queryError.message;
@@ -263,6 +288,7 @@ async function runQuery() {
     $('#mobile-run-label').textContent = 'Run';
     $('#results-content').classList.remove('query-stale');
     $('#results-content').removeAttribute('aria-busy');
+    updateResultNotice();
   }
 }
 

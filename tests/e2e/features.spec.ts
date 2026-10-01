@@ -168,6 +168,80 @@ test('query diagnostics, empty results, keyboard shortcuts, Vim toggle and cance
   await expect(page.locator('#query-stats')).toHaveText('Query canceled');
 });
 
+test('results distinguish edited queries, failed runs, cancellation and successful refresh', async ({ page }) => {
+  const original = 'Telemetry | project host,score | order by score asc';
+  const changed = 'Telemetry | where score>1 | project host,score | order by score asc';
+  await open(page, original);
+  await run(page, 3);
+  const notice = page.locator('#results-notice');
+  await expect(notice).toBeHidden();
+  await edit(page, changed);
+  await expect(notice).toHaveText('Query changed. Run it to update these results.');
+  await expect(page.locator('#result-body tr')).toHaveCount(3);
+  await edit(page, original);
+  await expect(notice).toBeHidden();
+  await edit(page, changed);
+  await page.route('**/api/query', route => route.fulfill({
+    status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Temporary query failure' }),
+  }));
+  await page.locator('#run-query').click();
+  await expect(page.locator('#query-stats')).toHaveText('Query failed');
+  await expect(notice).toHaveText('Query failed. Showing results from the last successful run.');
+  await expect(page.locator('#result-body tr')).toHaveCount(3);
+  await page.unroute('**/api/query');
+  let release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/query', async route => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.locator('#run-query').click();
+    await expect(notice).toHaveText('Query running. Showing results from the last successful run.');
+    await page.locator('#run-query').click();
+    await expect(page.locator('#query-stats')).toHaveText('Query canceled');
+    await expect(notice).toHaveText('Query canceled. Showing results from the last successful run.');
+    await expect(page.locator('#result-body tr')).toHaveCount(3);
+  } finally {
+    release();
+    await page.unroute('**/api/query');
+  }
+  await run(page, 2);
+  await expect(notice).toBeHidden();
+  await expect(page.locator('#result-body tr')).toHaveCount(2);
+});
+
+test('mobile editing cancels a run and labels the retained results', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, 'Telemetry | project host,score');
+  await run(page, 3, true);
+  await page.locator('#mobile-query-tab').click();
+  let release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/query', async route => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.locator('#mobile-run-query').click();
+    await expect(page.locator('#mobile-run-label')).toHaveText('Cancel');
+    await edit(page, 'Telemetry | where score>2 | project host,score');
+    await expect(page.locator('#query-stats')).toHaveText('Query canceled');
+    await page.locator('#mobile-results-tab').click();
+    await expect(page.locator('#results-notice')).toBeVisible();
+    await expect(page.locator('#results-notice')).toHaveText('Query canceled. Showing results from the last successful run.');
+    await expect(page.locator('.mobile-result-card')).toHaveCount(3);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    release();
+    await page.unroute('**/api/query');
+  }
+  await page.locator('#mobile-query-tab').click();
+  await run(page, 1, true);
+  await expect(page.locator('#results-notice')).toBeHidden();
+  await expect(page.locator('.mobile-result-card')).toHaveCount(1);
+});
+
 test('saved hunts persist, reopen, remove and undo; history clears; query links round-trip', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await open(page, 'Telemetry | count');
