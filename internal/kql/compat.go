@@ -36,6 +36,23 @@ func compatibilityOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_" + strings.TrimSuffix(name, "if"), Args: []sqlast.Expr{value}}}, nil
 		}))
 	}
+
+	for _, name := range []string{"replace_string", "replace"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 3 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 3 arguments", name)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if arg.Type != ksql.TypeString && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be strings", name)
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_string", Args: values}}, nil
+		}))
+	}
 	for _, name := range []string{"substring", "strlen"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

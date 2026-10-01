@@ -1,6 +1,10 @@
 package database
 
-import "unicode/utf8"
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
 
 // KQL indexes characters from zero; SQLite substr indexes from one and its
 // string functions stop at embedded NUL characters.
@@ -55,4 +59,37 @@ func kqlStringLength(value any) any {
 		return nil
 	}
 	return int64(utf8.RuneCountInString(text))
+}
+
+// Bound expanded results before allocating. SQLite's replace treats a search
+// string beginning with NUL as empty; Go's byte matching preserves that lookup.
+const maxReplacementBytes = 4 << 20
+
+func kqlReplaceString(value, lookup, rewrite any) (any, error) {
+	text, ok := value.(string)
+	if !ok {
+		return nil, nil
+	}
+	search, ok := lookup.(string)
+	if !ok {
+		return nil, nil
+	}
+	replacement, ok := rewrite.(string)
+	if !ok {
+		return nil, nil
+	}
+	// An empty lookup leaves the original text unchanged.
+	if search == "" {
+		return text, nil
+	}
+	count := strings.Count(text, search)
+	if count == 0 {
+		return text, nil
+	}
+	// Subtraction cannot overflow: non-overlapping matches consume at most text.
+	remaining := len(text) - count*len(search)
+	if remaining > maxReplacementBytes || len(replacement) > (maxReplacementBytes-remaining)/count {
+		return nil, fmt.Errorf("replace_string result exceeds %d bytes", maxReplacementBytes)
+	}
+	return strings.ReplaceAll(text, search, replacement), nil
 }

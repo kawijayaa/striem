@@ -597,7 +597,6 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("split", ksql.SQLFunction("kql_split")),
 		ksql.WithFunction("extract", ksql.SQLFunction("kql_extract")),
 		ksql.WithFunction("trim", ksql.SQLFunction("kql_trim")),
-		ksql.WithFunction("replace_string", ksql.SQLFunction("replace")),
 		ksql.WithFunction("isnull", nullFunction(false)),
 		ksql.WithFunction("isnotnull", nullFunction(true)),
 		ksql.WithFunction("isempty", emptyFunction(false)),
