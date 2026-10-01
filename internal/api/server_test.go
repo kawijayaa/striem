@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1203,5 +1204,23 @@ func TestUnnamedExtendThroughAPI(t *testing.T) {
 	object, ok := rows[0]["Column2"].(map[string]any)
 	if !ok || object["a"] != float64(101) {
 		t.Fatalf("dynamic column=%#v", rows)
+	}
+}
+
+func TestProjectionWidthLimitThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	columns := make([]string, 33)
+	for i := range columns {
+		columns[i] = fmt.Sprintf("c%d=%d", i, i)
+	}
+	response := queryAPI(t, server.URL, "print "+strings.Join(columns, ","))
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "MaxProjectionItems") {
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	rows := queryRows(t, server.URL, "print "+strings.Join(columns[:32], ","))
+	if len(rows) != 1 || len(rows[0]) != 32 || rows[0]["c31"] != float64(31) {
+		t.Fatalf("boundary rows=%#v", rows)
 	}
 }

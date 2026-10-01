@@ -320,6 +320,9 @@ func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions [
 			output.Columns = append(output.Columns, Column{Name: extension.name, Type: extension.value.Type})
 		}
 	}
+	if !s.checkProjectionWidth(len(output.Columns), operator.Span, "operator.extend") {
+		return Relation{}
+	}
 	items := make([]sqlast.SelectItem, 0, len(output.Columns))
 	for _, column := range output.Columns {
 		expr := s.columnIdentifier(column.Name)
@@ -601,6 +604,15 @@ func (s *compileState) validateUnique(columns []Column, span kql.Span, feature s
 		seen[key] = struct{}{}
 	}
 	return valid
+}
+
+func (s *compileState) checkProjectionWidth(count int, span kql.Span, feature string) bool {
+	limit := s.compiler.limits.MaxProjectionItems
+	if limit > 0 && count > limit {
+		s.bindError("KQLB0344", span, feature, fmt.Sprintf("output projection exceeds MaxProjectionItems (%d)", limit))
+		return false
+	}
+	return true
 }
 
 func (s *compileState) checkProjectionLimit(expressions []kql.Expression, operator kql.Operator) bool {

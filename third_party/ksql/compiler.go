@@ -346,6 +346,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema, false)
 		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema, false)
 		groupSchema.Columns = append(groupSchema.Columns, aggregateSchema.Columns...)
+		if !s.checkProjectionWidth(len(groupSchema.Columns), operator.Span, feature) {
+			return Relation{}
+		}
 		s.validateUnique(groupSchema.Columns, operator.Span, feature)
 		return Relation{Query: &sqlast.Select{From: from, Projections: append(groupItems, aggregateItems...), GroupBy: groups}, Schema: groupSchema}
 	case "distinct":
@@ -413,6 +416,10 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 }
 
 func (s *compileState) projectItems(expressions []kql.Expression, inferAlias bool, input Schema, printStyle bool) ([]sqlast.SelectItem, Schema) {
+	span := spanOfExpressions(expressions)
+	if !s.checkProjectionWidth(len(expressions), span, "expression.projection") {
+		return nil, Schema{}
+	}
 	items := make([]sqlast.SelectItem, 0, len(expressions))
 	schema := Schema{}
 	for expressionIndex, expression := range expressions {
@@ -421,6 +428,10 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 				items = append(items, sqlast.SelectItem{Expr: &sqlast.Star{}})
 				schema.Unknown = true
 				continue
+			}
+			if maximum := s.compiler.limits.MaxProjectionItems; maximum > 0 && len(input.Columns) > maximum-len(schema.Columns) {
+				s.bindError("KQLB0344", expression.NodeSpan(), "expression.projection", fmt.Sprintf("output projection exceeds MaxProjectionItems (%d)", maximum))
+				return nil, Schema{}
 			}
 			for _, column := range input.Columns {
 				items = append(items, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{column.Name}}, Alias: column.Name})
@@ -445,6 +456,9 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 			}
 		}
 		if item.Expr != nil {
+			if !s.checkProjectionWidth(len(schema.Columns)+1, expression.NodeSpan(), "expression.projection") {
+				return nil, Schema{}
+			}
 			items = append(items, item)
 			name := item.Alias
 			if name == "" {
