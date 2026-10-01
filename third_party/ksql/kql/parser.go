@@ -114,8 +114,13 @@ func parseLet(tokens []Token) (Statement, []ParseError) {
 }
 
 func parsePipeline(tokens []Token) (*Pipeline, []ParseError) {
-	parts := splitTopLevel(tokens, "|")
 	pipeline := &Pipeline{Span: tokensSpan(tokens)}
+	var errs []ParseError
+	tokens, errs = flattenPipelineParentheses(tokens)
+	if len(errs) > 0 {
+		return pipeline, errs
+	}
+	parts := splitTopLevel(tokens, "|")
 	if len(parts) == 0 || len(parts[0]) == 0 {
 		return pipeline, []ParseError{{Code: "KQLP0201", Message: "missing pipeline source", Span: pipeline.Span}}
 	}
@@ -132,6 +137,55 @@ func parsePipeline(tokens []Token) (*Pipeline, []ParseError) {
 		pipeline.Operators = append(pipeline.Operators, op)
 	}
 	return pipeline, errs
+}
+
+// Parentheses around the initial tabular expression only group its operators;
+// their order is unchanged when the wrappers are removed. Find all leading
+// wrappers in one pass, avoiding recursion and repeated scans for deeply nested
+// pipelines. Parentheses inside scalar expressions and operator bodies remain.
+func flattenPipelineParentheses(tokens []Token) ([]Token, []ParseError) {
+	prefix := 0
+	for prefix < len(tokens) && tokens[prefix].Text == "(" {
+		prefix++
+	}
+	if prefix == 0 {
+		return tokens, nil
+	}
+	closes := make([]bool, len(tokens))
+	var stack []int
+	for i, token := range tokens {
+		switch token.Text {
+		case "(", "[", "{":
+			stack = append(stack, i)
+		case ")", "]", "}":
+			if len(stack) == 0 {
+				return tokens, []ParseError{{Code: "KQLP0203", Message: "unexpected closing delimiter", Span: token.Span}}
+			}
+			open := stack[len(stack)-1]
+			if (tokens[open].Text == "(" && token.Text != ")") || (tokens[open].Text == "[" && token.Text != "]") || (tokens[open].Text == "{" && token.Text != "}") {
+				return tokens, []ParseError{{Code: "KQLP0203", Message: "mismatched closing delimiter", Span: token.Span}}
+			}
+			stack = stack[:len(stack)-1]
+			if open < prefix {
+				// A grouped scalar with a suffix (accessor/arithmetic/etc.) must
+				// keep its parentheses for normal expression parsing.
+				if i+1 < len(tokens) && tokens[i+1].Text != "|" && tokens[i+1].Text != ")" {
+					return tokens, nil
+				}
+				closes[i] = true
+			}
+		}
+	}
+	if len(stack) > 0 {
+		return tokens, []ParseError{{Code: "KQLP0203", Message: "unterminated parenthesized pipeline", Span: tokens[stack[0]].Span}}
+	}
+	flat := make([]Token, 0, len(tokens)-2*prefix)
+	for i := prefix; i < len(tokens); i++ {
+		if !closes[i] {
+			flat = append(flat, tokens[i])
+		}
+	}
+	return flat, nil
 }
 
 func parseSource(tokens []Token) (Source, []ParseError) {

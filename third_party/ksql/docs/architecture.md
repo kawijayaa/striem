@@ -78,6 +78,12 @@ Duplicate declarations in the same scope are rejected. Name resolution remains
 case insensitive; nested scopes and complete Microsoft type semantics are not
 implemented.
 
+Parenthesized tabular sources are flattened into the same ordered pipeline as
+their ungrouped form. Leading wrappers are matched in one pass, with positioned
+errors for unbalanced or mismatched delimiters, avoiding recursion for deeply
+nested initial pipelines. Scalar expression parentheses remain in operator
+bodies and sources with scalar suffixes still use expression parsing.
+
 Compiler options and rule maps are fixed by `New`; per-compilation aliases,
 arguments, diagnostics, and bindings live in isolated state. A configured
 compiler is safe for concurrent use if its catalog is safe for concurrent
