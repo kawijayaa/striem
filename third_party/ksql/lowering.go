@@ -142,6 +142,39 @@ func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
 	return boundExpr{SQL: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: text}, Type: TypeLong}
 }
 
+// The default suffix is shared across binding the whole script. Only extend
+// includes the row scope when avoiding names that already bind.
+func (s *compileState) defaultColumnName(span kql.Span, includeRowScope bool) string {
+	for attempt := 0; attempt < 4096; attempt++ {
+		s.defaultColumn++
+		name := fmt.Sprintf("Column%d", s.defaultColumn)
+		key := strings.ToLower(name)
+		if _, found := s.scalarLets[key]; found {
+			continue
+		}
+		if _, found := s.tabularLets[key]; found {
+			continue
+		}
+		if _, found := s.compiler.functionRules[key]; found {
+			continue
+		}
+		if _, found := s.compiler.typedFunctionRules[key]; found {
+			continue
+		}
+		if includeRowScope && s.hasInputName(name) {
+			continue
+		}
+		if s.compiler.catalog != nil {
+			if _, found := s.compiler.catalog.ResolveTable(name); found {
+				continue
+			}
+		}
+		return name
+	}
+	s.bindError("KQLB0407", span, "expression.name", "generated column name search exceeds 4096 collisions")
+	return ""
+}
+
 func (s *compileState) hasInputName(name string) bool {
 	_, _, found, ambiguous := s.input.Lookup(name)
 	return found || ambiguous
@@ -264,8 +297,10 @@ func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions [
 			name = inferredName(valueExpression, value.Name)
 		}
 		if name == "" {
-			s.bindError("KQLB0404", expression.NodeSpan(), "operator.extend", "extend expression requires an output name")
-			continue
+			name = s.defaultColumnName(expression.NodeSpan(), true)
+			if name == "" {
+				continue
+			}
 		}
 		key := strings.ToLower(name)
 		if _, duplicate := seen[key]; duplicate {

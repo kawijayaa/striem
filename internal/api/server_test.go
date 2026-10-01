@@ -1193,3 +1193,15 @@ func TestPrintPositionalNamesThroughAPI(t *testing.T) {
 		t.Fatalf("rows=%#v", rows)
 	}
 }
+
+func TestUnnamedExtendThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print Column1=5 | extend parse_json('{"a":101}') | project Column1,Column2`)
+	if len(rows) != 1 || rows[0]["Column1"] != float64(5) {
+		t.Fatalf("rows=%#v", rows)
+	}
+	object, ok := rows[0]["Column2"].(map[string]any)
+	if !ok || object["a"] != float64(101) {
+		t.Fatalf("dynamic column=%#v", rows)
+	}
+}

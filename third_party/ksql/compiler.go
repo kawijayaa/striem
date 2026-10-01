@@ -136,16 +136,17 @@ func (c *Compiler) Compile(source string) Result {
 }
 
 type compileState struct {
-	compiler    *Compiler
-	scalarLets  map[string]boundExpr
-	tabularLets map[string]Relation
-	diagnostics []Diagnostic
-	features    []FeatureUse
-	args        []any
-	alias       int
-	qualifiers  map[string]relationScope
-	qualifier   string
-	input       Schema
+	compiler      *Compiler
+	scalarLets    map[string]boundExpr
+	tabularLets   map[string]Relation
+	diagnostics   []Diagnostic
+	features      []FeatureUse
+	args          []any
+	alias         int
+	defaultColumn int
+	qualifiers    map[string]relationScope
+	qualifier     string
+	input         Schema
 }
 
 type boundExpr struct {
@@ -456,7 +457,7 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 				}
 			}
 			if name == "" {
-				name = fmt.Sprintf("Column%d", len(schema.Columns)+1)
+				name = s.defaultColumnName(expression.NodeSpan(), false)
 				item.Alias = name
 				items[len(items)-1].Alias = name
 			}
