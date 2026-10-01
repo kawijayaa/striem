@@ -224,6 +224,11 @@ type ListExpression struct {
 	Items []Expression
 	Span  Span
 }
+type DynamicExpression struct {
+	Tokens []Token
+	Span   Span
+}
+
 type RawExpression struct {
 	Tokens []Token
 	Span   Span
@@ -239,6 +244,7 @@ func (*IndexExpression) expressionNode()   {}
 func (*NamedExpression) expressionNode()   {}
 func (*ListExpression) expressionNode()    {}
 func (*RawExpression) expressionNode()     {}
+func (*DynamicExpression) expressionNode() {}
 
 func (e *NameExpression) NodeSpan() Span    { return e.Span }
 func (e *LiteralExpression) NodeSpan() Span { return e.Span }
@@ -250,3 +256,4 @@ func (e *IndexExpression) NodeSpan() Span   { return e.Span }
 func (e *NamedExpression) NodeSpan() Span   { return e.Span }
 func (e *ListExpression) NodeSpan() Span    { return e.Span }
 func (e *RawExpression) NodeSpan() Span     { return e.Span }
+func (e *DynamicExpression) NodeSpan() Span { return e.Span }

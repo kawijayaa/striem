@@ -16,11 +16,12 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_bin": kqlBin, "kql_bin_datetime": kqlBinDatetime,
 		"kql_calendar":  kqlCalendar,
 		"kql_substring": kqlSubstring, "kql_strlen": kqlStringLength,
-		"kql_replace_string": kqlReplaceString,
-		"kql_toint":          func(value any) any { return kqlToInteger(value, 32) },
-		"kql_tolong":         func(value any) any { return kqlToInteger(value, 64) },
-		"kql_toreal":         kqlToReal,
-		"kql_tobool":         kqlToBool,
+		"kql_replace_string":  kqlReplaceString,
+		"kql_replace_strings": kqlReplaceStrings,
+		"kql_toint":           func(value any) any { return kqlToInteger(value, 32) },
+		"kql_tolong":          func(value any) any { return kqlToInteger(value, 64) },
+		"kql_toreal":          kqlToReal,
+		"kql_tobool":          kqlToBool,
 	} {
 		if err := c.RegisterFunc(name, function, true); err != nil {
 			return err

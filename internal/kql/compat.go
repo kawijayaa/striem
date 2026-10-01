@@ -37,6 +37,23 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("replace_strings", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 3 {
+			return ksql.TypedExpression{}, fmt.Errorf("replace_strings requires 3 arguments")
+		}
+		values := make([]sqlast.Expr, 3)
+		for i, arg := range args {
+			required := ksql.TypeDynamic
+			if i == 0 {
+				required = ksql.TypeString
+			}
+			if arg.Type != required && arg.Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("replace_strings requires string text and dynamic arrays")
+			}
+			values[i] = arg.SQL
+		}
+		return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_strings", Args: values}}, nil
+	}))
 	for _, name := range []string{"replace_string", "replace"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

@@ -1,6 +1,8 @@
 package ksql
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -479,6 +481,35 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 		return s.name(value)
 	case *kql.LiteralExpression:
 		return s.literal(value)
+	case *kql.DynamicExpression:
+		var text strings.Builder
+		for i, token := range value.Tokens {
+			if token.Kind == kql.StringToken {
+				encoded, _ := json.Marshal(unquoteKQL(token.Text))
+				text.Write(encoded)
+			} else {
+				text.WriteString(token.Text)
+			}
+			// JSON signs must directly precede their number. Keep other token
+			// boundaries so malformed adjacent scalars cannot become a valid value.
+			sign := token.Text == "-" && i+1 < len(value.Tokens) && value.Tokens[i+1].Kind == kql.NumberToken
+			if !sign {
+				text.WriteByte(' ')
+			}
+		}
+		data := strings.TrimSpace(text.String())
+		if !json.Valid([]byte(data)) {
+			s.bindError("KQLB0407", value.Span, "expression.dynamic", "dynamic literal must contain a valid JSON constant; typed constants are not yet supported")
+			return boundExpr{}
+		}
+		var compact bytes.Buffer
+		_ = json.Compact(&compact, []byte(data))
+		expr := s.bind(compact.String())
+		if data == "null" {
+			expr = &sqlast.Literal{Kind: sqlast.NullLiteral}
+		}
+		return boundExpr{SQL: expr, Type: TypeDynamic}
+
 	case *kql.StarExpression:
 		return boundExpr{SQL: &sqlast.Star{}, Type: TypeUnknown, Name: "*"}
 	case *kql.UnaryExpression:

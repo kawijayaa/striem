@@ -36,3 +36,32 @@ func TestLiteralReplacement(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestMultipleLiteralReplacement(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print s=replace_strings("A magic trick can turn a cat into a dog",dynamic(["cat","dog"]),dynamic(["dog","pigeon"]))`, `[[A magic trick can turn a dog into a pigeon]]`},
+		{`print s=replace_strings("A magic trick can turn a cat into a dog",dynamic(["turn"," into a dog"]),dynamic(["disappear",""]))`, `[[A magic trick can disappear a cat]]`},
+		{`print s=replace_strings("This is an example of using replace_strings()",dynamic(["This","is"]),dynamic(["This","was"]))`, `[[This was an example of using replace_strings()]]`},
+		{`print s=replace_strings("This is an example of using replace_strings()",dynamic(["is","This"]),dynamic(["was","This"]))`, `[[Thwas was an example of using replace_strings()]]`},
+		{`print s=replace_strings("This is an example of using replace_strings()",dynamic(["This","is"]),dynamic([12345,"was"]))`, `[[This was an example of using replace_strings()]]`},
+		{`print s=replace_strings("aaaaa",dynamic(["aa","a"]),dynamic(["X","Y"]))`, `[[XXY]]`},
+		{`print s=replace_strings("ab",dynamic(["b","ab"]),dynamic(["X","Y"]))`, `[[aX]]`},
+		{`print s=replace_strings("a\u0000😀b",dynamic(["\u0000","😀"]),dynamic(["X","中"]))`, `[[aX中b]]`},
+		{`print s=replace_strings("ab",dynamic([1,null,{},[],"a","b"]),dynamic(["X","X","X","X",null,false]))`, `[[ab]]`},
+		{`print s=replace_strings("ab",dynamic([]),dynamic([]))`, `[[ab]]`},
+		{`let lookups=dynamic(["alice","bob"]); let rewrites=dynamic(["A","B"]); Events | where n<3 | project s=replace_strings(user,lookups,rewrites) | order by s asc`, `[[A] [B]]`},
+		{`print s=replace_strings("ab",dynamic(["a"]),dynamic(["X"])) | getschema | project DataType`, `[[System.String]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+	for _, expr := range []string{`replace_strings("a",dynamic([]))`, `replace_strings("a","b",dynamic([]))`, `replace_strings(1,dynamic([]),dynamic([]))`, `replace_strings("a",dynamic([]),"b")`} {
+		if _, err := Compile(`print s=`+expr, time.Now()); err == nil {
+			t.Errorf("accepted %s", expr)
+		}
+	}
+}

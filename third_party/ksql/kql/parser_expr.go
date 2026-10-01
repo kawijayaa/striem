@@ -112,6 +112,32 @@ func (p *expressionParser) parsePrefix() Expression {
 		p.consume("}")
 		raw := p.tokens[start:p.position]
 		expr = &RawExpression{Tokens: raw, Span: tokensSpan(raw)}
+	case token.Kind == IdentifierToken && strings.EqualFold(token.Text, "dynamic") && p.position+1 < len(p.tokens) && p.tokens[p.position+1].Text == "(":
+		p.position += 2
+		start := p.position
+		depth := 1
+		for p.position < len(p.tokens) {
+			current := p.tokens[p.position]
+			if current.Text == "(" {
+				depth++
+			}
+			if current.Text == ")" {
+				depth--
+				if depth == 0 {
+					break
+				}
+			}
+			p.position++
+		}
+		body := p.tokens[start:p.position]
+		if !p.consume(")") {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0404", Message: "missing closing parenthesis", Span: token.Span})
+		}
+		end := token.Span
+		if p.position > start {
+			end = p.tokens[p.position-1].Span
+		}
+		expr = &DynamicExpression{Tokens: body, Span: joinSpan(token.Span, end)}
 	case token.Kind == IdentifierToken:
 		p.position++
 		expr = &NameExpression{Name: token.Text, Span: token.Span}
