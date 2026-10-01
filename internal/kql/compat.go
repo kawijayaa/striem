@@ -70,6 +70,18 @@ func compatibilityOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_string", Args: values}}, nil
 		}))
 	}
+	for _, name := range []string{"tolower", "toupper"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 argument", name)
+			}
+			if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a string", name)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_" + name, Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}))
+	}
 	for _, name := range []string{"substring", "strlen"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

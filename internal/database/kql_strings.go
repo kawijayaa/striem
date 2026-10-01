@@ -93,3 +93,16 @@ func kqlReplaceString(value, lookup, rewrite any) (any, error) {
 	}
 	return strings.ReplaceAll(text, search, replacement), nil
 }
+
+// Go's Unicode simple case tables convert complete strings, including text
+// following embedded NUL. SQLite's built-in case conversion is ASCII-only.
+func kqlCase(value any, upper bool) any {
+	text, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	if upper {
+		return strings.ToUpper(text)
+	}
+	return strings.ToLower(text)
+}

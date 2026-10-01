@@ -49,6 +49,8 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 - Standard JSON-compatible `dynamic(...)` constants now parse and bind as dynamic values, including arrays, nested objects, scalars, and null. Execution tests cover scalar bindings, nested access, string escapes, signed/exact long JSON values, malformed literals, metadata, and both parameter modes. JSON token validation preserves boundaries and rejects expressions rather than concatenating them into constants. Typed Kusto constants inside dynamic literals, scalar type tags, and full accessor semantics remain open. [Dynamic reference](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/dynamic?view=microsoft-fabric).
 
+- `tolower` and `toupper` now use Go Unicode simple case conversion instead of SQLite ASCII-only conversion, preserve embedded NUL text, validate arity, and keep string output metadata. Execution tests cover documented ASCII examples, accented Latin/Greek/Cyrillic, filtering/grouping, dynamic fields, nulls, and metadata. Exact Kusto case tables, locale/expansion rules, and tagged dynamic string coercion remain unverified and open. [Lowercase reference](https://learn.microsoft.com/en-us/kusto/query/tolower-function?view=microsoft-fabric), [uppercase reference](https://learn.microsoft.com/en-us/kusto/query/toupper-function?view=microsoft-fabric).
+
 ## Remaining workstreams (all stay in scope)
 
 1. **Scalar semantics and types:** complete function catalog, Unicode/string behavior, all casts and null-on-failure behavior, dynamic values/literals, GUID/decimal/timespan types, scalar `let`/function definitions, datetime arithmetic, formatting/timezones, Boolean and null semantics.
