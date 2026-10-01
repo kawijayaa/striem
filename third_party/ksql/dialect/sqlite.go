@@ -65,7 +65,12 @@ func (d sqlite) JSONIndex(value, index string) string {
 }
 func (sqlite) JSONIndexExpression(value, index string, numeric bool) string {
 	if numeric {
-		return "json_extract(" + value + ", '$[' || " + index + " || ']')"
+		// Keep each expression (and each bound placeholder) in the SQL once.
+		// Adding an array length to a negative int64 is safe even at MinInt64.
+		return "(SELECT ksql_index_values.value FROM (SELECT " + value + " AS document, " + index + " AS subscript) AS ksql_index_bounds, " +
+			"json_each(ksql_index_bounds.document) AS ksql_index_values WHERE ksql_index_values.key = " +
+			"CASE WHEN ksql_index_bounds.subscript < 0 THEN json_array_length(ksql_index_bounds.document) + ksql_index_bounds.subscript " +
+			"ELSE ksql_index_bounds.subscript END LIMIT 1)"
 	}
 	if key, ok := decodeSQLStringLiteral(index); ok && safeSQLiteJSONKey(key) {
 		return sqliteJSONExtract(value, []string{key})

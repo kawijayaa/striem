@@ -1146,7 +1146,7 @@ func TestJaccardThroughAPI(t *testing.T) {
 
 func TestParseJSONThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
-	response := queryAPI(t, server.URL, `print invalid=parse_json("{bad}"),number=parse_json("9223372036854775807"),b=parse_json("false"),a=todynamic("[1,null]"),s=toobject("\"hello\"")`)
+	response := queryAPI(t, server.URL, `print invalid=parse_json("{bad}"),number=parse_json("9223372036854775807"),b=parse_json("false"),a=todynamic("[1,null]"),s=toobject("\"hello\""),last=parse_json('[1,9007199254740993]')[(-1)]`)
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
@@ -1161,7 +1161,7 @@ func TestParseJSONThroughAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := result.Rows[0]
-	if row["invalid"] != "{bad}" || row["number"] != json.Number("9223372036854775807") || row["b"] != false || row["s"] != "hello" {
+	if row["invalid"] != "{bad}" || row["number"] != json.Number("9223372036854775807") || row["b"] != false || row["s"] != "hello" || row["last"] != json.Number("9007199254740993") {
 		t.Fatalf("dynamic scalar values=%#v", row)
 	}
 	values, ok := row["a"].([]any)

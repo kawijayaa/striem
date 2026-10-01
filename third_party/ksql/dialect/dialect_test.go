@@ -140,7 +140,7 @@ func TestSQLiteJSONIndexSyntax(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `SELECT json_extract("d", '$[' || 0 || ']'), json_extract("d", '$."a.b"'), json_extract("d", '$."space key"'), json_extract("d", '$."hyphen-key"'), json_extract("d", '$."it''s"'), (SELECT value FROM json_each("d") WHERE key = 'a.b"\c' LIMIT 1), json_extract("d", '$."process"."command line"."image-name"'), (SELECT value FROM json_each("d") WHERE key = ? LIMIT 1)`; got != want {
+	if want := `SELECT (SELECT ksql_index_values.value FROM (SELECT "d" AS document, 0 AS subscript) AS ksql_index_bounds, json_each(ksql_index_bounds.document) AS ksql_index_values WHERE ksql_index_values.key = CASE WHEN ksql_index_bounds.subscript < 0 THEN json_array_length(ksql_index_bounds.document) + ksql_index_bounds.subscript ELSE ksql_index_bounds.subscript END LIMIT 1), json_extract("d", '$."a.b"'), json_extract("d", '$."space key"'), json_extract("d", '$."hyphen-key"'), json_extract("d", '$."it''s"'), (SELECT value FROM json_each("d") WHERE key = 'a.b"\c' LIMIT 1), json_extract("d", '$."process"."command line"."image-name"'), (SELECT value FROM json_each("d") WHERE key = ? LIMIT 1)`; got != want {
 		t.Fatalf("Render() = %q, want %q", got, want)
 	}
 }

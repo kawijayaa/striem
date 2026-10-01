@@ -148,6 +148,8 @@ type Cast struct {
 type Index struct {
 	Value Expr
 	Index Expr
+	// Numeric records a bound integer or Boolean index, including expressions.
+	Numeric bool
 }
 type Regex struct {
 	Value         Expr

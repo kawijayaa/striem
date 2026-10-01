@@ -486,12 +486,12 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		if capability, ok := r.dialect.(interface {
 			JSONIndexExpression(value, index string, numeric bool) string
 		}); ok {
-			numeric := false
+			numeric := e.Numeric
 			switch indexNode := e.Index.(type) {
 			case *sqlast.Literal:
-				numeric = indexNode.Kind == sqlast.NumberLiteral
+				numeric = numeric || indexNode.Kind == sqlast.NumberLiteral || indexNode.Kind == sqlast.BooleanLiteral
 			case *sqlast.Parameter:
-				numeric = indexNode.Kind == sqlast.NumberLiteral
+				numeric = numeric || indexNode.Kind == sqlast.NumberLiteral || indexNode.Kind == sqlast.BooleanLiteral
 			}
 			return capability.JSONIndexExpression(value, index, numeric), nil
 		}

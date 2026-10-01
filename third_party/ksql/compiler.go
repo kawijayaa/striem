@@ -530,7 +530,7 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 		if base.Type != TypeDynamic && base.Type != TypeUnknown {
 			s.bindError("KQLB0405", value.Span, "expression.index", "property access requires a dynamic value")
 		}
-		return boundExpr{SQL: &sqlast.Index{Value: base.SQL, Index: index.SQL}, Type: TypeDynamic}
+		return boundExpr{SQL: &sqlast.Index{Value: base.SQL, Index: index.SQL, Numeric: index.Type == TypeInt || index.Type == TypeLong || index.Type == TypeBool}, Type: TypeDynamic}
 	case *kql.NamedExpression:
 		return s.expression(value.Value)
 	case *kql.ListExpression:
