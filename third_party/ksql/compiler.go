@@ -87,15 +87,28 @@ func (c *Compiler) Compile(source string) Result {
 	for _, statement := range tree.Statements {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
+			key := strings.ToLower(node.Name)
+			_, scalarExists := state.scalarLets[key]
+			_, tabularExists := state.tabularLets[key]
+			if scalarExists || tabularExists {
+				state.bindError("KQLB0101", node.Span, "statement.let", "variable already declared: "+node.Name)
+				continue
+			}
 			if node.Pipeline != nil {
 				value := state.pipeline(node.Pipeline)
 				if value.Query != nil {
 					state.tabularLets[strings.ToLower(node.Name)] = value
 				}
 			} else if node.Value != nil {
-				value := state.expression(node.Value)
-				if value.SQL != nil {
-					state.scalarLets[strings.ToLower(node.Name)] = value
+				if value, tabular := state.tabularLetValue(node.Value); tabular {
+					if value.Query != nil {
+						state.tabularLets[key] = value
+					}
+				} else {
+					value := state.expression(node.Value)
+					if value.SQL != nil {
+						state.scalarLets[key] = value
+					}
 				}
 			} else {
 				state.error("KQLL0101", node.Span, "statement.let", "function declarations require semantic parameter binding")
@@ -172,6 +185,35 @@ func (s *compileState) pipeline(pipeline *kql.Pipeline) Relation {
 		relation = s.operator(relation, operator)
 	}
 	return relation
+}
+
+// A name-valued let can refer to either a scalar binding or a relation. Resolve
+// local bindings before catalog tables, and lower tables through the normal
+// source rule so application filtering and typed schemas remain attached.
+func (s *compileState) tabularLetValue(expression kql.Expression) (Relation, bool) {
+	name, ok := expression.(*kql.NameExpression)
+	if !ok {
+		return Relation{}, false
+	}
+	logicalName := unquoteKQL(name.Name)
+	key := strings.ToLower(logicalName)
+	if _, scalar := s.scalarLets[key]; scalar {
+		return Relation{}, false
+	}
+	if relation, tabular := s.tabularLets[key]; tabular {
+		return relation, true
+	}
+	// An unquoted dotted expression is property access, not a table name.
+	if logicalName == name.Name && strings.Contains(name.Name, ".") {
+		return Relation{}, false
+	}
+	if s.compiler.catalog != nil {
+		if _, found := s.compiler.catalog.ResolveTable(logicalName); !found {
+			return Relation{}, false
+		}
+	}
+	// Without a catalog, match the existing open-schema table source behavior.
+	return s.source(kql.Source{Kind: "table", Name: logicalName, Expr: name, Span: name.Span}), true
 }
 
 func (s *compileState) source(source kql.Source) Relation {

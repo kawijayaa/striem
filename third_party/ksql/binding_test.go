@@ -247,7 +247,7 @@ func TestSourceRuleRunsAfterTabularBinding(t *testing.T) {
 			Schema: table.Schema,
 		}, nil
 	}))
-	result := compiler.Compile(`let E = Events | project Host; E | take 1`)
+	result := compiler.Compile(`let T = Events; let U = T; let E = U | project Host; E | take 1`)
 	if !result.OK() {
 		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
 	}

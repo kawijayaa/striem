@@ -1260,3 +1260,22 @@ func TestQuotedLetNamesThroughAPI(t *testing.T) {
 		t.Fatalf("rows=%#v", rows)
 	}
 }
+
+func TestDirectTabularLetAliasesThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let T=print d=dynamic({"x":151}),b=not(false); let ['T U']=T; ['T U']`)
+	if len(rows) != 1 || rows[0]["b"] != true {
+		t.Fatalf("rows=%#v", rows)
+	}
+	d, ok := rows[0]["d"].(map[string]any)
+	if !ok || d["x"] != float64(151) {
+		t.Fatalf("dynamic=%#v", rows)
+	}
+	for _, query := range []string{`let T=NoSuchTable; T`, `let T=Events; let T=Events; T`, `let x=1; let x=Events; x`} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("query %s: status=%d", query, response.StatusCode)
+		}
+	}
+}

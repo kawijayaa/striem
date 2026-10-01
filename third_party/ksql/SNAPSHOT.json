@@ -1,5 +1,5 @@
 {
-  "baseCommit": "55f11824122070c25fb09eecc0ab9e1bbe2d5ee9",
+  "baseCommit": "b86e9e804bb665ba3944c262e9fb6e814d03e905",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
@@ -7,10 +7,10 @@
     "README.md": "0117bc66da044b1c04c5f2c84dd614c9118f6bd7e858264f0cc00acc562598d6",
     "array_names_test.go": "1ee57b710bde7ebbbffb74fb6b6d55f035a91f9c750ec95a349c52fe7c4254cb",
     "bag_metadata_test.go": "7f04e45a3b691d0a9105f7ae02a7a02b35081c2144e8c794608e4722ce364b52",
-    "binding_test.go": "6c8113f6e7e15fa09f8ef4d683c57f17d5d67369a5fc4f15dfaa8d6b20ada76d",
+    "binding_test.go": "a39fcbed6866779bfa211d5229e2549ffaf4709ed5bc1a2663cc34c86a5ba123",
     "column_patterns.go": "c979c55a6e2d9a62e26a276d1744d798e0778933291d8b6a28d7ce2055e2e19d",
     "column_patterns_test.go": "12fa329a75f878cb137f896e146364dd6b70c9351a7101740af10eac74f7656b",
-    "compiler.go": "359d8166ba88a130a0b4d122c582f6521d87290578cd4bb1c7eb479053fc9193",
+    "compiler.go": "e74417f37fdab83844acdac69eec979158928b2775e75365b8909aed29348506",
     "compiler_test.go": "c665dfa4470cb24da1118f4f63b25df94c9aa9143061bd8f82fc143786814c0f",
     "diagnostic.go": "1bf539e59fba07f2fe7e922177e832da4ae41bd550caac6b04ebd39e69d30e2e",
     "dialect/dialect.go": "4648eacc279afadae21a1f46d326a5b250c90b7337f8f7a92e80676b9a5a87be",
@@ -20,7 +20,7 @@
     "dialect/sqlite.go": "de0422b14155d9f2f5872e46bf16286c17a9b3ceb98a3ff2ebe20bccdf001e5c",
     "dialect/sqlserver.go": "23861b15568ca1684ef147b762d54d95c89afdc1dffc220673e725f0b8c1b9f4",
     "doc.go": "47210251e86e8c8391e6fa6f254a279e459e0618015e44e174632397e289bf4b",
-    "docs/architecture.md": "ac34d020e7afad880614184bd6135ec12392a0a39847b6ac5266d56f06322012",
+    "docs/architecture.md": "2feedca77de53b82b10d24abb9a807e323967201a6ffdd93a1cfc66e31925a80",
     "docs/operator-support.md": "a844453c650fdb478fe5f0d745fed77a98c447a19b288ee65be7a1d78ab8986e",
     "dynamic_grouping_test.go": "9af78a90cb70ac5e7f6a1eb4c315ed68174d00ebd63acbd2d5a8873c0b25343e",
     "dynamic_literal_test.go": "d55f570c153e4dd8c7bf05a362a865cac149df8e504923ba34846de30f2370f7",
@@ -65,6 +65,7 @@
     "sqlast/parameters.go": "435f042472fb068491be0dea18148b9cf77d6510948cf165ec9d2d6ec4338507",
     "sqlite_execution_test.go": "48648bca1f62763fb771c39243dfe87f1850f1a7bb9ba351c3d29cbd5b06005e",
     "string_literals_test.go": "505832c47f4d64b8c5e84e07b85165e584adba4b80a2c867d8e7c1658fbe693a",
+    "tabular_let_alias_test.go": "e37531897603a51f1a10f2e31a79f68953fb93d7f588441413c4c7059e0519aa",
     "typed_functions_test.go": "7662a0f9c0fee2dc82738d3d79dc3c77dc4aac254f3695ade5101779c4987ee7",
     "union.go": "5d8b0b0d0d8e06e412cde2df7a884de73633221bbffac5ec1bbe9e21269278e2",
     "union_test.go": "67b822147da954524dd000cd0f2d193718d77336dab49c225eb869482c030bda"

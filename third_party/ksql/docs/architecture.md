@@ -70,6 +70,14 @@ selected dialect. They return SQL AST values, never SQL fragments. Tabular
 bindings are resolved before a source rule, so a physical source adapter cannot
 accidentally intercept `let` or `as` names.
 
+Name-valued let expressions resolve scalar locals, tabular locals, then catalog
+tables. Direct table aliases use the source rule once and retain its schema and
+filtering through further aliases. Without a catalog they follow the existing
+open-schema table behavior; unquoted dotted property expressions remain scalar.
+Duplicate declarations in the same scope are rejected. Name resolution remains
+case insensitive; nested scopes and complete Microsoft type semantics are not
+implemented.
+
 Compiler options and rule maps are fixed by `New`; per-compilation aliases,
 arguments, diagnostics, and bindings live in isolated state. A configured
 compiler is safe for concurrent use if its catalog is safe for concurrent
