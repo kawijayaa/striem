@@ -11,6 +11,31 @@ import (
 
 func compatibilityOptions() []ksql.Option {
 	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	for _, name := range []string{"substring", "strlen"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			minimum, maximum := 1, 1
+			resultType := ksql.TypeLong
+			if name == "substring" {
+				minimum, maximum = 2, 3
+				resultType = ksql.TypeString
+			}
+			if len(args) < minimum || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d to %d arguments", name, minimum, maximum)
+			}
+			if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a string", name)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if i > 0 && arg.Type != ksql.TypeInt && arg.Type != ksql.TypeLong && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("substring offset and length must be integers")
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: resultType, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
+		}))
+	}
 	for _, name := range []string{"make_bag", "make_bag_if", "make_dictionary"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

@@ -1,6 +1,7 @@
 package kql
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strconv"
@@ -291,6 +292,10 @@ func normalizeDateTimeSource(source sqlast.Source) {
 func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	switch node := expr.(type) {
 	case *sqlast.Literal:
+		if node.Kind == sqlast.StringLiteral && strings.ContainsRune(node.Value, 0) {
+			// SQLite SQL text cannot contain NUL, even inside a quoted literal.
+			return &sqlast.Call{Name: "kql_base64_decode_tostring", Args: []sqlast.Expr{stringLiteral(base64.StdEncoding.EncodeToString([]byte(node.Value)))}}
+		}
 		if node.Kind == sqlast.DateTimeLiteral {
 			return &sqlast.Call{Name: "kql_todatetime", Args: []sqlast.Expr{stringLiteral(node.Value)}}
 		}

@@ -37,6 +37,8 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 - Standard `getschema` returns the four documented metadata columns without scanning input rows. Tests cover transformations, empty inputs, wide schemas, parameter pruning, and pipeline composition. SQLite inline values now support valid aliases and empty tables. Unknown schema/types and `kind=csl` remain unsupported. [Reference](https://learn.microsoft.com/en-us/kusto/query/getschema-operator?view=microsoft-fabric).
 
+- String indexing adapters now use zero-based Unicode character offsets, negative offsets from the end, and optional lengths. `strlen` counts Unicode codepoints including embedded NUL characters. Tests cover documented examples, non-ASCII text, large offsets, and argument diagnostics. [Substring reference](https://learn.microsoft.com/en-us/kusto/query/substring-function?view=microsoft-fabric). Full string null/coercion behavior and differential edge-case conformance remain open.
+
 ## Remaining workstreams (all stay in scope)
 
 1. **Scalar semantics and types:** complete function catalog, Unicode/string behavior, all casts and null-on-failure behavior, dynamic values/literals, GUID/decimal/timespan types, scalar `let`/function definitions, datetime arithmetic, formatting/timezones, Boolean and null semantics.
