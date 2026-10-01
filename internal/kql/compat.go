@@ -38,6 +38,27 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"array_concat", "array_reverse"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			maximum := 64
+			if name == "array_reverse" {
+				maximum = 1
+			}
+			if len(args) < 1 || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 to %d dynamic arrays", name, maximum)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if arg.Type != ksql.TypeDynamic && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be dynamic arrays", name)
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
+		}))
+	}
+
 	options = append(options, ksql.WithTypedFunction("bag_set_key", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 3 {
 			return ksql.TypedExpression{}, fmt.Errorf("bag_set_key requires 3 arguments")

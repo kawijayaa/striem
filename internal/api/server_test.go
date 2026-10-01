@@ -863,3 +863,29 @@ func TestBagSetKeyThroughAPI(t *testing.T) {
 		t.Fatalf("nested=%#v", bag)
 	}
 }
+
+func TestArrayOperationsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=array_reverse(array_concat(dynamic([9223372036854775807,null]),pack_array(true,bag_pack("x",2)))) | project renamed=a`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	values, ok := result.Rows[0]["renamed"].([]any)
+	if !ok || len(values) != 4 || values[1] != true || values[2] != nil || values[3] != json.Number("9223372036854775807") {
+		t.Fatalf("array=%#v", result)
+	}
+	bag, ok := values[0].(map[string]any)
+	if !ok || bag["x"] != json.Number("2") {
+		t.Fatalf("nested bag=%#v", values)
+	}
+}

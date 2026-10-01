@@ -19,6 +19,8 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_replace_string":  kqlReplaceString,
 		"kql_replace_strings": kqlReplaceStrings,
 		"kql_pack_array":      kqlPackArray,
+		"kql_array_concat":    kqlArrayConcat,
+		"kql_array_reverse":   kqlArrayReverse,
 		"kql_bag_pack":        kqlBagPack,
 		"kql_bag_merge":       kqlBagMerge,
 		"kql_bag_set_key":     kqlBagSetKey,
