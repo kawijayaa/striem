@@ -1,5 +1,5 @@
 {
-  "baseCommit": "e3f54520074d86e7ce60d72116984ee985d95629",
+  "baseCommit": "43e879d02e5e2c77880548cc672e435db12038ae",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
@@ -30,6 +30,7 @@
     "getschema_test.go": "30f97308834a88ea72cd4f2d129f06cc08108973dea1d7fc24dec86fcc1c6f14",
     "go.mod": "9f16200a31f28667224713c58c59007ef00e92fe94cfff76d860bedc237828ba",
     "go.sum": "21b69ad8182cd241ffd4d1fba7199ae55303f22a7f3554761101d58c3b8f5f6d",
+    "indexof_names_test.go": "5532d011631de19b57cb61edfbe4477852d509368976cb7ff09a2eb19d7872c4",
     "int_type_test.go": "ec1c44c65ffb83a833fb7286f03d8db6132cbad224db9032a998df5e63a73dad",
     "inventory/source.json": "a88396534e43ef0f6cfa2c101c66c5963faf46649f4dd1b63e0beaedaa633bd6",
     "join_compatibility_test.go": "e6af71b022104188f29c1ddcbd793a2c6b76bbedfc725ee6fe731326740f1d1d",
@@ -45,7 +46,7 @@
     "kql/strings.go": "29cf0dc91785337793d6192351e9b83a4011b759605ae2a740b770d268041a89",
     "kql/strings_test.go": "c85ae025f7ba1a713fdf3694c65d70c26fafc4fda41f8971ac054d13c313ebe2",
     "kql/token.go": "959857fb5773b7a46a82b11662b29db4f785205cfa9fc1f17786193533ba25a4",
-    "lowering.go": "ecadc98fb6389fcda1ee7c0b4450db1faefef3a2f686926b2fe3bfcdfe00c801",
+    "lowering.go": "cdcc73f954a26c8cc3578d6a35c5c82d222b1e7659be01ecb6aa4cc841ace796",
     "not_test.go": "49419d42a6cdd08c4c7cc53d305f1693295a119de461d49edde768c4afed6977",
     "options.go": "8ae2fb9975754e6aac13930226d1ba229985147f0d4545ffc1c08387d7687aeb",
     "range_execution_test.go": "8609ffcd49cf995f096fce10ac0e1e87cc1beaa33fcd776cdf32f51893005745",

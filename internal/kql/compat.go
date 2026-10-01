@@ -70,6 +70,28 @@ func compatibilityOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_replace_string", Args: values}}, nil
 		}))
 	}
+	options = append(options, ksql.WithTypedFunction("indexof", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) < 2 || len(args) > 5 {
+			return ksql.TypedExpression{}, fmt.Errorf("indexof requires 2 to 5 arguments")
+		}
+		values := make([]sqlast.Expr, len(args))
+		for i, arg := range args {
+			values[i] = arg.SQL
+			if i < 2 {
+				values[i] = scalarTextSQL(arg)
+				continue
+			}
+			if arg.Type != ksql.TypeInt && arg.Type != ksql.TypeLong && arg.Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("indexof start, length, and occurrence must be integers")
+			}
+			if i == 4 {
+				if !integerSQLConstant(arg.SQL) {
+					return ksql.TypedExpression{}, fmt.Errorf("indexof occurrence must be a constant integer")
+				}
+			}
+		}
+		return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "kql_indexof", Args: values}}, nil
+	}))
 	for _, name := range []string{"tolower", "toupper"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
@@ -223,4 +245,15 @@ func binFunction(args []sqlast.Expr) (sqlast.Expr, error) {
 
 func scalarTextSQL(value ksql.TypedExpression) sqlast.Expr {
 	return &sqlast.Call{Name: "kql_scalar_text", Args: []sqlast.Expr{value.SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(value.Type)}}}
+}
+
+func integerSQLConstant(expr sqlast.Expr) bool {
+	if unary, ok := expr.(*sqlast.Unary); ok && (unary.Operator == "-" || unary.Operator == "+") {
+		expr = unary.Operand
+	}
+	literal, ok := expr.(*sqlast.Literal)
+	if !ok || literal.Kind != sqlast.NumberLiteral {
+		return false
+	}
+	return !strings.ContainsAny(literal.Value, ".eE")
 }

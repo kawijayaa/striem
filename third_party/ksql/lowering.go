@@ -590,6 +590,11 @@ func inferredName(expression kql.Expression, boundName string) string {
 		return lastName(value.Name)
 	case *kql.CallExpression:
 		if function, ok := value.Function.(*kql.NameExpression); ok {
+			// Microsoft's IndexOf signature uses ResultNameKind.None.
+			// Leaving the name empty lets projection binding generate ColumnN.
+			if strings.EqualFold(lastName(function.Name), "indexof") {
+				return ""
+			}
 			return lastName(function.Name) + "_"
 		}
 	}
