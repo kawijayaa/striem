@@ -761,3 +761,20 @@ func TestBagAggregatesThroughAPI(t *testing.T) {
 		t.Fatalf("expected empty object, got %#v", rows)
 	}
 }
+
+func TestSplitArraysThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print a=split("a,b",",") | project result=a`)
+	if len(rows) != 1 {
+		t.Fatal(rows)
+	}
+	values, ok := rows[0]["result"].([]any)
+	if !ok || len(values) != 2 || values[0] != "a" || values[1] != "b" {
+		t.Fatalf("expected JSON array, got %#v", rows)
+	}
+	rows = queryRows(t, server.URL, `print result=split("a,b",",",1)`)
+	values, ok = rows[0]["result"].([]any)
+	if !ok || len(values) != 1 || values[0] != "b" {
+		t.Fatalf("expected indexed JSON array, got %#v", rows)
+	}
+}

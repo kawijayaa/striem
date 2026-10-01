@@ -408,14 +408,6 @@ func tokenBoundary(value string, offset, direction int) bool {
 	return !unicode.IsLetter(character) && !unicode.IsDigit(character) && character != '_'
 }
 
-func kqlSplit(value, delimiter string) (string, error) {
-	if delimiter == "" {
-		return "", fmt.Errorf("split delimiter cannot be empty")
-	}
-	encoded, err := json.Marshal(strings.Split(value, delimiter))
-	return string(encoded), err
-}
-
 func kqlExtract(pattern string, capture int64, value string) (string, error) {
 	if len(pattern) > 512 {
 		return "", fmt.Errorf("extract pattern exceeds 512 characters")

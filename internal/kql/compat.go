@@ -38,6 +38,23 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("split", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) < 2 || len(args) > 3 {
+			return ksql.TypedExpression{}, fmt.Errorf("split requires 2 or 3 arguments")
+		}
+		if args[1].Type != ksql.TypeString && args[1].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("split delimiter must be a string")
+		}
+		if len(args) == 3 && args[2].Type != ksql.TypeInt && args[2].Type != ksql.TypeLong && args[2].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("split requestedIndex must be an integer")
+		}
+		values := make([]sqlast.Expr, len(args))
+		for i, arg := range args {
+			values[i] = arg.SQL
+		}
+		values[0] = scalarTextSQL(args[0])
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_split", Args: values}}, nil
+	}))
 	options = append(options, ksql.WithTypedFunction("replace_strings", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 3 {
 			return ksql.TypedExpression{}, fmt.Errorf("replace_strings requires 3 arguments")
