@@ -543,6 +543,115 @@ test('a stalled readiness request times out and recovers', async ({ page }) => {
   }
 });
 
+test('pending answer responses preserve editor focus and answer drafts', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#active-task-title')).toHaveText('Identify the first host');
+  let release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/questions/host/answer', async route => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.locator('#active-task-answer').fill('wrong');
+    await page.locator('#active-task-submit').click();
+    await expect(page.locator('#active-task-submit')).toHaveText('Checking answer');
+    await edit(page, 'Telemetry | count');
+    release();
+    await expect(page.locator('#active-task-feedback')).toContainText('does not match');
+    await expect(page.locator('.cm-content')).toBeFocused();
+    await expect(page.locator('#active-task-answer')).toHaveValue('wrong');
+  } finally {
+    release();
+  }
+});
+
+test('stalled task loading and submission recover without losing drafts', async ({ page }) => {
+  await page.clock.install();
+  let releaseLoad: () => void = () => {};
+  const heldLoad = new Promise<void>(resolve => { releaseLoad = resolve; });
+  let first = true;
+  await page.route('**/api/questions', async route => {
+    if (first) {
+      first = false;
+      await heldLoad;
+    }
+    await route.continue().catch(() => {});
+  });
+  try {
+    await open(page);
+    await expect(page.locator('#active-task-progress')).toHaveText('Loading investigation tasks');
+    await page.clock.fastForward(10001);
+    await expect(page.locator('#active-task-title')).toHaveText('Could not load investigation tasks');
+    releaseLoad();
+    await page.locator('#active-task-next').click();
+    await expect(page.locator('#active-task-title')).toHaveText('Identify the first host');
+    let releaseAnswer: () => void = () => {};
+    const heldAnswer = new Promise<void>(resolve => { releaseAnswer = resolve; });
+    await page.route('**/api/questions/host/answer', async route => {
+      await heldAnswer;
+      await route.abort().catch(() => {});
+    });
+    try {
+      await page.locator('#active-task-answer').fill('kept draft');
+      await page.locator('#active-task-submit').click();
+      await expect(page.locator('#active-task-submit')).toHaveText('Checking answer');
+      await page.clock.fastForward(10001);
+      await expect(page.locator('#active-task-feedback')).toHaveText('The answer service did not respond. Your draft is kept; try again.');
+      await expect(page.locator('#active-task-answer')).toHaveValue('kept draft');
+      await expect(page.locator('#active-task-submit')).toBeEnabled();
+      await expect(page.locator('#active-task-answer')).toBeEnabled();
+    } finally {
+      releaseAnswer();
+    }
+  } finally {
+    releaseLoad();
+  }
+});
+
+test('submitting an answer preserves a task selected during the request and pauses background refresh', async ({ page }) => {
+  const response = await page.request.get('/api/questions');
+  const state = await response.json();
+  state.questions.push({ id: 'format', title: 'Check the format', prompt: 'Inspect formatting.', solved: false });
+  state.totalQuestions = state.questions.length;
+  let reads = 0;
+  await page.route('**/api/questions', route => {
+    reads++;
+    return route.fulfill({ json: state });
+  });
+  await page.clock.install();
+  await open(page);
+  await expect(page.locator('#active-task-title')).toHaveText('Identify the first host');
+  await page.clock.fastForward(14000);
+  let release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/questions/host/answer', async route => {
+    await held;
+    state.questions[0].solved = true;
+    state.questions[0].answer = 'alpha';
+    state.solvedQuestions = 1;
+    await route.fulfill({ json: { correct: true, state } });
+  });
+  try {
+    await page.locator('#active-task-answer').fill('alpha');
+    await page.locator('#active-task-submit').click();
+    await expect(page.locator('#active-task-submit')).toHaveText('Checking answer');
+    await page.locator('#questions-tab').click();
+    await page.locator('.question-select').last().click();
+    await expect(page.locator('#active-task-title')).toHaveText('Check the format');
+    await edit(page, 'Telemetry | count');
+    await page.clock.fastForward(2000);
+    expect(reads).toBe(1);
+    release();
+    await expect(page.locator('#toast-message')).toHaveText('Task solved');
+    await expect(page.locator('#active-task-title')).toHaveText('Check the format');
+    await expect(page.locator('.cm-content')).toBeFocused();
+    await expect(page.locator('.question-select').last()).toHaveAttribute('aria-current', 'true');
+  } finally {
+    release();
+  }
+});
+
 test('answer drafts persist, wrong answers recover, completion unlocks flag and persists', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await open(page);

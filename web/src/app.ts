@@ -110,6 +110,7 @@ const questionCooldowns = new Map<string, number>();
 const questionCooldownTimers = new Map<string, number>();
 let activeQuestionId: string | null = null;
 let questionRequestGeneration = 0;
+let questionController: AbortController | null = null;
 let questionsLoaded = false;
 let questionSubmitting = false;
 const sharedQuery = new URL(window.location.href).searchParams.get('q');
@@ -955,7 +956,7 @@ function updateActiveTaskCooldown(question: InvestigationQuestion): void {
   const seconds = Math.max(1, Math.ceil(remaining / 1000));
   status.textContent = `Wait ${seconds} second${seconds === 1 ? '' : 's'} before trying again.`;
   status.classList.remove('hidden');
-  input.disabled = false;
+  input.disabled = questionSubmitting;
   submit.disabled = true;
 }
 
@@ -1067,15 +1068,21 @@ async function submitActiveQuestion(): Promise<void> {
   let advancedToNextQuestion = false;
   questionSubmitting = true;
   questionRequestGeneration++;
+  questionController?.abort();
   questionDrafts.set(question.id, input.value);
   persistQuestionDrafts();
   renderActiveTask();
+  const focusAfterSubmit = document.activeElement;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 10000);
   try {
     const result = await request<AnswerResponse>(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ answer }),
+      signal: controller.signal,
     });
+    if (controller.signal.aborted) throw new DOMException('Answer request timed out', 'AbortError');
     questionRequestGeneration++;
     challengeState = result.state;
     correct = result.correct;
@@ -1085,7 +1092,7 @@ async function submitActiveQuestion(): Promise<void> {
       persistQuestionDrafts();
       questionCooldowns.delete(question.id);
       const nextQuestionId = challengeState.completed ? null : nextUnsolvedQuestionId(question.id);
-      if (nextQuestionId) {
+      if (nextQuestionId && activeQuestionId === question.id) {
         activeQuestionId = nextQuestionId;
         advancedToNextQuestion = true;
       }
@@ -1103,13 +1110,21 @@ async function submitActiveQuestion(): Promise<void> {
     if (retry > 0) questionCooldowns.set(question.id, Date.now() + retry);
     const message = retry > 0
       ? 'Too many attempts. Your answer was not submitted; wait for the retry timer, then try again.'
-      : (queryError.error || queryError.message || 'The answer could not be submitted. Your draft is saved in this browser; try again.');
+      : controller.signal.aborted
+        ? 'The answer service did not respond. Your draft is kept; try again.'
+        : (queryError.error || queryError.message || 'The answer could not be submitted. Your draft is saved in this browser; try again.');
     questionFeedback.set(question.id, message);
   } finally {
+    window.clearTimeout(timeout);
+    const focused = document.activeElement;
+    const restoreFocus = (activeQuestionId === question.id || advancedToNextQuestion)
+      && (focused === focusAfterSubmit || Boolean(focused?.closest('#active-task-form')));
     questionSubmitting = false;
     renderQuestions();
     renderActiveTask();
+    const focusAfterRender = document.activeElement;
     window.requestAnimationFrame(() => {
+      if (!restoreFocus || document.activeElement !== focusAfterRender) return;
       if (correct && !advancedToNextQuestion) $<HTMLButtonElement>('#active-task-next').focus();
       else $<HTMLInputElement>('#active-task-answer').focus();
     });
@@ -1197,6 +1212,7 @@ function renderActiveTaskFailure(): void {
 }
 
 async function loadQuestions(backgroundRefresh = false) {
+  if (questionSubmitting) return;
   if (!backgroundRefresh) {
     $('#active-task-bar').setAttribute('aria-busy', 'true');
     $('#active-task-progress').textContent = 'Loading investigation tasks';
@@ -1206,9 +1222,14 @@ async function loadQuestions(backgroundRefresh = false) {
     $('#active-task-resolution').classList.add('hidden');
   }
   const generation = ++questionRequestGeneration;
+  questionController?.abort();
+  const controller = new AbortController();
+  questionController = controller;
+  const timeout = window.setTimeout(() => controller.abort(), 10000);
   try {
-    const nextState = await request<ChallengeState>('/api/questions');
+    const nextState = await request<ChallengeState>('/api/questions', { signal: controller.signal });
     if (generation !== questionRequestGeneration) return;
+    if (controller.signal.aborted) throw new DOMException('Task loading timed out', 'AbortError');
     if (backgroundRefresh && JSON.stringify(nextState) === JSON.stringify(challengeState)) return;
     challengeState = nextState;
     questionsLoaded = true;
@@ -1224,6 +1245,9 @@ async function loadQuestions(backgroundRefresh = false) {
     if (backgroundRefresh && questionsLoaded) return;
     renderLoadFailure($('#question-list'), 'Could not load tasks.', () => void loadQuestions());
     renderActiveTaskFailure();
+  } finally {
+    window.clearTimeout(timeout);
+    if (questionController === controller) questionController = null;
   }
 }
 
