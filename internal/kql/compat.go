@@ -38,6 +38,19 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"array_iff", "array_iif"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 3 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 3 arguments", name)
+			}
+			if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a dynamic condition array", name)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_array_iff", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[1].Type)}, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[2].Type)}}}}, nil
+		}))
+	}
+
 	for _, name := range []string{"array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

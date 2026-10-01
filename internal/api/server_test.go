@@ -1025,3 +1025,29 @@ func TestTypedArraySearchThroughAPI(t *testing.T) {
 		t.Fatalf("typed lookup results=%#v", rows)
 	}
 }
+
+func TestArrayIffThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=array_iff(dynamic([true,false]),9223372036854775807,true),b=array_iif(dynamic([true,false]),dynamic([true]),"no")`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := result.Rows[0]["a"].([]any)
+	if !ok || len(a) != 2 || a[0] != json.Number("9223372036854775807") || a[1] != true {
+		t.Fatalf("typed branches=%#v", result)
+	}
+	b, ok := result.Rows[0]["b"].([]any)
+	if !ok || len(b) != 2 || b[0] != true || b[1] != "no" {
+		t.Fatalf("alias=%#v", result)
+	}
+}

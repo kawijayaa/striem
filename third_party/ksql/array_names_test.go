@@ -76,3 +76,14 @@ func TestArraySumUnnamedResultColumns(t *testing.T) {
 		t.Fatalf("result=%#v want=%#v", result, want)
 	}
 }
+
+func TestArrayIffUnnamedResultColumn(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithTypedFunction("array_iff", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		return ksql.TypedExpression{SQL: &sqlast.Call{Name: "array_iff", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}, Type: ksql.TypeDynamic}, nil
+	}))
+	result := compiler.Compile(`print array_iff(dynamic([true]),1,0)`)
+	want := []ksql.Column{{Name: "Column1", Type: ksql.TypeDynamic}}
+	if !result.OK() || !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("result=%#v want=%#v", result, want)
+	}
+}
