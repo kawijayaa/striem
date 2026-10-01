@@ -1252,3 +1252,11 @@ func TestParenthesizedTabularLetThroughAPI(t *testing.T) {
 		t.Fatalf("dynamic=%#v", rows)
 	}
 }
+
+func TestQuotedLetNamesThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let ['a.b']=dynamic({"x":131}); let ['T U']=(print value=['a.b'].x,b=not(false)); ['T U'] | project value,b`)
+	if len(rows) != 1 || rows[0]["value"] != float64(131) || rows[0]["b"] != true {
+		t.Fatalf("rows=%#v", rows)
+	}
+}

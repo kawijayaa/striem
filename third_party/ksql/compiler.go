@@ -177,7 +177,7 @@ func (s *compileState) pipeline(pipeline *kql.Pipeline) Relation {
 func (s *compileState) source(source kql.Source) Relation {
 	s.use("source."+source.Kind, "equivalent", source.Span)
 	if source.Kind == "table" {
-		if bound, ok := s.tabularLets[strings.ToLower(source.Name)]; ok {
+		if bound, ok := s.tabularLets[strings.ToLower(unquoteKQL(source.Name))]; ok {
 			return bound
 		}
 	}

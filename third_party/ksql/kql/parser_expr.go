@@ -200,6 +200,12 @@ func (p *expressionParser) parsePrefix() Expression {
 			p.position += 2
 			leftName, ok := expr.(*NameExpression)
 			if ok {
+				// Preserve a quoted root as one name, even if it contains dots.
+				if _, err := DecodeString(leftName.Name); err == nil {
+					ok = false
+				}
+			}
+			if ok {
 				expr = &NameExpression{Name: leftName.Name + "." + name.Text, Span: joinSpan(leftName.Span, name.Span)}
 			} else {
 				index := &LiteralExpression{Text: strconv.Quote(name.Text), Kind: StringToken, Span: name.Span}

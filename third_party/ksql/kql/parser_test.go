@@ -242,3 +242,22 @@ func TestParenthesizedLetClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotedLetDeclarationAndRoot(t *testing.T) {
+	script, errs := Parse(`let ['a.b']=dynamic({"x":1}); print v=['a.b'].x`)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	binding := script.Statements[0].(*LetStatement)
+	if binding.Name != "a.b" || binding.Value == nil {
+		t.Fatalf("binding=%#v", binding)
+	}
+	output := script.Statements[1].(*ExpressionStatement).Pipeline.Source.Items[0].(*NamedExpression)
+	index, ok := output.Value.(*IndexExpression)
+	if !ok {
+		t.Fatalf("quoted root was flattened: %#v", output.Value)
+	}
+	if root, ok := index.Value.(*NameExpression); !ok || root.Name != `'a.b'` {
+		t.Fatalf("root=%#v", index.Value)
+	}
+}

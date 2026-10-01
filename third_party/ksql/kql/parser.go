@@ -84,13 +84,24 @@ func parseStatement(tokens []Token) (Statement, []ParseError) {
 
 func parseLet(tokens []Token) (Statement, []ParseError) {
 	statement := &LetStatement{Raw: tokens, Span: tokensSpan(tokens)}
-	if len(tokens) < 4 || tokens[1].Kind != IdentifierToken || tokens[2].Text != "=" {
+	equal := 2
+	if len(tokens) >= 5 && tokens[1].Text == "[" && tokens[2].Kind == StringToken && tokens[3].Text == "]" {
+		name, err := DecodeString(tokens[2].Text)
+		if err != nil {
+			return statement, []ParseError{{Code: "KQLP0101", Message: err.Error(), Span: tokens[2].Span}}
+		}
+		statement.Name, equal = name, 4
+	} else if len(tokens) >= 3 && tokens[1].Kind == IdentifierToken {
+		statement.Name = tokens[1].Text
+	} else {
 		return statement, []ParseError{{Code: "KQLP0101", Message: "expected 'let name = expression'", Span: statement.Span}}
 	}
-	statement.Name = tokens[1].Text
-	value := trimParentheses(tokens[3:])
+	if tokens[equal].Text != "=" {
+		return statement, []ParseError{{Code: "KQLP0101", Message: "expected '=' after let name", Span: tokens[equal].Span}}
+	}
+	value := trimParentheses(tokens[equal+1:])
 	if len(value) == 0 {
-		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokensSpan(tokens[3:])}}
+		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokens[equal].Span}}
 	}
 	if hasTopLevel(value, "|") || beginsTabularSource(value) {
 		pipeline, errs := parsePipeline(value)
