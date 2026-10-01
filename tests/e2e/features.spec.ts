@@ -395,6 +395,60 @@ test('source selection, field filtering/insertion, autocomplete and timeline fil
   await run(page, 2);
 });
 
+test('field catalog retries preserve search and malformed responses do not break the editor', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  let healthy = false;
+  await page.route('**/api/fields', route => healthy ? route.continue() : route.fulfill({
+    status: 200, json: { common: [{ path: 123, type: 'string' }], tables: [] },
+  }));
+  await page.goto('/?q=Telemetry');
+  await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+  const retry = page.locator('#field-list').getByRole('button', { name: 'Try again' });
+  await expect(retry).toBeVisible();
+  await page.locator('#field-search').fill('host');
+  await expect(retry).toBeVisible();
+  healthy = true;
+  await retry.click();
+  await expect(page.locator('#source-list button')).toHaveCount(5);
+  await expect(page.locator('#field-list .field-path')).toHaveText(['host']);
+  await expect(page.locator('#field-search')).toHaveValue('host');
+  await run(page, 3);
+  expect(errors).toEqual([]);
+});
+
+test('stalled field catalog loading offers a retry and keeps the query editor usable', async ({ page }) => {
+  let release: () => void = () => {};
+  const stalled = new Promise<void>(resolve => { release = resolve; });
+  let first = true;
+  await page.route('**/api/fields', async route => {
+    if (first) {
+      first = false;
+      await stalled;
+    }
+    await route.continue().catch(() => {});
+  });
+  await page.clock.install();
+  try {
+    await page.goto('/?q=Telemetry');
+    await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+    await expect(page.locator('#field-list')).toHaveAttribute('aria-busy', 'true');
+    await page.locator('#field-search').fill('host');
+    await expect(page.locator('#field-list')).toHaveText('Loading field catalog…');
+    await page.clock.fastForward(10001);
+    const retry = page.locator('#field-list').getByRole('button', { name: 'Try again' });
+    await expect(retry).toBeVisible();
+    await expect(page.locator('#field-list')).toHaveAttribute('aria-busy', 'false');
+    await run(page, 3);
+    release();
+    await retry.click();
+    await expect(page.locator('#source-list button')).toHaveCount(5);
+    await expect(page.locator('#field-list .field-path')).toHaveText(['host']);
+  } finally {
+    release();
+  }
+});
+
 test('mobile navigation, result cards, JSON viewer and value pivots', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, 'Telemetry | project host, score, TimeGenerated');

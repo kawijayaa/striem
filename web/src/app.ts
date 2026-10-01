@@ -12,6 +12,7 @@ import {
 } from './features/results';
 import type { ResultSort } from './features/results';
 import { createTimeline } from './features/timeline';
+import { parseFieldsResponse, parseSchemaResponse } from './features/schema';
 import { addTimeRangeFilter, addValueFilter, querySource, replaceQuerySource } from './kql/query';
 import {
   createBrowserStorage,
@@ -26,13 +27,11 @@ import type {
   EventRow,
   FieldGroup,
   FieldMetadata,
-  FieldsResponse,
   InvestigationQuestion,
   QueryError,
   QueryHistoryItem,
   QueryResult,
   SavedQuery,
-  SchemaResponse,
   SchemaTable,
 } from './types';
 import { createEventDialog } from './ui/event-dialog';
@@ -84,6 +83,9 @@ let dataSources: SchemaTable[] = [];
 let fieldCompletions: Completion[] = [];
 let tableCompletions: Completion[] = [{ label: 'Events', type: 'class' }];
 let activeTable = 'Events';
+let fieldsReady = false;
+let fieldsRequestGeneration = 0;
+let fieldsController: AbortController | null = null;
 
 let queryHistory = readQueryHistory(browserStorage);
 let savedQueries = readSavedQueries(browserStorage);
@@ -893,6 +895,7 @@ function showInvestigationPanel(view: 'questions' | 'hunts'): void {
 }
 
 function renderDataSources(): void {
+  if (!fieldsReady) return;
   const list = $('#source-list');
   list.replaceChildren();
   $('#source-count').textContent = String(dataSources.length);
@@ -1225,6 +1228,7 @@ async function loadQuestions(backgroundRefresh = false) {
 }
 
 function renderFields(filter = ''): void {
+  if (!fieldsReady) return;
   const list = $('#field-list');
   const normalized = filter.trim().toLowerCase();
   list.replaceChildren();
@@ -1268,11 +1272,29 @@ function renderFields(filter = ''): void {
 }
 
 async function loadFields() {
+  const generation = ++fieldsRequestGeneration;
+  fieldsController?.abort();
+  const controller = new AbortController();
+  fieldsController = controller;
+  fieldsReady = false;
+  const targets = [$('#source-list'), $('#field-list')];
+  targets.forEach(target => {
+    target.setAttribute('aria-busy', 'true');
+    const loading = document.createElement('span');
+    loading.className = ui.muted;
+    loading.textContent = target.id === 'source-list' ? 'Loading data sources…' : 'Loading field catalog…';
+    target.replaceChildren(loading);
+  });
+  const timeout = window.setTimeout(() => controller.abort(), 10000);
   try {
-    const [result, schema] = await Promise.all([
-      request<FieldsResponse>('/api/fields'),
-      request<SchemaResponse>('/api/schema'),
+    const [rawFields, rawSchema] = await Promise.all([
+      request<unknown>('/api/fields', { signal: controller.signal }),
+      request<unknown>('/api/schema', { signal: controller.signal }),
     ]);
+    if (generation !== fieldsRequestGeneration) return;
+    if (controller.signal.aborted) throw new DOMException('Field loading timed out', 'AbortError');
+    const result = parseFieldsResponse(rawFields);
+    const schema = parseSchemaResponse(rawSchema);
     commonFields = result.common;
     fieldGroups = result.tables;
     dataSources = schema.tables ?? [];
@@ -1281,7 +1303,10 @@ async function loadFields() {
     challengeLabel.textContent = challengeName;
     challengeLabel.setAttribute('title', challengeName);
     document.title = `${challengeName} | striem`;
+    availableTables.clear();
+    availableTables.add('Events');
     fieldGroups.forEach(group => availableTables.add(group.table));
+    if (!availableTables.has(activeTable)) activeTable = 'Events';
     const source = querySource(editor.state.doc.toString());
     if (source && availableTables.has(source)) activeTable = source;
     fieldCompletions = [
@@ -1296,11 +1321,20 @@ async function loadFields() {
       { label: 'Events', type: 'class' },
       ...fieldGroups.map(group => ({ label: group.table, type: 'class' })),
     ];
+    fieldsReady = true;
     renderDataSources();
-    renderFields();
+    renderFields($<HTMLInputElement>('#field-search').value);
   } catch {
+    if (generation !== fieldsRequestGeneration) return;
+    controller.abort();
     renderLoadFailure($('#source-list'), 'Could not load data sources.', () => void loadFields());
     renderLoadFailure($('#field-list'), 'Could not load fields.', () => void loadFields());
+  } finally {
+    window.clearTimeout(timeout);
+    if (generation === fieldsRequestGeneration) {
+      fieldsController = null;
+      targets.forEach(target => target.setAttribute('aria-busy', 'false'));
+    }
   }
 }
 
