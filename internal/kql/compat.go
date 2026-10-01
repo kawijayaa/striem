@@ -38,6 +38,26 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"bag_merge", "bag_remove_keys"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			maximum := 64
+			if name == "bag_remove_keys" {
+				maximum = 2
+			}
+			if len(args) < 2 || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 2 to %d arguments", name, maximum)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if arg.Type != ksql.TypeDynamic && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s requires dynamic arguments", name)
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
+		}))
+	}
 	for _, name := range []string{"pack_array", "bag_pack", "pack", "pack_dictionary"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

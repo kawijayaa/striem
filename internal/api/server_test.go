@@ -825,3 +825,15 @@ func TestConstructedLongPrecisionThroughAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestBagOperationsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print b=bag_remove_keys(bag_merge(dynamic({"keep":true,"drop":1}),dynamic({"keep":false,"extra":[1,2]})),dynamic(["drop"])) | project renamed=b`)
+	bag, ok := rows[0]["renamed"].(map[string]any)
+	if !ok || bag["keep"] != true || len(bag) != 2 {
+		t.Fatalf("bag=%#v", rows)
+	}
+	if values, ok := bag["extra"].([]any); !ok || len(values) != 2 {
+		t.Fatalf("array=%#v", bag)
+	}
+}
