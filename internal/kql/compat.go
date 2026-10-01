@@ -69,6 +69,21 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("array_split", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 2 {
+			return ksql.TypedExpression{}, fmt.Errorf("array_split requires 2 arguments")
+		}
+		if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("array_split requires a dynamic array")
+		}
+		switch args[1].Type {
+		case ksql.TypeInt, ksql.TypeLong, ksql.TypeDynamic, ksql.TypeUnknown:
+		default:
+			return ksql.TypedExpression{}, fmt.Errorf("array_split requires an integer or dynamic integer array")
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_array_split", Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}}, nil
+	}))
+
 	options = append(options, ksql.WithTypedFunction("array_slice", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 3 {
 			return ksql.TypedExpression{}, fmt.Errorf("array_slice requires 3 arguments")

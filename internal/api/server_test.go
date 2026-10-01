@@ -975,3 +975,37 @@ func TestZipThroughAPI(t *testing.T) {
 		t.Fatalf("second=%#v", rows)
 	}
 }
+
+func TestArraySplitThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print a=array_split(pack_array(true,9223372036854775807,bag_pack("x",false)),1) | project renamed=a`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	segments, ok := result.Rows[0]["renamed"].([]any)
+	if !ok || len(segments) != 2 {
+		t.Fatalf("split=%#v", result)
+	}
+	first, ok := segments[0].([]any)
+	if !ok || len(first) != 1 || first[0] != true {
+		t.Fatalf("first=%#v", segments)
+	}
+	second, ok := segments[1].([]any)
+	if !ok || len(second) != 2 || second[0] != json.Number("9223372036854775807") {
+		t.Fatalf("second=%#v", segments)
+	}
+	bag, ok := second[1].(map[string]any)
+	if !ok || bag["x"] != false {
+		t.Fatalf("bag=%#v", second)
+	}
+}

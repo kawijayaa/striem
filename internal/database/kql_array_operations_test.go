@@ -130,3 +130,35 @@ func TestZipBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestArraySplitBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		value, indices any
+	}{
+		{"input", strings.Repeat("x", maxReplacementBytes+1), int64(0)},
+		{"indices input", "[]", strings.Repeat("x", maxReplacementBytes+1)},
+		{"segments", "[]", `[` + strings.TrimSuffix(strings.Repeat("0,", maxReplacementParts), ",") + `]`},
+		{"output", `["` + strings.Repeat("x", maxReplacementBytes-4) + `"]`, int64(0)},
+		{"negative bound", "[1]", math.MinInt64},
+		{"positive bound", "[1]", math.MaxInt64},
+		{"descending", "[1,2,3]", "[2,1]"},
+		{"fractional", "[1,2,3]", "[1.5]"},
+		{"overflow", "[1,2,3]", "[9223372036854775808]"},
+		{"string index", "[1,2,3]", `["1"]`},
+		{"null index", "[1,2,3]", "[null]"},
+		{"invalid index", "[1,2,3]", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := kqlArraySplit(tc.value, tc.indices); err == nil {
+				t.Fatal("expected diagnostic")
+			}
+		})
+	}
+	// Non-array input behavior remains characterization pending Kusto evidence.
+	for _, value := range []any{nil, "null", "{}", "invalid"} {
+		if got, err := kqlArraySplit(value, int64(0)); err != nil || got != nil {
+			t.Fatalf("invalid input: %v %v", got, err)
+		}
+	}
+}

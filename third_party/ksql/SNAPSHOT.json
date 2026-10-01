@@ -1,11 +1,11 @@
 {
-  "baseCommit": "96681db4477fec6fb627c8ffd93fbc1cb0a5a5bb",
+  "baseCommit": "f0ff3c0c52f6386c459eeae429e23812b5ade4ca",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
     "NOTICE": "4e31042f17cc5f86dc8216293ecd8fe07c8fc8f40fc428a3d456bfe39abd9beb",
     "README.md": "0117bc66da044b1c04c5f2c84dd614c9118f6bd7e858264f0cc00acc562598d6",
-    "array_names_test.go": "20d358b521020e6500558e0f3d9e96252b53babc1a9ba7069fd740303194cbea",
+    "array_names_test.go": "34e357754cf72245cd9c30870f5d507350d026d68321d0730a9d019e42ac5145",
     "bag_metadata_test.go": "7f04e45a3b691d0a9105f7ae02a7a02b35081c2144e8c794608e4722ce364b52",
     "binding_test.go": "6c8113f6e7e15fa09f8ef4d683c57f17d5d67369a5fc4f15dfaa8d6b20ada76d",
     "column_patterns.go": "c979c55a6e2d9a62e26a276d1744d798e0778933291d8b6a28d7ce2055e2e19d",
@@ -47,7 +47,7 @@
     "kql/strings.go": "29cf0dc91785337793d6192351e9b83a4011b759605ae2a740b770d268041a89",
     "kql/strings_test.go": "c85ae025f7ba1a713fdf3694c65d70c26fafc4fda41f8971ac054d13c313ebe2",
     "kql/token.go": "959857fb5773b7a46a82b11662b29db4f785205cfa9fc1f17786193533ba25a4",
-    "lowering.go": "03396cec003d99960278f7d1c52d1827085f0cacdf4020473067c9be82cc8b1d",
+    "lowering.go": "c0f0a01b72529942edea67b70595b5a1ec056b80b29a00b822eee41e7d3fa080",
     "not_test.go": "49419d42a6cdd08c4c7cc53d305f1693295a119de461d49edde768c4afed6977",
     "options.go": "8ae2fb9975754e6aac13930226d1ba229985147f0d4545ffc1c08387d7687aeb",
     "pack_array_test.go": "6e4a2a46968402ce10eb52ec03773102aae8f72fcf932711cbe7160596dcc612",

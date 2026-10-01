@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -207,6 +208,73 @@ func kqlZip(values ...any) (any, error) {
 		if err := appendArrayElement(&result, row.Bytes()); err != nil {
 			return nil, err
 		}
+	}
+	result.WriteByte(']')
+	return result.String(), nil
+}
+
+func kqlArraySplit(value, indicesValue any) (any, error) {
+	elements, ok, err := dynamicArray(value)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	indices := make([]int64, 0)
+	if index, ok := indicesValue.(int64); ok {
+		indices = append(indices, index)
+	} else {
+		rawIndices, ok, err := dynamicArray(indicesValue)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("array_split requires an integer or a dynamic integer array")
+		}
+		if len(rawIndices) >= maxReplacementParts {
+			return nil, fmt.Errorf("array_split segment limit exceeded")
+		}
+		for _, raw := range rawIndices {
+			index, err := strconv.ParseInt(string(raw), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("array_split indices must be signed long integers")
+			}
+			indices = append(indices, index)
+		}
+	}
+	size := int64(len(elements))
+	previous := int64(0)
+	for i, index := range indices {
+		if index < 0 {
+			index += size
+		}
+		if index < 0 || index > size {
+			return nil, fmt.Errorf("array_split out-of-range split points are not yet supported")
+		}
+		if index < previous {
+			return nil, fmt.Errorf("array_split descending split points are not yet supported")
+		}
+		indices[i] = index
+		previous = index
+	}
+	indices = append(indices, size)
+	var result bytes.Buffer
+	result.WriteByte('[')
+	previous = 0
+	for _, index := range indices {
+		var segment bytes.Buffer
+		segment.WriteByte('[')
+		for _, element := range elements[int(previous):int(index)] {
+			if err := appendArrayElement(&segment, element); err != nil {
+				return nil, err
+			}
+		}
+		segment.WriteByte(']')
+		if err := appendArrayElement(&result, segment.Bytes()); err != nil {
+			return nil, err
+		}
+		previous = index
 	}
 	result.WriteByte(']')
 	return result.String(), nil
