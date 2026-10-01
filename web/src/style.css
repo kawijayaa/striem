@@ -181,6 +181,7 @@
 }
 
 .ingestion-card .brand-name { margin-bottom: 8px; }
+.ingestion-card > button { margin-top: 18px; }
 
 .ingestion-challenge-name {
   color: var(--paper-2);

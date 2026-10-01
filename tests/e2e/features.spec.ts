@@ -441,6 +441,52 @@ test('loading and startup failure screens', async ({ page }) => {
   await page.reload();
   await expect(page.locator('#ingestion-title')).toHaveText('Ingestion could not complete');
   await expect(page.locator('#ingestion-detail')).toHaveText('Fixture import failed');
+  await page.unroute('**/api/ready');
+  await page.getByRole('button', { name: 'Reload workspace' }).click();
+  await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+  await expect(page.locator('#source-list button')).toHaveCount(5);
+});
+
+test('startup rejects malformed readiness responses and reconnects automatically', async ({ page }) => {
+  let reconnect = false;
+  await page.route('**/api/ready', route => reconnect ? route.continue() : route.fulfill({
+    status: 200, json: { challengeName: 123, status: 'unexpected' },
+  }));
+  await page.goto('/');
+  await expect(page.locator('#ingestion-title')).toHaveText('Connecting to workspace');
+  await expect(page.locator('#ingestion-status')).toHaveText('Reconnecting…');
+  await expect(page.locator('.app-shell')).toHaveAttribute('inert', '');
+  await expect(page.locator('#ingestion-challenge-name')).toBeHidden();
+  reconnect = true;
+  await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+  await expect(page.locator('#source-list button')).toHaveCount(5);
+});
+
+test('a stalled readiness request times out and recovers', async ({ page }) => {
+  await page.clock.install();
+  let release: () => void = () => {};
+  const stalled = new Promise<void>(resolve => { release = resolve; });
+  let first = true;
+  await page.route('**/api/ready', async route => {
+    if (first) {
+      first = false;
+      await stalled;
+    }
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.goto('/');
+    await expect(page.locator('#ingestion-screen')).toBeVisible();
+    await page.clock.fastForward(8001);
+    await expect(page.locator('#ingestion-title')).toHaveText('Connecting to workspace');
+    await expect(page.locator('.app-shell')).toHaveAttribute('inert', '');
+    release();
+    await page.clock.fastForward(1001);
+    await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+    await expect(page.locator('#source-list button')).toHaveCount(5);
+  } finally {
+    release();
+  }
 });
 
 test('answer drafts persist, wrong answers recover, completion unlocks flag and persists', async ({ page, context }) => {
