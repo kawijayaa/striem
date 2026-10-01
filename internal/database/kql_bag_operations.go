@@ -271,3 +271,52 @@ func setBagProperty(bag map[string]json.RawMessage, path []string, value json.Ra
 	}
 	return encoded, nil
 }
+
+func kqlBagZip(keysValue, valuesValue any) (any, error) {
+	keys, ok, err := dynamicArray(keysValue)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	values, _, err := dynamicArray(valuesValue)
+	if err != nil {
+		return nil, err
+	}
+	bag := make(map[string]json.RawMessage)
+	size := 2
+	for i, raw := range keys {
+		if len(raw) == 0 || raw[0] != '"' {
+			continue
+		}
+		var key string
+		if err := json.Unmarshal(raw, &key); err != nil {
+			return nil, err
+		}
+		if _, exists := bag[key]; exists {
+			return nil, fmt.Errorf("bag_zip duplicate keys are not yet supported")
+		}
+		value := json.RawMessage("null")
+		if i < len(values) {
+			value = values[i]
+		}
+		// Account for key escaping and the encoder's HTML escaping before retaining
+		// the property. Marshal RawMessage preserves exact JSON integer digits.
+		encodedKey, _ := json.Marshal(key)
+		encodedValue, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		extra := len(encodedKey) + 1 + len(encodedValue)
+		if len(bag) > 0 {
+			extra++
+		}
+		if extra > maxBagBytes-size {
+			return nil, fmt.Errorf("bag_zip result exceeds %d bytes", maxBagBytes)
+		}
+		size += extra
+		bag[key] = encodedValue
+	}
+	return encodeBag(bag)
+}

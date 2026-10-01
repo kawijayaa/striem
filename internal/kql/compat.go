@@ -204,11 +204,11 @@ func compatibilityOptions() []ksql.Option {
 		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_bag_set_key", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[2].Type)}}}}, nil
 	}))
 
-	for _, name := range []string{"bag_merge", "bag_remove_keys"} {
+	for _, name := range []string{"bag_merge", "bag_remove_keys", "bag_zip"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			maximum := 64
-			if name == "bag_remove_keys" {
+			if name != "bag_merge" {
 				maximum = 2
 			}
 			if len(args) < 2 || len(args) > maximum {

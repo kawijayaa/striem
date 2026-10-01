@@ -1081,3 +1081,25 @@ func TestRepeatThroughAPI(t *testing.T) {
 		t.Fatalf("zero/negative count=%#v", result)
 	}
 }
+
+func TestBagZipThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	response := queryAPI(t, server.URL, `print b=bag_zip(dynamic(["bool","long","missing"]),pack_array(true,9223372036854775807)) | project renamed=b`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("query failed: %s", body)
+	}
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	bag, ok := result.Rows[0]["renamed"].(map[string]any)
+	if !ok || len(bag) != 3 || bag["bool"] != true || bag["long"] != json.Number("9223372036854775807") || bag["missing"] != nil {
+		t.Fatalf("bag=%#v", result)
+	}
+}

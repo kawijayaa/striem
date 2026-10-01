@@ -70,3 +70,21 @@ func TestBagSetKeyBounds(t *testing.T) {
 		t.Fatal("expected work limit")
 	}
 }
+
+func TestBagZipResourceBounds(t *testing.T) {
+	for _, tc := range []struct{ name, keys, values string }{
+		{"keys input", strings.Repeat("x", maxBagBytes+1), "[]"},
+		{"values input", `["a"]`, strings.Repeat("x", maxBagBytes+1)},
+		{"keys count", `[` + strings.Repeat("0,", maxReplacementParts) + `0]`, "[]"},
+		{"values count", "[]", `[` + strings.Repeat("0,", maxReplacementParts) + `0]`},
+		{"output", `["a"]`, `["` + strings.Repeat("x", maxBagBytes-4) + `"]`},
+		{"escaped output", `["a"]`, `["` + strings.Repeat("&", maxBagBytes/2) + `"]`},
+		{"duplicates", `["a","a"]`, "[1,2]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := kqlBagZip(tc.keys, tc.values); err == nil {
+				t.Fatal("expected diagnostic")
+			}
+		})
+	}
+}

@@ -112,3 +112,41 @@ func TestBagSetKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBagZip(t *testing.T) {
+	db := featureDatabase(t)
+	// All six documented cases, including non-array input columns.
+	query := `let Data=datatable(KeysArray:dynamic,ValuesArray:dynamic)[dynamic(["a","b","c"]),dynamic([1,"2",3.4]),dynamic(["a","b","c"]),dynamic([1,"2"]),dynamic(["a","b"]),dynamic([1,"2",2.5]),dynamic(["a",8,"b"]),dynamic([1,"2",2.5]),dynamic(["a",8,"b"]),dynamic(1),dynamic("a"),dynamic([1,"2",2.5])]; Data | project NewBag=bag_zip(KeysArray,ValuesArray)`
+	want := `[[{"a":1,"b":"2","c":3.4}] [{"a":1,"b":"2","c":null}] [{"a":1,"b":"2"}] [{"a":1,"b":2.5}] [{"a":null,"b":null}] [<nil>]]`
+	if got := fmt.Sprint(featureRows(t, db, query)); got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+	for _, tc := range []struct{ query, want string }{
+		{`print b=bag_zip(dynamic([]),dynamic([]))`, `[[{}]]`},
+		{`print b=bag_zip(dynamic([true,null,{},[1]]),dynamic([1,2,3,4]))`, `[[{}]]`},
+		{`print b=bag_zip(pack_array("long","bool","array","object"),pack_array(9223372036854775807,true,dynamic([null,1]),bag_pack("x",false)))`, `[[{"array":[null,1],"bool":true,"long":9223372036854775807,"object":{"x":false}}]]`},
+		{`print b=bag_zip(dynamic(["é\u0000",""]),dynamic([1,2]))`, `[[{"":2,"é\u0000":1}]]`},
+		{`print b=bag_zip(dynamic(["a.b","$.x"]),dynamic([1,2]))`, `[[{"$.x":2,"a.b":1}]]`},
+		{`print b=bag_zip(dynamic(["<key>"]),dynamic(["&value"]))`, `[[{"\u003ckey\u003e":"\u0026value"}]]`},
+		{`let keys=dynamic(["one","two"]); print b=bag_zip(keys,pack_array(1,2)) | project value=b.two`, `[[2]]`},
+		{`Events | where n == 1 | project b=bag_zip(dynamic(["one","two"]),items) | project value=b.two`, `[[2]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+	compiled, err := Compile(`print bag_zip(dynamic([]),dynamic([])) | project renamed=Column1`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := compiled.DynamicColumns["renamed"]; !ok {
+		t.Fatal("dynamic metadata lost")
+	}
+	for _, expr := range []string{`bag_zip()`, `bag_zip(dynamic([]))`, `bag_zip("[]",dynamic([]))`, `bag_zip(dynamic([]),1)`, `bag_zip(dynamic([]),dynamic([]),dynamic([]))`} {
+		if _, err := Compile(`print b=`+expr, time.Now()); err == nil {
+			t.Errorf("accepted %s", expr)
+		}
+	}
+}
