@@ -41,7 +41,7 @@ func TestJaccardIndex(t *testing.T) {
 		t.Fatal(got)
 	}
 	query = `print jaccard_index(dynamic([1]),dynamic([2])) | getschema | project ColumnName,ColumnType`
-	if got := fmt.Sprint(featureRows(t, db, query)); got != `[[Column1 real]]` {
+	if got := fmt.Sprint(featureRows(t, db, query)); got != `[[print_0 real]]` {
 		t.Fatal(got)
 	}
 	for _, expr := range []string{`jaccard_index()`, `jaccard_index(dynamic([]))`, `jaccard_index("[]",dynamic([]))`, `jaccard_index(dynamic([]),1)`, `jaccard_index(dynamic([]),dynamic([]),dynamic([]))`} {

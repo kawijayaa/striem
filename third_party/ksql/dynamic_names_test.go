@@ -21,8 +21,8 @@ func TestDynamicAccessorNames(t *testing.T) {
 			{`print d=dynamic({"where":{"a.b":31}}) | project d.['where'].["a.b"] | project ['d_where_a.b']`, `[[31]]`, []string{"d_where_a.b"}},
 			{`print d=dynamic([11,22]),i=1 | project d[i]`, `[[22]]`, []string{"d_"}},
 			{`print d=dynamic([11,22]) | project d[(-1)]`, `[[22]]`, []string{"d_"}},
-			{`let original=dynamic({"a":19}); let alias=original; print alias["a"]`, `[[19]]`, []string{"alias_a"}},
-			{`print dynamic({"a":23}).a,dynamic([29])[0]`, `[[23 29]]`, []string{"a", "0"}},
+			{`let original=dynamic({"a":19}); let alias=original; print root=1 | project alias["a"]`, `[[19]]`, []string{"alias_a"}},
+			{`print dynamic({"a":23}).a,dynamic([29])[0]`, `[[23 29]]`, []string{"print_0", "print_1"}},
 			{`print d=dynamic({"a":31}) | extend d.a | project d_a`, `[[31]]`, []string{"d_a"}},
 		} {
 			result := compiler.Compile(tc.query)
@@ -40,7 +40,7 @@ func TestDynamicAccessorNames(t *testing.T) {
 				t.Fatalf("%s rows=%s want=%s", tc.query+" SQL="+result.SQL, got, tc.rows)
 			}
 		}
-		for _, query := range []string{`let d=dynamic({"a":{"b":17}}); print d.a.b`, `let d=dynamic({"a":{"b":17}}); print d["a"]["b"]`} {
+		for _, query := range []string{`let d=dynamic({"a":{"b":17}}); print root=1 | project d.a.b`, `let d=dynamic({"a":{"b":17}}); print root=1 | project d["a"]["b"]`} {
 			result := compiler.Compile(query)
 			if !result.OK() || len(result.Columns) != 1 || result.Columns[0] != (ksql.Column{Name: "d_a_b", Type: ksql.TypeDynamic}) {
 				t.Fatal(result)

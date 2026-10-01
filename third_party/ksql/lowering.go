@@ -243,7 +243,7 @@ func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions [
 		return Relation{}
 	}
 	if input.Unknown {
-		items, output := s.projectItems(expressions, true, input)
+		items, output := s.projectItems(expressions, true, input, false)
 		return Relation{Query: &sqlast.Select{From: from, Projections: append([]sqlast.SelectItem{{Expr: &sqlast.Star{}}}, items...)}, Schema: Schema{Unknown: true, Columns: output.Columns}}
 	}
 	type extension struct {

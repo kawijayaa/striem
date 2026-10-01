@@ -29,7 +29,7 @@ func TestArraySplit(t *testing.T) {
 			}
 		})
 	}
-	compiled, err := Compile(`print array_split(dynamic([]),0) | project renamed=Column1`, time.Now())
+	compiled, err := Compile(`print array_split(dynamic([]),0) | project renamed=print_0`, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

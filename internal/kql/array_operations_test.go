@@ -33,7 +33,7 @@ func TestArrayOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(compiled.Columns, []string{"Column1", "Column2", "named"}) {
+	if !reflect.DeepEqual(compiled.Columns, []string{"print_0", "print_1", "named"}) {
 		t.Fatal(compiled.Columns)
 	}
 	if len(compiled.DynamicColumns) != 3 {
@@ -78,10 +78,10 @@ func TestArraySlice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(compiled.Columns, []string{"Column1"}) {
+	if !reflect.DeepEqual(compiled.Columns, []string{"print_0"}) {
 		t.Fatal(compiled.Columns)
 	}
-	if _, ok := compiled.DynamicColumns["Column1"]; !ok {
+	if _, ok := compiled.DynamicColumns["print_0"]; !ok {
 		t.Fatal("dynamic metadata lost")
 	}
 	for _, expr := range []string{`array_slice()`, `array_slice(dynamic([]),0)`, `array_slice("[]",0,1)`, `array_slice(dynamic([]),0.5,1)`, `array_slice(dynamic([]),0,true)`, `array_slice(dynamic([]),0,1,2)`} {

@@ -36,8 +36,8 @@ func TestParseJSONContracts(t *testing.T) {
 			}
 		}
 		for _, tc := range []struct{ query, want string }{
-			{`print ` + name + `('{"a":73}') | project Column1.a`, `[[73]]`},
-			{`let raw='{"a":79}'; print ` + name + `(raw) | project raw.a`, `[[79]]`},
+			{`print ` + name + `('{"a":73}') | project print_0.a`, `[[73]]`},
+			{`let raw='{"a":79}'; print root=1 | project ` + name + `(raw) | project raw.a`, `[[79]]`},
 			{`print raw='{"a":83}' | project ` + name + `(raw) | project raw.a`, `[[83]]`},
 			{`print d=dynamic({"a":{"b":89}}) | project ` + name + `(d.a) | project d_a.b`, `[[89]]`},
 		} {
@@ -58,7 +58,7 @@ func TestParseJSONContracts(t *testing.T) {
 		{`Events | where n == 1 | project tostring(RawData.user) | project RawData_user`, `[[alice]]`},
 		{`print raw=dynamic([1,2]) | project tostring(raw) | project raw`, `[[[1,2]]]`},
 		{`Events | where n == 1 | project RawData.user,items[0] | project RawData_user,items_0`, `[[alice 1]]`},
-		{`let d=dynamic({"a":{"b":61}}); print d.a.b | project d_a_b`, `[[61]]`},
+		{`let d=dynamic({"a":{"b":61}}); print root=1 | project d.a.b | project d_a_b`, `[[61]]`},
 		{`print d=dynamic({"a.b":67}) | project d.['a.b'] | project ['d_a.b']`, `[[67]]`},
 
 		{`print d=dynamic([11,22,33])[toint("-1")]`, `[[33]]`},

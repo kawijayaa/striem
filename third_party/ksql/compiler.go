@@ -210,7 +210,7 @@ func (s *compileState) source(source kql.Source) Relation {
 	case "union":
 		return s.union(Relation{}, kql.Operator{Kind: "union", Body: *source.Union, Span: source.Span})
 	case "print":
-		items, schema := s.projectItems(source.Items, true, Schema{})
+		items, schema := s.projectItems(source.Items, true, Schema{}, true)
 		return Relation{Query: &sqlast.Select{Projections: items}, Schema: schema}
 	case "datatable":
 		columns := make([]string, len(source.Columns))
@@ -332,7 +332,7 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		if !s.checkProjectionLimit(spec.Expressions, operator) {
 			return Relation{}
 		}
-		items, schema := s.projectItems(spec.Expressions, false, input.Schema)
+		items, schema := s.projectItems(spec.Expressions, false, input.Schema, false)
 		return Relation{Query: &sqlast.Select{From: from, Projections: items}, Schema: schema}
 	case "extend":
 		spec := operator.Body.(kql.ExpressionSpec)
@@ -342,14 +342,14 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	case "summarize":
 		spec := operator.Body.(kql.SummarizeSpec)
 		groups := s.expressions(spec.By)
-		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema)
-		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema)
+		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema, false)
+		aggregateItems, aggregateSchema := s.projectItems(spec.Aggregates, true, input.Schema, false)
 		groupSchema.Columns = append(groupSchema.Columns, aggregateSchema.Columns...)
 		s.validateUnique(groupSchema.Columns, operator.Span, feature)
 		return Relation{Query: &sqlast.Select{From: from, Projections: append(groupItems, aggregateItems...), GroupBy: groups}, Schema: groupSchema}
 	case "distinct":
 		spec := operator.Body.(kql.ExpressionSpec)
-		items, schema := s.projectItems(spec.Expressions, false, input.Schema)
+		items, schema := s.projectItems(spec.Expressions, false, input.Schema, false)
 		return Relation{Query: &sqlast.Select{Distinct: true, From: from, Projections: items}, Schema: schema}
 	case "getschema":
 		return s.getSchema(input.Schema, operator)
@@ -411,10 +411,10 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	}
 }
 
-func (s *compileState) projectItems(expressions []kql.Expression, inferAlias bool, input Schema) ([]sqlast.SelectItem, Schema) {
+func (s *compileState) projectItems(expressions []kql.Expression, inferAlias bool, input Schema, printStyle bool) ([]sqlast.SelectItem, Schema) {
 	items := make([]sqlast.SelectItem, 0, len(expressions))
 	schema := Schema{}
-	for _, expression := range expressions {
+	for expressionIndex, expression := range expressions {
 		if _, star := expression.(*kql.StarExpression); star {
 			if input.Unknown {
 				items = append(items, sqlast.SelectItem{Expr: &sqlast.Star{}})
@@ -438,6 +438,9 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 			item.Expr = bound.SQL
 			if inferAlias {
 				item.Alias = inferredName(expression, bound.Name)
+			}
+			if printStyle {
+				item.Alias = fmt.Sprintf("print_%d", expressionIndex)
 			}
 		}
 		if item.Expr != nil {

@@ -28,7 +28,7 @@ func TestArraySum(t *testing.T) {
 			})
 		}
 		query := `let input=dynamic([1,2,3]); print ` + name + `(input) | getschema | project ColumnName,ColumnType`
-		if got := fmt.Sprint(featureRows(t, db, query)); got != `[[Column1 real]]` {
+		if got := fmt.Sprint(featureRows(t, db, query)); got != `[[print_0 real]]` {
 			t.Fatal(got)
 		}
 		for _, expr := range []string{name + `()`, name + `("[1]")`, name + `(true)`, name + `(dynamic([1]),dynamic([2]))`} {

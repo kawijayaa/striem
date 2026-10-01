@@ -1180,8 +1180,16 @@ func TestDynamicAccessorNamesThroughAPI(t *testing.T) {
 
 func TestParseJSONImplicitNameThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
-	rows := queryRows(t, server.URL, `let raw='{"a":97}'; print parse_json(raw) | project raw.a`)
+	rows := queryRows(t, server.URL, `let raw='{"a":97}'; print root=1 | project parse_json(raw) | project raw.a`)
 	if len(rows) != 1 || rows[0]["raw_a"] != float64(97) {
+		t.Fatalf("rows=%#v", rows)
+	}
+}
+
+func TestPrintPositionalNamesThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print explicit=1,tostring("hello"),parse_json('{"a":3}').a`)
+	if len(rows) != 1 || rows[0]["explicit"] != float64(1) || rows[0]["print_1"] != "hello" || rows[0]["print_2"] != float64(3) {
 		t.Fatalf("rows=%#v", rows)
 	}
 }

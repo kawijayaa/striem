@@ -43,7 +43,7 @@ func TestArrayIff(t *testing.T) {
 	if got := fmt.Sprint(featureRows(t, db, query)); got != `[[1]]` {
 		t.Fatal(got)
 	}
-	compiled, err := Compile(`print array_iff(dynamic([]),1,0) | project renamed=Column1`, time.Now())
+	compiled, err := Compile(`print array_iff(dynamic([]),1,0) | project renamed=print_0`, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

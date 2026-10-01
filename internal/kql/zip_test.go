@@ -27,7 +27,7 @@ func TestZip(t *testing.T) {
 			}
 		})
 	}
-	compiled, err := Compile(`print zip(dynamic([]),dynamic([])) | project renamed=Column1`, time.Now())
+	compiled, err := Compile(`print zip(dynamic([]),dynamic([])) | project renamed=print_0`, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

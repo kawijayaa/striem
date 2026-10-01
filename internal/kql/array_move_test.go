@@ -47,7 +47,7 @@ func TestArrayRotationAndShift(t *testing.T) {
 				t.Errorf("accepted %s(%s)", name, args)
 			}
 		}
-		compiled, err := Compile(`print `+name+`(dynamic([1]),1) | project renamed=Column1`, time.Now())
+		compiled, err := Compile(`print `+name+`(dynamic([1]),1) | project renamed=print_0`, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
