@@ -327,20 +327,44 @@ function addColumnResizer(header: HTMLTableCellElement, column: string): void {
     resizer.setAttribute('aria-valuenow', String(Math.round(next)));
     resizer.setAttribute('aria-valuetext', `${Math.round(next)} pixels wide`);
   };
+  let finishDrag: (() => void) | undefined;
+  let cancelDrag: (() => void) | undefined;
   resizer.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0) return;
     event.preventDefault();
+    finishDrag?.();
     const startX = event.clientX;
     const startWidth = header.getBoundingClientRect().width;
-    resizer.setPointerCapture(event.pointerId);
-    const move = (moveEvent: PointerEvent) => resize(startWidth + moveEvent.clientX - startX);
-    const stop = () => {
+    const pointerId = event.pointerId;
+    resizer.setPointerCapture(pointerId);
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId === pointerId) resize(startWidth + moveEvent.clientX - startX);
+    };
+    const cleanup = () => {
       resizer.removeEventListener('pointermove', move);
       resizer.removeEventListener('pointerup', stop);
+      resizer.removeEventListener('pointercancel', stop);
+      resizer.removeEventListener('lostpointercapture', stop);
+      finishDrag = undefined;
+      cancelDrag = undefined;
+      if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
     };
+    const stop = (stopEvent: PointerEvent) => {
+      if (stopEvent.pointerId === pointerId) cleanup();
+    };
+    finishDrag = cleanup;
+    cancelDrag = () => { resize(startWidth); cleanup(); };
     resizer.addEventListener('pointermove', move);
     resizer.addEventListener('pointerup', stop);
+    resizer.addEventListener('pointercancel', stop);
+    resizer.addEventListener('lostpointercapture', stop);
   });
   resizer.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && cancelDrag) {
+      event.preventDefault();
+      cancelDrag();
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     resize(header.getBoundingClientRect().width + (event.key === 'ArrowRight' ? 16 : -16));

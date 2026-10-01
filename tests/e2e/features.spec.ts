@@ -70,6 +70,61 @@ test('filters on calculated result columns preserve the producing pipeline', asy
   await run(page, 3);
 });
 
+test('column resizing stops after interrupted drags and supports Escape cancellation', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await open(page, 'Telemetry | project host,score');
+  await run(page, 3);
+  const resizer = page.getByRole('separator', { name: 'Resize host column' });
+  await resizer.evaluate(element => element.addEventListener('pointerdown', event => {
+    element.setAttribute('data-test-pointer', String((event as PointerEvent).pointerId));
+  }));
+  const width = async () => Number(await resizer.getAttribute('aria-valuenow'));
+  const startDrag = async () => {
+    const box = (await resizer.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    expect(await resizer.evaluate((_element, point) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      return { tag: hit?.tagName, className: hit?.className };
+    }, { x, y })).toEqual({ tag: 'SPAN', className: 'column-resizer' });
+    await page.mouse.down();
+    expect(await resizer.getAttribute('data-test-pointer')).not.toBeNull();
+    return { x, y, pointerId: Number(await resizer.getAttribute('data-test-pointer')) };
+  };
+  for (const interruption of ['pointercancel', 'lostpointercapture']) {
+    const before = await width();
+    const drag = await startDrag();
+    await page.mouse.move(drag.x + 40, drag.y);
+    expect(await width()).toBeGreaterThan(before);
+    const resized = await width();
+    await resizer.dispatchEvent('pointermove', { pointerId: 999, clientX: drag.x + 200 });
+    expect(await width()).toBe(resized);
+    await resizer.dispatchEvent(interruption, { pointerId: drag.pointerId });
+    await resizer.dispatchEvent('pointermove', { pointerId: drag.pointerId, clientX: drag.x + 200 });
+    expect(await width()).toBe(resized);
+    await page.mouse.up();
+  }
+  const beforeCancel = await width();
+  const drag = await startDrag();
+  await page.mouse.move(drag.x + 60, drag.y);
+  await resizer.focus();
+  await page.keyboard.press('Escape');
+  expect(Math.abs((await width()) - beforeCancel)).toBeLessThanOrEqual(1);
+  await resizer.dispatchEvent('pointermove', { pointerId: drag.pointerId, clientX: drag.x + 200 });
+  expect(Math.abs((await width()) - beforeCancel)).toBeLessThanOrEqual(1);
+  await page.mouse.up();
+  for (const input of [{ isPrimary: false, button: 0 }, { isPrimary: true, button: 2 }]) {
+    await resizer.dispatchEvent('pointerdown', { ...input, pointerId: 999, clientX: drag.x });
+    await resizer.dispatchEvent('pointermove', { pointerId: 999, clientX: drag.x + 200 });
+    expect(Math.abs((await width()) - beforeCancel)).toBeLessThanOrEqual(1);
+  }
+  await resizer.press('ArrowRight');
+  expect(await width()).toBeGreaterThan(beforeCancel);
+  expect(errors).toEqual([]);
+});
+
 test('result keyboard navigation crosses JSON columns and preserves dialog focus', async ({ page }) => {
   await open(page, 'Telemetry | project host,details=iff(score==2,dynamic(null),details),score | order by score asc');
   await run(page, 3);
