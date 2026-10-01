@@ -88,7 +88,10 @@ func parseLet(tokens []Token) (Statement, []ParseError) {
 		return statement, []ParseError{{Code: "KQLP0101", Message: "expected 'let name = expression'", Span: statement.Span}}
 	}
 	statement.Name = tokens[1].Text
-	value := tokens[3:]
+	value := trimParentheses(tokens[3:])
+	if len(value) == 0 {
+		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokensSpan(tokens[3:])}}
+	}
 	if hasTopLevel(value, "|") || beginsTabularSource(value) {
 		pipeline, errs := parsePipeline(value)
 		statement.Pipeline = pipeline
@@ -528,9 +531,19 @@ func appendExpressions(destination []Expression, tokens []Token, errs []ParseErr
 	return append(destination, expressions...), append(errs, expressionErrs...)
 }
 
+// Strip all balanced outer parentheses in one pass. Recording the first close
+// at each leading depth prevents interior groups from being mistaken for wrappers.
 func trimParentheses(tokens []Token) []Token {
-	if len(tokens) < 2 || tokens[0].Text != "(" || tokens[len(tokens)-1].Text != ")" {
+	prefix := 0
+	for prefix < len(tokens) && tokens[prefix].Text == "(" {
+		prefix++
+	}
+	if prefix == 0 {
 		return tokens
+	}
+	closes := make([]int, prefix)
+	for i := range closes {
+		closes[i] = -1
 	}
 	depth := 0
 	for i, token := range tokens {
@@ -539,12 +552,22 @@ func trimParentheses(tokens []Token) []Token {
 			depth++
 		case ")":
 			depth--
-			if depth == 0 && i != len(tokens)-1 {
+			if depth < 0 {
 				return tokens
+			}
+			if depth < prefix && closes[depth] < 0 {
+				closes[depth] = i
 			}
 		}
 	}
-	return tokens[1 : len(tokens)-1]
+	if depth != 0 {
+		return tokens
+	}
+	layers := 0
+	for layers < prefix && closes[layers] == len(tokens)-1-layers {
+		layers++
+	}
+	return tokens[layers : len(tokens)-layers]
 }
 
 func parseSummarize(op Operator, tokens []Token) (Operator, []ParseError) {

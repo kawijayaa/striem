@@ -1240,3 +1240,15 @@ func TestDynamicGroupingRejectedThroughAPI(t *testing.T) {
 		t.Fatalf("cast rows=%#v", rows)
 	}
 }
+
+func TestParenthesizedTabularLetThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let T=((print d=dynamic({"a":109}),b=not(false))); T | project d,b`)
+	if len(rows) != 1 || rows[0]["b"] != true {
+		t.Fatalf("rows=%#v", rows)
+	}
+	object, ok := rows[0]["d"].(map[string]any)
+	if !ok || object["a"] != float64(109) {
+		t.Fatalf("dynamic=%#v", rows)
+	}
+}

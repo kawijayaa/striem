@@ -1,5 +1,5 @@
 {
-  "baseCommit": "69dcbe41145232846396e69faa9f5c0a1f43c4be",
+  "baseCommit": "42fc62487b156986a6f9da9cce7c9ddda03a440a",
   "files": {
     "CHANGELOG.md": "115b1fae272852b3b4a0a8cafdd557df16e13ee08080ea12396dcc6d66567bd2",
     "LICENSE": "a285281a72cb67492bfdf56e237ea8b8b99713b1c97cb907810faef6d6ff64b4",
@@ -44,10 +44,10 @@
     "kql/inventory_test.go": "6abbbc94a17a4b5ca3de905bb14cce99466dba60c0d26758466e1e0f1d8de454",
     "kql/lexer.go": "8f95e37bf49e29f80920a33e614bbe1a18ffd1d2f4fdefdccc6f91154e465c31",
     "kql/lexer_test.go": "74374fa7eaa4a50225cd44f076c58d0c0edc28f163f95847fd247582aed22b14",
-    "kql/parser.go": "358f02311ea5a050d597ad122d7c4bb5e5607d0fa4e703878e3e283b0647c54f",
+    "kql/parser.go": "89ce695fd1d0d38579d10d44adeabbe38f8c98fadecb0aacdf7465d6bbee46cd",
     "kql/parser_columns.go": "52e241ac3a9ab7a72a03b90aed70c976b9e6114b284cfae0a18dd5d88a5029f7",
     "kql/parser_expr.go": "be675099dd0848900e34d400f326aae1e145fdc0b93bacf5fb7c966e0c1c7e4d",
-    "kql/parser_test.go": "e1e8faeb74ab4c12d1dc71a6a569c31439eaf987e0fdab2d47dbb17d58691349",
+    "kql/parser_test.go": "1d92cdcf2e0fa70d482f6e07dbce24e451bb1d4cb53f7541855fe91944be5eea",
     "kql/strings.go": "29cf0dc91785337793d6192351e9b83a4011b759605ae2a740b770d268041a89",
     "kql/strings_test.go": "c85ae025f7ba1a713fdf3694c65d70c26fafc4fda41f8971ac054d13c313ebe2",
     "kql/token.go": "959857fb5773b7a46a82b11662b29db4f785205cfa9fc1f17786193533ba25a4",
@@ -55,6 +55,7 @@
     "not_test.go": "49419d42a6cdd08c4c7cc53d305f1693295a119de461d49edde768c4afed6977",
     "options.go": "8ae2fb9975754e6aac13930226d1ba229985147f0d4545ffc1c08387d7687aeb",
     "pack_array_test.go": "6e4a2a46968402ce10eb52ec03773102aae8f72fcf932711cbe7160596dcc612",
+    "parenthesized_let_test.go": "f902e38329178cec13651b4921faa21573b303f8fbca4289ec048d61daccac7d",
     "print_names_test.go": "7e0a8267b41770ef6fed53e304abd3117650e61942a90bf7a5962c5624ea22bc",
     "projection_limits_test.go": "f983ecb9d1125cab4dfe49a07ee67214afaab2e230db75b33db66b4af112ab68",
     "range_execution_test.go": "8609ffcd49cf995f096fce10ac0e1e87cc1beaa33fcd776cdf32f51893005745",

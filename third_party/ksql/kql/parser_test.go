@@ -218,3 +218,27 @@ func TestQuotedDotProperty(t *testing.T) {
 		}
 	}
 }
+
+func TestParenthesizedLetClassification(t *testing.T) {
+	for _, tc := range []struct {
+		query   string
+		tabular bool
+	}{
+		{`let T=((print x=1)); T`, true},
+		{`let T=((Events | take 1)); T`, true},
+		{`let n=((1)+(2)); print x=n`, false},
+		{`let d=((dynamic({"p":"|"}))); print x=d`, false},
+	} {
+		script, errs := Parse(tc.query)
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		binding := script.Statements[0].(*LetStatement)
+		if (binding.Pipeline != nil) != tc.tabular || (binding.Value != nil) == tc.tabular {
+			t.Fatalf("classification=%#v", binding)
+		}
+		if binding.Span.Offset != 0 || binding.Span.Length == 0 {
+			t.Fatalf("span=%#v", binding.Span)
+		}
+	}
+}
