@@ -69,6 +69,37 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"array_index_of", "set_has_element"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			maximum := 5
+			resultType := ksql.TypeLong
+			function := "kql_array_index_of"
+			if name == "set_has_element" {
+				maximum = 2
+				resultType = ksql.TypeBool
+				function = "kql_set_has_element_typed"
+			}
+			if len(args) < 2 || len(args) > maximum {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 2 to %d arguments", name, maximum)
+			}
+			if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a dynamic array", name)
+			}
+			values := []sqlast.Expr{args[0].SQL, args[1].SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[1].Type)}}
+			for i, arg := range args[2:] {
+				if arg.Type != ksql.TypeInt && arg.Type != ksql.TypeLong && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("array_index_of start, length, and occurrence must be integers")
+				}
+				if i == 2 && !integerSQLConstant(arg.SQL) {
+					return ksql.TypedExpression{}, fmt.Errorf("array_index_of occurrence must be a constant integer")
+				}
+				values = append(values, arg.SQL)
+			}
+			return ksql.TypedExpression{Type: resultType, SQL: &sqlast.Call{Name: function, Args: values}}, nil
+		}))
+	}
+
 	for _, name := range []string{"array_sum", "series_sum"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

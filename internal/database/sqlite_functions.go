@@ -872,7 +872,7 @@ func sqliteScalarEqual(left, right kqlScalar) bool {
 	if left.kind != right.kind {
 		return false
 	}
-	if left.kind == 's' {
+	if left.kind == 's' || left.kind == 'b' {
 		return left.text == right.text
 	}
 	return left.number == right.number

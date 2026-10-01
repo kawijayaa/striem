@@ -564,7 +564,6 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("array_length", ksql.SQLFunction("kql_array_length")),
 		ksql.WithFunction("bag_keys", ksql.SQLFunction("kql_bag_keys")),
 		ksql.WithFunction("bag_has_key", ksql.SQLFunction("kql_bag_has_key")),
-		ksql.WithFunction("set_has_element", ksql.SQLFunction("kql_set_has_element")),
 		ksql.WithFunction("base64_decode_tostring", ksql.SQLFunction("kql_base64_decode_tostring")),
 		ksql.WithFunction("url_decode", ksql.SQLFunction("kql_url_decode")),
 		ksql.WithFunction("ipv4_is_private", ksql.SQLFunction("kql_ipv4_is_private")),

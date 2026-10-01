@@ -1017,3 +1017,11 @@ func TestArraySumThroughAPI(t *testing.T) {
 		t.Fatalf("numeric/null values=%#v", rows)
 	}
 }
+
+func TestTypedArraySearchThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print index=array_index_of(dynamic([true,1]),1),member=set_has_element(dynamic([true]),true),numeric=set_has_element(dynamic([true]),1)`)
+	if len(rows) != 1 || rows[0]["index"] != float64(1) || rows[0]["member"] != true || rows[0]["numeric"] != false {
+		t.Fatalf("typed lookup results=%#v", rows)
+	}
+}

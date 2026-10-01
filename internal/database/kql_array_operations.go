@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Decode elements without converting JSON numbers to floating point or
@@ -19,6 +20,9 @@ func dynamicArray(value any) ([]json.RawMessage, bool, error) {
 	}
 	if len(text) > maxReplacementBytes {
 		return nil, false, fmt.Errorf("array input exceeds %d bytes", maxReplacementBytes)
+	}
+	if !utf8.ValidString(text) {
+		return nil, false, nil
 	}
 	decoder := json.NewDecoder(strings.NewReader(text))
 	token, err := decoder.Token()
