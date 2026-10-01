@@ -214,28 +214,12 @@ func kqlSetOperation(operation string, values ...any) (any, error) {
 	work := maxReplacementWork
 	var result dynamicSet
 	for i, value := range values {
-		if text, ok := value.(string); ok {
-			work -= len(text)
-			if work < 0 {
-				return nil, fmt.Errorf("set input work limit exceeded")
-			}
-		}
-		elements, ok, err := dynamicArray(value)
+		current, ok, err := readDynamicSet(value, &work)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, nil
-		}
-		current := dynamicSet{values: make(map[string]json.RawMessage)}
-		for _, element := range elements {
-			key, err := setValueKey(element, &work)
-			if err != nil {
-				return nil, err
-			}
-			if err := current.add(key, element); err != nil {
-				return nil, err
-			}
 		}
 		if i == 0 {
 			result = current
@@ -275,4 +259,52 @@ func kqlSetOperation(operation string, values ...any) (any, error) {
 	}
 	encoded.WriteByte(']')
 	return encoded.String(), nil
+}
+
+func readDynamicSet(value any, work *int) (dynamicSet, bool, error) {
+	if text, ok := value.(string); ok {
+		*work -= len(text)
+		if *work < 0 {
+			return dynamicSet{}, false, fmt.Errorf("set input work limit exceeded")
+		}
+	}
+	elements, ok, err := dynamicArray(value)
+	if err != nil || !ok {
+		return dynamicSet{}, false, err
+	}
+	current := dynamicSet{values: make(map[string]json.RawMessage)}
+	for _, element := range elements {
+		key, err := setValueKey(element, work)
+		if err != nil {
+			return dynamicSet{}, false, err
+		}
+		if err := current.add(key, element); err != nil {
+			return dynamicSet{}, false, err
+		}
+	}
+	return current, true, nil
+}
+
+func kqlJaccardIndex(leftValue, rightValue any) (any, error) {
+	work := maxReplacementWork
+	left, ok, err := readDynamicSet(leftValue, &work)
+	if err != nil || !ok {
+		return nil, err
+	}
+	right, ok, err := readDynamicSet(rightValue, &work)
+	if err != nil || !ok {
+		return nil, err
+	}
+	intersection := 0
+	for key := range left.values {
+		if _, exists := right.values[key]; exists {
+			intersection++
+		}
+	}
+	// Cardinalities are bounded by the decoder and distinct-element limits.
+	union := len(left.values) + len(right.values) - intersection
+	if union == 0 {
+		return nil, fmt.Errorf("jaccard_index of two empty sets is not yet supported")
+	}
+	return float64(intersection) / float64(union), nil
 }

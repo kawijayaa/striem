@@ -41,6 +41,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_set_intersect":         func(values ...any) (any, error) { return kqlSetOperation("set_intersect", values...) },
 		"kql_set_difference":        func(values ...any) (any, error) { return kqlSetOperation("set_difference", values...) },
 
+		"kql_jaccard_index":   kqlJaccardIndex,
 		"kql_repeat":          kqlRepeat,
 		"kql_bag_pack":        kqlBagPack,
 		"kql_bag_merge":       kqlBagMerge,

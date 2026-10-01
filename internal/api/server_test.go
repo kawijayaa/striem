@@ -1135,3 +1135,11 @@ func TestSetOperationsThroughAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestJaccardThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print j=jaccard_index(dynamic([1,2,3]),dynamic([1,2,3,4])) | project renamed=j`)
+	if len(rows) != 1 || rows[0]["renamed"] != float64(0.75) {
+		t.Fatalf("real output=%#v", rows)
+	}
+}

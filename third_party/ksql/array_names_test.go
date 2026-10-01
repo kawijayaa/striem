@@ -113,3 +113,14 @@ func TestSetUnnamedResultColumns(t *testing.T) {
 		t.Fatalf("result=%#v want=%#v", result, want)
 	}
 }
+
+func TestJaccardUnnamedResultColumn(t *testing.T) {
+	compiler := ksql.New(dialect.SQLite(), ksql.WithTypedFunction("jaccard_index", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		return ksql.TypedExpression{SQL: &sqlast.Call{Name: "jaccard_index", Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}, Type: ksql.TypeReal}, nil
+	}))
+	result := compiler.Compile(`print jaccard_index(dynamic([1]),dynamic([2]))`)
+	want := []ksql.Column{{Name: "Column1", Type: ksql.TypeReal}}
+	if !result.OK() || !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("result=%#v want=%#v", result, want)
+	}
+}

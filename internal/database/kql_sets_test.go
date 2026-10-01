@@ -51,3 +51,25 @@ func TestSetResourceBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestJaccardBounds(t *testing.T) {
+	for _, tc := range []struct{ name, left, right string }{
+		{"input", strings.Repeat("x", maxReplacementBytes+1), "[]"},
+		{"elements", `[` + strings.Repeat("0,", maxReplacementParts) + `0]`, "[]"},
+		{"depth", `[` + strings.Repeat("[", maxSetKeyDepth+1) + `0` + strings.Repeat("]", maxSetKeyDepth+1) + `]`, "[]"},
+		{"empty sets", "[]", "[]"},
+		{"duplicate properties", `[{"a":1,"a":2}]`, "[]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := kqlJaccardIndex(tc.left, tc.right); err == nil {
+				t.Fatal("expected diagnostic")
+			}
+		})
+	}
+	// Null/non-array behavior is characterized pending Kusto evidence.
+	for _, value := range []any{nil, "null", "{}", "invalid"} {
+		if got, err := kqlJaccardIndex(value, "[1]"); err != nil || got != nil {
+			t.Fatalf("invalid input: %v %v", got, err)
+		}
+	}
+}

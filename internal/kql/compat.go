@@ -38,6 +38,18 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("jaccard_index", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 2 {
+			return ksql.TypedExpression{}, fmt.Errorf("jaccard_index requires 2 arguments")
+		}
+		for _, arg := range args {
+			if arg.Type != ksql.TypeDynamic && arg.Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("jaccard_index requires dynamic arrays")
+			}
+		}
+		return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_jaccard_index", Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}}, nil
+	}))
+
 	options = append(options, ksql.WithTypedFunction("repeat", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 2 {
 			return ksql.TypedExpression{}, fmt.Errorf("repeat requires 2 arguments")
