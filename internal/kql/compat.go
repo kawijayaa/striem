@@ -76,10 +76,7 @@ func compatibilityOptions() []ksql.Option {
 			if len(args) != 1 {
 				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 argument", name)
 			}
-			if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
-				return ksql.TypedExpression{}, fmt.Errorf("%s requires a string", name)
-			}
-			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_" + name, Args: []sqlast.Expr{args[0].SQL}}}, nil
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_" + name, Args: []sqlast.Expr{scalarTextSQL(args[0])}}}, nil
 		}))
 	}
 	for _, name := range []string{"substring", "strlen"} {
@@ -94,8 +91,8 @@ func compatibilityOptions() []ksql.Option {
 			if len(args) < minimum || len(args) > maximum {
 				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d to %d arguments", name, minimum, maximum)
 			}
-			if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown {
-				return ksql.TypedExpression{}, fmt.Errorf("%s requires a string", name)
+			if name == "strlen" && args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a string or dynamic value", name)
 			}
 			values := make([]sqlast.Expr, len(args))
 			for i, arg := range args {
@@ -104,6 +101,7 @@ func compatibilityOptions() []ksql.Option {
 				}
 				values[i] = arg.SQL
 			}
+			values[0] = scalarTextSQL(args[0])
 			return ksql.TypedExpression{Type: resultType, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
 		}))
 	}
@@ -221,4 +219,8 @@ func binFunction(args []sqlast.Expr) (sqlast.Expr, error) {
 		return &sqlast.Call{Name: "kql_bin_datetime", Args: []sqlast.Expr{args[0], &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(int64(duration), 10)}}}, nil
 	}
 	return &sqlast.Call{Name: "kql_bin", Args: args}, nil
+}
+
+func scalarTextSQL(value ksql.TypedExpression) sqlast.Expr {
+	return &sqlast.Call{Name: "kql_scalar_text", Args: []sqlast.Expr{value.SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(value.Type)}}}
 }

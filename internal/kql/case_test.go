@@ -9,6 +9,10 @@ import (
 func TestUnicodeCaseConversion(t *testing.T) {
 	db := featureDatabase(t)
 	for _, tc := range []struct{ query, want string }{
+		{`print x=tolower(12345),y=toupper(123.45),b=tolower(true),c=toupper(false)`, `[[12345 123.45 true FALSE]]`},
+		{`Events | where n==1 | project x=tolower(n),y=toupper(n==1)`, `[[1 TRUE]]`},
+		{`datatable(b:bool)[true,false] | project B=b | project text=tolower(B) | order by text asc`, `[[false] [true]]`},
+		{`print x=tolower(9223372036854775807)`, `[[9223372036854775807]]`},
 		{`print x=tolower("Hello")=="hello",y=toupper("hello")=="HELLO"`, `[[1 1]]`},
 		{`print x=tolower("ÉCOLE ΓΕΙΑ ДОМ"),y=toupper("école γεια дом")`, `[[école γεια дом ÉCOLE ΓΕΙΑ ДОМ]]`},
 		{`print x=tolower("A\u0000É"),y=toupper("a\u0000é")`, "[[a\x00é A\x00É]]"},
@@ -26,7 +30,7 @@ func TestUnicodeCaseConversion(t *testing.T) {
 		})
 	}
 	for _, name := range []string{"tolower", "toupper"} {
-		for _, expr := range []string{name + `()`, name + `("a","b")`, name + `(1)`, name + `(true)`} {
+		for _, expr := range []string{name + `()`, name + `("a","b")`} {
 			if _, err := Compile(`print x=`+expr, time.Now()); err == nil {
 				t.Errorf("accepted %s", expr)
 			}

@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -105,4 +107,26 @@ func kqlCase(value any, upper bool) any {
 		return strings.ToUpper(text)
 	}
 	return strings.ToLower(text)
+}
+
+// Scalar string functions receive SQLite's physical values plus the compiler's
+// type. A Boolean needs its type tag because SQLite stores it as an integer.
+func kqlScalarText(value any, kind string) any {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return v
+	case int64:
+		if kind == "bool" {
+			return strconv.FormatBool(v != 0)
+		}
+		return strconv.FormatInt(v, 10)
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil
+		}
+		return strconv.FormatFloat(v, 'g', -1, 64)
+	}
+	return nil
 }
