@@ -157,3 +157,29 @@ func TestParseTypedSearchWithSpan(t *testing.T) {
 		t.Fatalf("search spans = term %v operator %v", spec.Term.NodeSpan(), operator.Span)
 	}
 }
+
+func TestPostfixPropertiesPreserveExpression(t *testing.T) {
+	for _, source := range []string{`f().a.b`, `dynamic({"a":{"b":1}}).a.b`, `(f())["a"].b`} {
+		tokens, errs := Lex(source)
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		expr, parseErrs := parseExpressionTokens(tokens[:len(tokens)-1])
+		if len(parseErrs) != 0 {
+			t.Fatal(parseErrs)
+		}
+		outer, ok := expr.(*IndexExpression)
+		if !ok {
+			t.Fatalf("%s: got %T", source, expr)
+		}
+		if key, ok := outer.Index.(*LiteralExpression); !ok || key.Text != `"b"` {
+			t.Fatalf("outer key: %#v", outer.Index)
+		}
+		if _, ok := outer.Value.(*IndexExpression); !ok {
+			t.Fatalf("inner expression lost: %#v", outer.Value)
+		}
+		if outer.Span.Offset+outer.Span.Length != len(source) {
+			t.Fatalf("span=%#v source=%s", outer.Span, source)
+		}
+	}
+}

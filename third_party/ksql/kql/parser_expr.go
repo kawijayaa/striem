@@ -1,6 +1,9 @@
 package kql
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 var binaryPrecedence = map[string]int{
 	"or": 1, "and": 2,
@@ -187,10 +190,12 @@ func (p *expressionParser) parsePrefix() Expression {
 			name := p.tokens[p.position+1]
 			p.position += 2
 			leftName, ok := expr.(*NameExpression)
-			if !ok {
-				return expr
+			if ok {
+				expr = &NameExpression{Name: leftName.Name + "." + name.Text, Span: joinSpan(leftName.Span, name.Span)}
+			} else {
+				index := &LiteralExpression{Text: strconv.Quote(name.Text), Kind: StringToken, Span: name.Span}
+				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(expr.NodeSpan(), name.Span)}
 			}
-			expr = &NameExpression{Name: leftName.Name + "." + name.Text, Span: joinSpan(leftName.Span, name.Span)}
 		default:
 			return expr
 		}

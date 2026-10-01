@@ -18,6 +18,9 @@ func TestDynamicJSONLiterals(t *testing.T) {
 	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
 		compiler := ksql.New(dialect.SQLite(), ksql.WithParameterization(mode))
 		for _, tc := range []struct{ query, want string }{
+			{`print x=dynamic({"a":{"b":17}}).a.b`, `[[17]]`},
+			{`print x=(dynamic({"a":[{"b":23}]})).a[0].b + 1`, `[[24]]`},
+			{`print x=dynamic({"a":{"b":17}}).a.missing`, `[[<nil>]]`},
 			{`print x=dynamic(['a','b'])`, `[[["a","b"]]]`},
 			{`print x=dynamic([]),y=dynamic({})`, `[[[] {}]]`},
 			{`print x=dynamic({'a':[1,-2,9223372036854775807,true,null]})["a"][2]`, `[[9223372036854775807]]`},
