@@ -287,6 +287,28 @@ test('filter Undo preserves newer editor changes', async ({ page }) => {
   await run(page, 1);
 });
 
+test('Undo notifications remain available while focused or hovered', async ({ page }) => {
+  await open(page, 'Telemetry | project host,score | order by score asc');
+  await run(page, 3);
+  await page.clock.install();
+  await page.locator('#result-body tr').first().locator('[data-result-column-index="0"]').click();
+  await page.locator('#filter-result-value').click();
+  const action = page.locator('#toast-action');
+  await action.focus();
+  await page.clock.fastForward(10000);
+  await expect(action).toBeFocused();
+  await expect(action).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.cm-content')).not.toContainText('host == "beta"');
+  await page.locator('#filter-result-value').click();
+  await page.locator('#toast').hover();
+  await page.clock.fastForward(10000);
+  await expect(action).toBeVisible();
+  await page.locator('.cm-content').hover();
+  await page.clock.fastForward(6001);
+  await expect(page.locator('#toast')).toBeHidden();
+});
+
 test('undo clearing history keeps newer runs and persists both histories', async ({ page }) => {
   const previous = 'Telemetry | count';
   const newer = 'Telemetry | project host';

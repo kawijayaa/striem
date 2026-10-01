@@ -101,3 +101,68 @@ test('toast actions run only once and replaced messages discard previous actions
   button.click();
   assert.equal(actions, 1);
 });
+
+test('toast expiry pauses while hovered or focused and resumes with the time remaining', t => {
+  let now = 0;
+  let sequence = 0;
+  const timers = new Map();
+  t.mock.method(Date, 'now', () => now);
+  globalThis.Node = class {};
+  globalThis.window = {
+    clearTimeout: id => timers.delete(id),
+    setTimeout: (callback, delay) => {
+      const id = ++sequence;
+      timers.set(id, { callback, at: now + delay });
+      return id;
+    },
+  };
+  t.after(() => { delete globalThis.window; delete globalThis.Node; });
+  function advance(ms) {
+    now += ms;
+    for (const [id, timer] of timers) {
+      if (timer.at > now) continue;
+      timers.delete(id);
+      timer.callback();
+    }
+  }
+  const root = element();
+  const toast = createToast(root, element(), element());
+  toast.show('Removed', { label: 'Undo', handler() {} });
+  advance(2000);
+  root.handlers.pointerenter();
+  advance(10000);
+  assert.equal(root.classList.contains('hidden'), false);
+  assert.equal(timers.size, 0);
+  root.handlers.focusin();
+  root.handlers.pointerleave();
+  advance(10000);
+  assert.equal(root.classList.contains('hidden'), false);
+  root.handlers.focusout({ relatedTarget: null });
+  advance(3999);
+  assert.equal(root.classList.contains('hidden'), false);
+  advance(1);
+  assert.equal(root.classList.contains('hidden'), true);
+  assert.equal(timers.size, 0);
+});
+
+test('replacing a paused toast resets its lifetime without retaining hidden action focus', t => {
+  const timers = new Map();
+  let sequence = 0;
+  globalThis.window = {
+    clearTimeout: id => timers.delete(id),
+    setTimeout: (callback, delay) => { const id = ++sequence; timers.set(id, { callback, delay }); return id; },
+  };
+  t.after(() => { delete globalThis.window; });
+  const root = element();
+  const toast = createToast(root, element(), element());
+  toast.show('Removed', { label: 'Undo', handler() {} });
+  root.handlers.focusin();
+  assert.equal(timers.size, 0);
+  toast.show('Copied');
+  assert.equal(timers.size, 1);
+  assert.equal([...timers.values()][0].delay, 2800);
+  root.handlers.pointerenter();
+  toast.hide();
+  root.handlers.pointerleave();
+  assert.equal(timers.size, 0);
+});
