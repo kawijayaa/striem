@@ -226,7 +226,30 @@ func (s *compileState) source(source kql.Source) Relation {
 		}
 		return Relation{Query: &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}, Schema: schema}
 	case "range":
-		return Relation{Query: &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: s.expression(source.From).SQL, To: s.expression(source.To).SQL, Step: s.expression(source.Step).SQL, Alias: s.nextAlias()}}, Schema: Schema{Columns: []Column{{Name: source.Name, Type: TypeLong}}}}
+		from, to, step := s.expression(source.From), s.expression(source.To), s.expression(source.Step)
+		columnType := TypeLong
+		if s.compiler.dialect.Name() == "sqlite" {
+			for _, value := range []boundExpr{from, to, step} {
+				switch value.Type {
+				case TypeInt, TypeLong:
+				case TypeReal:
+					columnType = TypeReal
+				default:
+					s.bindError("KQLB0216", source.Span, "source.range", "SQLite range currently requires numeric bounds and step")
+					return Relation{}
+				}
+			}
+			if columnType == TypeReal {
+				from.SQL = &sqlast.Cast{Expr: from.SQL, Type: "REAL"}
+				to.SQL = &sqlast.Cast{Expr: to.SQL, Type: "REAL"}
+				step.SQL = &sqlast.Cast{Expr: step.SQL, Type: "REAL"}
+			}
+		} else if from.Type == TypeDateTime {
+			columnType = TypeDateTime
+		} else if from.Type == TypeReal || to.Type == TypeReal || step.Type == TypeReal {
+			columnType = TypeReal
+		}
+		return Relation{Query: &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: from.SQL, To: to.SQL, Step: step.SQL, Alias: s.nextAlias()}}, Schema: Schema{Columns: []Column{{Name: source.Name, Type: columnType}}}}
 	case "expression":
 		if call, ok := source.Expr.(*kql.CallExpression); ok {
 			if table := s.entityCall(call); table != nil {

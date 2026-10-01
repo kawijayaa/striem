@@ -83,8 +83,18 @@ func (sqlite) JSONIndexPath(value string, keys []string) (string, bool) {
 	}
 	return sqliteJSONExtract(value, keys), true
 }
-func (sqlite) SafeCast(_, _ string) (string, bool)        { return "", false }
-func (sqlite) Series(_, _, _, _, _ string) (string, bool) { return "", false }
+func (sqlite) SafeCast(_, _ string) (string, bool) { return "", false }
+func (sqlite) Series(column, from, to, step, alias string) (string, bool) {
+	// Evaluate each bound once: duplicating '?' placeholders would change the
+	// parameter order. A derived recursive CTE also remains lazy under LIMIT.
+	return "(WITH RECURSIVE ksql_bounds(lo, hi, stride) AS (SELECT " + from + ", " + to + ", " + step + "), " +
+		"ksql_range(value) AS (SELECT lo FROM ksql_bounds WHERE (stride > 0 AND lo <= hi) OR (stride < 0 AND lo >= hi) " +
+		"UNION ALL SELECT value + stride FROM ksql_range, ksql_bounds WHERE " +
+		"((stride > 0 AND value + stride > value AND value + stride <= hi) OR " +
+		"(stride < 0 AND value + stride < value AND value + stride >= hi)) AND " +
+		"(typeof(lo) = 'real' OR typeof(hi) = 'real' OR typeof(stride) = 'real' OR typeof(value + stride) = 'integer')) " +
+		"SELECT value AS " + column + " FROM ksql_range) AS " + alias, true
+}
 func (sqlite) JSONEach(value, alias string) (string, bool) {
 	value = "CASE WHEN " + value + " IS NULL THEN json_array(NULL) ELSE " + value + " END"
 	return "json_each(" + value + ") AS " + alias, true
