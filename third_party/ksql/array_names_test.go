@@ -61,3 +61,18 @@ func TestArraySplitUnnamedResultColumn(t *testing.T) {
 		t.Fatalf("result=%#v want=%#v", result, want)
 	}
 }
+
+func TestArraySumUnnamedResultColumns(t *testing.T) {
+	options := []ksql.Option{}
+	for _, name := range []string{"array_sum", "series_sum"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			return ksql.TypedExpression{SQL: &sqlast.Call{Name: name, Args: []sqlast.Expr{args[0].SQL}}, Type: ksql.TypeReal}, nil
+		}))
+	}
+	result := ksql.New(dialect.SQLite(), options...).Compile(`print array_sum(dynamic([1])),series_sum(dynamic([2]))`)
+	want := []ksql.Column{{Name: "Column1", Type: ksql.TypeReal}, {Name: "Column2", Type: ksql.TypeReal}}
+	if !result.OK() || !reflect.DeepEqual(result.Columns, want) {
+		t.Fatalf("result=%#v want=%#v", result, want)
+	}
+}

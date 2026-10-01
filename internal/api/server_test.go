@@ -1009,3 +1009,11 @@ func TestArraySplitThroughAPI(t *testing.T) {
 		t.Fatalf("bag=%#v", second)
 	}
 }
+
+func TestArraySumThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print a=array_sum(dynamic([0.5,0.25])),b=series_sum(dynamic([1,2,3])),c=array_sum(dynamic([1,"2"]))`)
+	if len(rows) != 1 || rows[0]["a"] != float64(0.75) || rows[0]["b"] != float64(6) || rows[0]["c"] != nil {
+		t.Fatalf("numeric/null values=%#v", rows)
+	}
+}

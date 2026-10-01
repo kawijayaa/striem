@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -278,4 +279,36 @@ func kqlArraySplit(value, indicesValue any) (any, error) {
 	}
 	result.WriteByte(']')
 	return result.String(), nil
+}
+
+func kqlArraySum(value any) (any, error) {
+	elements, ok, err := dynamicArray(value)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	sum := float64(0)
+	overflow := false
+	for _, element := range elements {
+		if len(element) == 0 || element[0] != '-' && (element[0] < '0' || element[0] > '9') {
+			return nil, nil
+		}
+		number, err := strconv.ParseFloat(string(element), 64)
+		if err != nil {
+			overflow = true
+			continue
+		}
+		sum += number
+		if math.IsInf(sum, 0) || math.IsNaN(sum) {
+			overflow = true
+		}
+	}
+	// A later nonnumeric element still returns null as documented, even if an
+	// earlier numeric element exceeded the current finite-real representation.
+	if overflow {
+		return nil, fmt.Errorf("array/series sum non-finite results are not yet supported")
+	}
+	return sum, nil
 }

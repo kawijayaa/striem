@@ -33,6 +33,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 
 		"kql_array_slice":     kqlArraySlice,
 		"kql_array_split":     kqlArraySplit,
+		"kql_array_sum":       kqlArraySum,
 		"kql_bag_pack":        kqlBagPack,
 		"kql_bag_merge":       kqlBagMerge,
 		"kql_bag_set_key":     kqlBagSetKey,

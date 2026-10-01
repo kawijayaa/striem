@@ -162,3 +162,25 @@ func TestArraySplitBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestArraySumBoundsAndInvalidValues(t *testing.T) {
+	for _, value := range []string{strings.Repeat("x", maxReplacementBytes+1), `[` + strings.Repeat("0,", maxReplacementParts) + `0]`, `[1e999]`, `[1e308,1e308]`} {
+		if _, err := kqlArraySum(value); err == nil {
+			t.Fatal("expected input/finite-real diagnostic")
+		}
+	}
+	for _, value := range []any{nil, "null", "{}", "invalid", `[1e999,"x"]`, `[1e308,1e308,null]`} {
+		if got, err := kqlArraySum(value); err != nil || got != nil {
+			t.Fatalf("null/non-numeric result: %v %v", got, err)
+		}
+	}
+	// Empty arrays and accumulation rounding remain characterization pending Kusto evidence.
+	got, err := kqlArraySum("[]")
+	if err != nil || got != float64(0) {
+		t.Fatalf("empty array: %v %v", got, err)
+	}
+	got, err = kqlArraySum("[0.1,0.2]")
+	if err != nil || math.Abs(got.(float64)-0.3) > 1e-15 {
+		t.Fatalf("real sum: %v %v", got, err)
+	}
+}

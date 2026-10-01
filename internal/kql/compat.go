@@ -69,6 +69,19 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"array_sum", "series_sum"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 argument", name)
+			}
+			if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a dynamic array", name)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_array_sum", Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}))
+	}
+
 	options = append(options, ksql.WithTypedFunction("array_split", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 2 {
 			return ksql.TypedExpression{}, fmt.Errorf("array_split requires 2 arguments")
