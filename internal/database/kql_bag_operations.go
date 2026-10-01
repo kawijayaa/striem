@@ -199,3 +199,75 @@ func removeBagProperties(bag map[string]json.RawMessage, node *bagRemoval, work 
 	}
 	return changed, nil
 }
+
+func kqlBagSetKey(value, keyValue, replacement any, kind string) (any, error) {
+	bag, ok, err := bagObject(value)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	key, ok := keyValue.(string)
+	if !ok {
+		return nil, fmt.Errorf("bag_set_key key must be a string")
+	}
+	if len(key) > maxBagPathBytes {
+		return nil, fmt.Errorf("bag_set_key path limit exceeded")
+	}
+	path := []string{key}
+	if strings.HasPrefix(key, "$") {
+		var valid bool
+		path, valid = parseBagPath(key)
+		if !valid || len(path) == 0 {
+			return nil, fmt.Errorf("bag_set_key unsupported JSON path")
+		}
+	}
+	encoded, err := packJSONValue(replacement, kind)
+	if err != nil {
+		return nil, err
+	}
+	work := maxReplacementWork
+	result, err := setBagProperty(bag, path, encoded, &work)
+	if err != nil {
+		return nil, err
+	}
+	return string(result), nil
+}
+
+func setBagProperty(bag map[string]json.RawMessage, path []string, value json.RawMessage, work *int) (json.RawMessage, error) {
+	key := path[0]
+	if len(path) > 1 {
+		nested := make(map[string]json.RawMessage)
+		if raw, exists := bag[key]; exists {
+			*work -= len(raw)
+			if *work < 0 {
+				return nil, fmt.Errorf("bag_set_key work limit exceeded")
+			}
+			if err := json.Unmarshal(raw, &nested); err != nil || nested == nil {
+				return nil, fmt.Errorf("bag_set_key traversal through a non-object is not yet supported")
+			}
+		}
+		var err error
+		value, err = setBagProperty(nested, path[1:], value, work)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, exists := bag[key]; !exists && len(bag) >= maxReplacementParts {
+		return nil, fmt.Errorf("bag_set_key property limit exceeded")
+	}
+	bag[key] = value
+	encoded, err := json.Marshal(bag)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > maxBagBytes {
+		return nil, fmt.Errorf("bag_set_key result exceeds %d bytes", maxBagBytes)
+	}
+	*work -= len(encoded)
+	if *work < 0 {
+		return nil, fmt.Errorf("bag_set_key work limit exceeded")
+	}
+	return encoded, nil
+}

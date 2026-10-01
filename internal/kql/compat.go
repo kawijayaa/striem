@@ -38,6 +38,19 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	options = append(options, ksql.WithTypedFunction("bag_set_key", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 3 {
+			return ksql.TypedExpression{}, fmt.Errorf("bag_set_key requires 3 arguments")
+		}
+		if args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("bag_set_key bag must be dynamic")
+		}
+		if args[1].Type != ksql.TypeString && args[1].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("bag_set_key key must be a string")
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_bag_set_key", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: string(args[2].Type)}}}}, nil
+	}))
+
 	for _, name := range []string{"bag_merge", "bag_remove_keys"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

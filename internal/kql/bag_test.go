@@ -76,3 +76,39 @@ func TestBagOperations(t *testing.T) {
 		}
 	}
 }
+
+func TestBagSetKey(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(input:dynamic)[dynamic({"key1":1,"key2":2}),dynamic({"key1":1,"key3":"abc"})] | project result=bag_set_key(input,"key3",3)`, `[[{"key1":1,"key2":2,"key3":3}] [{"key1":1,"key3":3}]]`},
+		{`datatable(input:dynamic)[dynamic({"key1":123,"key2":{"prop1":123,"prop2":"xyz"}}),dynamic({"key1":123})] | project result=bag_set_key(input,"$.key2.prop1","abc")`, `[[{"key1":123,"key2":{"prop1":"abc","prop2":"xyz"}}] [{"key1":123,"key2":{"prop1":"abc"}}]]`},
+		{`print b=bag_set_key(dynamic({}),"$.a.b.c",true)`, `[[{"a":{"b":{"c":true}}}]]`},
+		{`print b=bag_set_key(dynamic({"keep":9223372036854775807}),"long",9223372036854775807)`, `[[{"keep":9223372036854775807,"long":9223372036854775807}]]`},
+		{`print b=bag_set_key(dynamic({}),"str","{\"a\":1}")`, `[[{"str":"{\"a\":1}"}]]`},
+		{`print b=bag_set_key(dynamic({}),"nested",pack_array(true,null,bag_pack("x",2)))`, `[[{"nested":[true,null,{"x":2}]}]]`},
+		{`print b=bag_set_key(dynamic({"a":1}),"a",null)`, `[[{"a":null}]]`},
+		{`print b=bag_set_key(dynamic(null),"a",1)`, `[[<nil>]]`},
+		{`print b=bag_set_key(dynamic([]),"a",1)`, `[[<nil>]]`},
+		{`print b=bag_set_key(dynamic({}),"$['a.b']['é']",1)`, `[[{"a.b":{"é":1}}]]`},
+		{`print b=bag_set_key(dynamic({}),"a.b",1) | project value=b["a.b"]`, `[[1]]`},
+		{`let path="$.nested.value"; Events | where n == 1 | project b=bag_set_key(RawData,path,n) | project value=b.nested.value`, `[[1]]`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
+	}
+	compiled, err := Compile(`print b=bag_set_key(dynamic({}),"a",true) | project renamed=b`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := compiled.DynamicColumns["renamed"]; !ok {
+		t.Fatal("dynamic metadata lost")
+	}
+	for _, expr := range []string{`bag_set_key(dynamic({}),"a")`, `bag_set_key("{}","a",1)`, `bag_set_key(dynamic({}),1,1)`} {
+		if _, err := Compile(`print b=`+expr, time.Now()); err == nil {
+			t.Errorf("accepted %s", expr)
+		}
+	}
+}

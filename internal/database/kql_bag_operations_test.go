@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -36,5 +37,36 @@ func TestBagOperationsBounds(t *testing.T) {
 	got, err := kqlBagRemoveKeys(`{"a\u0000é":1,"keep":true}`, `["a\u0000é"]`)
 	if err != nil || got != `{"keep":true}` {
 		t.Fatalf("unicode/NUL key: %v %v", got, err)
+	}
+}
+
+func TestBagSetKeyBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		bag, key string
+		value    any
+	}{
+		{"input", strings.Repeat("x", maxBagBytes+1), "a", 1},
+		{"value", "{}", "a", strings.Repeat("x", maxBagBytes+1)},
+		{"output", `{"a":"` + strings.Repeat("x", maxBagBytes/2) + `"}`, "b", strings.Repeat("x", maxBagBytes/2)},
+		{"path", "{}", strings.Repeat("a", maxBagPathBytes+1), 1},
+		{"root", "{}", "$", 1},
+		{"array indexing", "{}", "$.a[0]", 1},
+		{"depth", "{}", "$" + strings.Repeat(".a", maxBagPathDepth+1), 1},
+		{"nonobject parent", `{"a":1}`, "$.a.b", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := kqlBagSetKey(tc.bag, tc.key, tc.value, "string"); err == nil {
+				t.Fatal("expected diagnostic")
+			}
+		})
+	}
+	got, err := kqlBagSetKey(`{}`, "a\x00é", int64(3), "long")
+	if err != nil || got != `{"a\u0000é":3}` {
+		t.Fatalf("unicode/NUL key: %v %v", got, err)
+	}
+	work := 0
+	if _, err := setBagProperty(map[string]json.RawMessage{}, []string{"a"}, json.RawMessage("1"), &work); err == nil {
+		t.Fatal("expected work limit")
 	}
 }
