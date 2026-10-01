@@ -30,7 +30,7 @@ const logicalOperators = new Set([
 const functions = new Set([
   'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
-  'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'jaccard_index',
+  'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'trim_start', 'trim_end', 'replace_string', 'replace_strings', 'replace_regex',
@@ -77,6 +77,7 @@ const functionCompletions = createCompletions('function', [
   ['array_shift_left', 'Shift array elements left with optional padding'], ['array_shift_right', 'Shift array elements right with optional padding'],
   ['jaccard_index', 'Compute intersection size divided by union size'],
   ['set_union', 'Combine distinct values from arrays'], ['set_intersect', 'Keep distinct values shared by all arrays'], ['set_difference', 'Remove values found in subsequent arrays'],
+  ['set_equals', 'Compare distinct array values regardless of order or duplicates'],
   ['repeat', 'Construct an array by repeating a scalar value'],
   ['pack_array', 'Construct a dynamic array from values or all columns'], ['bag_pack', 'Construct a dynamic bag from key/value pairs'], ['pack', 'Legacy bag constructor'], ['pack_dictionary', 'Legacy bag constructor'],
   ['bag_zip', 'Construct a bag from arrays of keys and values'],

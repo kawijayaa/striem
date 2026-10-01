@@ -1145,6 +1145,21 @@ func TestJaccardThroughAPI(t *testing.T) {
 	}
 }
 
+func TestSetEqualsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print same=set_equals(dynamic([2,1,2]),dynamic([1,2])),different=set_equals(dynamic([9007199254740992]),dynamic([9007199254740993])),empty=set_equals(dynamic([]),dynamic([])) | project same,different,empty`)
+	if len(rows) != 1 || rows[0]["same"] != true || rows[0]["different"] != false || rows[0]["empty"] != true {
+		t.Fatalf("Boolean output=%#v", rows)
+	}
+	for _, query := range []string{`print set_equals(dynamic([]))`, `print set_equals("[]",dynamic([]))`, `print set_equals(dynamic([]),dynamic([]),dynamic([]))`} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("query %s: status=%d", query, response.StatusCode)
+		}
+	}
+}
+
 func TestParseJSONThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
 	response := queryAPI(t, server.URL, `print invalid=parse_json("{bad}"),number=parse_json("9223372036854775807"),b=parse_json("false"),a=todynamic("[1,null]"),s=toobject("\"hello\""),last=parse_json('[1,9007199254740993]')[(-1)]`)

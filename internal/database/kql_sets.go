@@ -285,6 +285,27 @@ func readDynamicSet(value any, work *int) (dynamicSet, bool, error) {
 	return current, true, nil
 }
 
+func kqlSetEquals(leftValue, rightValue any) (any, error) {
+	work := maxReplacementWork
+	left, ok, err := readDynamicSet(leftValue, &work)
+	if err != nil || !ok {
+		return nil, err
+	}
+	right, ok, err := readDynamicSet(rightValue, &work)
+	if err != nil || !ok {
+		return nil, err
+	}
+	if len(left.values) != len(right.values) {
+		return false, nil
+	}
+	for key := range left.values {
+		if _, exists := right.values[key]; !exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func kqlJaccardIndex(leftValue, rightValue any) (any, error) {
 	work := maxReplacementWork
 	left, ok, err := readDynamicSet(leftValue, &work)
