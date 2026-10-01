@@ -364,11 +364,11 @@ function clearSelectedResultValue(): void {
 }
 
 function focusResultCell(row: number, column: number): void {
-  const cell = document.querySelector<HTMLTableCellElement>(`.result-value-cell[data-result-row="${row}"][data-result-column-index="${column}"]`);
+  const cell = document.querySelector<HTMLTableCellElement>(`.result-navigation-cell[data-result-row="${row}"][data-result-column-index="${column}"]`);
   if (!cell) return;
-  document.querySelectorAll<HTMLTableCellElement>('.result-value-cell').forEach(candidate => { candidate.tabIndex = -1; });
-  cell.tabIndex = 0;
-  cell.focus();
+  const target = cell.querySelector<HTMLButtonElement>('button') ?? cell;
+  target.tabIndex = 0;
+  target.focus();
 }
 
 function renderMobileResult(row: EventRow, rowKey: string, columns: string[]): HTMLElement {
@@ -513,6 +513,9 @@ function renderResults(result: QueryResult, resetSort = true): void {
         dynamic.textContent = 'JSON';
         dynamic.title = `Open ${column} JSON`;
         dynamic.setAttribute('aria-label', `Open ${column} JSON`);
+        dynamic.tabIndex = firstFocusableValue ? 0 : -1;
+        firstFocusableValue = false;
+        dynamic.addEventListener('focus', clearSelectedResultValue);
         dynamic.addEventListener('click', event => {
           event.stopPropagation();
           selectRow();
@@ -526,8 +529,6 @@ function renderResults(result: QueryResult, resetSort = true): void {
         td.textContent = value === null || value === undefined ? '—' : String(value);
         td.title = value === null || value === undefined ? 'null' : String(value);
         td.classList.add('result-value-cell');
-        td.dataset.resultRow = String(rowIndex);
-        td.dataset.resultColumnIndex = String(columnIndex);
         td.tabIndex = firstFocusableValue ? 0 : -1;
         firstFocusableValue = false;
         td.setAttribute('aria-label', `${column}: ${resultValue(value)}. Press Enter to filter or Shift+Enter to exclude.`);
@@ -539,19 +540,29 @@ function renderResults(result: QueryResult, resetSort = true): void {
             pivotOnValue(column, value, event.shiftKey);
             return;
           }
-          const rowDirection = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
-          const columnDirection = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-          if (!rowDirection && !columnDirection && event.key !== 'Home' && event.key !== 'End') return;
-          event.preventDefault();
-          const nextRow = event.key === 'Home' ? 0 : event.key === 'End' ? result.rows.length - 1 : rowIndex + rowDirection;
-          const nextColumn = columnIndex + columnDirection;
-          focusResultCell(nextRow, nextColumn);
         });
         td.addEventListener('dblclick', event => {
           event.preventDefault();
           pivotOnValue(column, value, event.altKey);
         });
       }
+      td.classList.add('result-navigation-cell');
+      td.dataset.resultRow = String(rowIndex);
+      td.dataset.resultColumnIndex = String(columnIndex);
+      td.addEventListener('focusin', () => {
+        document.querySelectorAll<HTMLTableCellElement>('.result-navigation-cell').forEach(candidate => {
+          const target = candidate.querySelector<HTMLButtonElement>('button') ?? candidate;
+          target.tabIndex = candidate === td ? 0 : -1;
+        });
+      });
+      td.addEventListener('keydown', event => {
+        const rowDirection = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+        const columnDirection = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+        if (!rowDirection && !columnDirection && event.key !== 'Home' && event.key !== 'End') return;
+        event.preventDefault();
+        const nextRow = event.key === 'Home' ? 0 : event.key === 'End' ? result.rows.length - 1 : rowIndex + rowDirection;
+        focusResultCell(nextRow, columnIndex + columnDirection);
+      });
       tr.append(td);
     });
     body.append(tr);
@@ -594,7 +605,8 @@ function pivotOnValue(column: string, value: unknown, negate: boolean): void {
 async function copySelectedResultValue(): Promise<void> {
   if (!selectedResultValue) return;
   try {
-    await navigator.clipboard.writeText(resultValue(selectedResultValue.value));
+    const value = selectedResultValue.value;
+    await navigator.clipboard.writeText(value === null || value === undefined ? 'null' : String(value));
     showToast(`Copied ${selectedResultValue.column} value`);
   } catch {
     showToast('Could not copy the value. Select it and copy it manually.');

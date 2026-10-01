@@ -70,6 +70,55 @@ test('filters on calculated result columns preserve the producing pipeline', asy
   await run(page, 3);
 });
 
+test('result keyboard navigation crosses JSON columns and preserves dialog focus', async ({ page }) => {
+  await open(page, 'Telemetry | project host,details=iff(score==2,dynamic(null),details),score | order by score asc');
+  await run(page, 3);
+  const rows = page.locator('#result-body tr');
+  const host = rows.first().locator('[data-result-column-index="0"]');
+  const json = rows.first().getByRole('button', { name: 'Open details JSON' });
+  await host.focus();
+  await host.press('ArrowRight');
+  await expect(json).toBeFocused();
+  await expect(page.locator('#result-value-actions')).toBeHidden();
+  await json.press('Enter');
+  await expect(page.locator('#raw-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(json).toBeFocused();
+  await json.press('ArrowRight');
+  const score = rows.first().locator('[data-result-column-index="2"]');
+  await expect(score).toBeFocused();
+  await score.press('ArrowLeft');
+  await expect(json).toBeFocused();
+  await json.press('ArrowDown');
+  const empty = rows.nth(1).locator('[data-result-column-index="1"]');
+  await expect(empty).toBeFocused();
+  await expect(page.locator('#result-value-actions')).toBeVisible();
+  await empty.press('End');
+  await expect(rows.last().getByRole('button', { name: 'Open details JSON' })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(json).toBeFocused();
+  expect(await page.locator('#result-body [tabindex="0"]').count()).toBe(2); // One grid cell and row-details action.
+  await rows.last().locator('[data-result-column-index="2"]').click();
+  await expect(rows.last().locator('[data-result-column-index="2"]')).toHaveAttribute('tabindex', '0');
+  await expect(json).toHaveAttribute('tabindex', '-1');
+});
+
+test('copy result values retains numeric text under a non-English locale', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'de-DE', permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await context.newPage();
+  try {
+    await open(page, 'print count=12345,amount=1234.5,enabled=false,missing=long(null),text="a,b"', 'http://127.0.0.1:18081');
+    await run(page, 1);
+    for (const [column, expected] of ['12345', '1234.5', 'false', 'null', 'a,b'].entries()) {
+      await page.locator(`#result-body [data-result-column-index="${column}"]`).click();
+      await page.locator('#copy-result-value').click();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
 test('JSON viewer searches full phrases and Unicode without dismissing keyboard actions', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await open(page, 'print details=dynamic({"action":"login","message":"İprefixTarget [a.b]+?"})');
