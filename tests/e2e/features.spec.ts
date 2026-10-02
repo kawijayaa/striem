@@ -526,6 +526,47 @@ test('undo clearing history keeps newer runs and persists both histories', async
   await expect(page.locator('#query-history .query-preview')).toHaveText([newer, previous]);
 });
 
+test('hunting autocomplete opens after a pipe and supports keyboard selection and dismissal', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'Telemetry ');
+  await editor.press('End');
+  await editor.pressSequentially('|');
+  const popup = page.locator('.cm-tooltip-autocomplete');
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText('where');
+  await editor.press('Escape');
+  await expect(popup).toHaveCount(0);
+  await editor.press('Control+Space');
+  await expect(popup).toBeVisible();
+  await editor.pressSequentially('whe', { delay: 80 });
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^where$/ })).toBeVisible();
+  await page.waitForTimeout(100);
+  await editor.press('Enter');
+  await expect(editor).toHaveText('Telemetry |where ');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^host$/ })).toBeVisible();
+  await editor.press('Escape');
+  await expect(editor).toHaveText('Telemetry |where ');
+});
+
+test('hunting autocomplete keeps column lists separate from operators and functions', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  for (const query of ['Telemetry | project-away ', 'Telemetry | distinct ', 'Telemetry | summarize count() by ']) {
+    await edit(page, query);
+    await editor.press('End');
+    await editor.press('Control+Space');
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: /^host$/ })).toBeVisible();
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: /^(?:has|contains|==|!=|tostring)$/ })).toHaveCount(0);
+    await editor.press('Escape');
+  }
+  await edit(page, 'Telemetry | project host ');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^user$/ })).toBeVisible();
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^(?:has|contains|==|!=)$/ })).toHaveCount(0);
+});
+
 test('hunting autocomplete offers string and symbolic comparisons and accepts Tab', async ({ page }) => {
   await open(page);
   const editor = page.locator('.cm-content');
@@ -681,7 +722,7 @@ test('autocomplete descriptions and selection remain readable inside narrow view
       background: getComputedStyle(element).backgroundColor,
       text: getComputedStyle(element).color,
     }));
-    expect(colors).toEqual({ background: 'rgb(38, 63, 85)', text: 'rgb(243, 242, 241)' });
+    expect(colors).toEqual({ background: 'rgb(9, 71, 113)', text: 'rgb(243, 242, 241)' });
     await expect(page.locator('.completion-documentation')).toBeVisible();
     const info = (await page.locator('.cm-completionInfo').boundingBox())!;
     expect(info.x).toBeGreaterThanOrEqual(0);

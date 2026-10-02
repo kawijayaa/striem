@@ -3,7 +3,7 @@ import { expressionOperatorWords } from './expression-operators.ts';
 export interface QueryCompletionContext {
   from: number;
   to: number;
-  kind: 'source' | 'table' | 'operator' | 'expression' | 'comparison' | 'sort';
+  kind: 'source' | 'table' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
   prefix: string;
 }
 
@@ -75,6 +75,8 @@ export function queryCompletionContext(query: string, position: number): QueryCo
   let kind: QueryCompletionContext['kind'] = /^\s*[A-Za-z_-]*$/.test(segment)
     ? source ? 'source' : 'operator'
     : /^\s*(?:order|sort)\s+by\b/i.test(segment) ? 'sort'
+    : /^\s*(?:project-away|project-keep|project-reorder|distinct)\s/i.test(segment)
+      || /^\s*summarize\b[\s\S]*\bby\s+[^()]*$/i.test(segment) ? 'column'
     : /\b(?:join|union|lookup)\b\s*(?:kind\s*=\s*[A-Za-z_]+\s+)?\(?\s*[A-Za-z_0-9]*$/i.test(segment)
       || /^\s*\(\s*[A-Za-z_0-9]*$/.test(segment) ? 'table' : 'expression';
   const token = kind === 'operator'
@@ -86,7 +88,11 @@ export function queryCompletionContext(query: string, position: number): QueryCo
     const lastWord = before.match(/[A-Za-z_][A-Za-z_0-9]*$/)?.[0]?.toLowerCase();
     const needsOperand = /^\s*(?:where|filter|search|project|extend|summarize|distinct|take|limit|top|print|order|sort)\s*$/i.test(before)
       || (lastWord !== undefined && expressionOperatorWords.has(lastWord));
-    if ((!source || /^\s*(?:print|let)\b/i.test(segment)) && !needsOperand && /[A-Za-z_0-9.)\]]$/.test(before)) kind = 'comparison';
+    // Comparisons belong in predicates and calculated expressions, not between
+    // the columns in a projection or the numeric argument of take/limit.
+    const comparisonsAllowed = /^\s*(?:where|filter|search)\b/i.test(segment)
+      || /^\s*(?:extend|project|summarize|print|let)\b[\s\S]*=/i.test(segment);
+    if (comparisonsAllowed && !needsOperand && /[A-Za-z_0-9.)\]]$/.test(before)) kind = 'comparison';
   }
   const rest = query.slice(position);
   const suffixPattern = kind === 'operator' ? /^[A-Za-z_0-9-]*/

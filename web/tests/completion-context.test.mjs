@@ -63,3 +63,19 @@ test('comparison operators complete after operands and preserve adjacent values'
   const field = queryCompletionContext(query, query.indexOf('host') + 2);
   assert.equal(query.slice(field.from, field.to), 'host');
 });
+
+test('column lists and numeric limits do not suggest comparisons', () => {
+  for (const [query, kind] of [
+    ['Events | project host ', 'expression'],
+    ['Events | project host, user ', 'expression'],
+    ['Events | project-away host, ', 'column'],
+    ['Events | project-keep ho', 'column'],
+    ['Events | project-reorder ho', 'column'],
+    ['Events | distinct ho', 'column'],
+    ['Events | summarize count() by ho', 'column'],
+    ['Events | take 10 ', 'expression'],
+    ['Events | limit 10 ', 'expression'],
+    ['Events | extend matched=host ha', 'comparison'],
+    ['Events | PROJECT matched=host ha', 'comparison'],
+  ]) assert.equal(queryCompletionContext(query, query.length).kind, kind, query);
+});

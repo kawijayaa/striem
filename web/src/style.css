@@ -2671,8 +2671,8 @@ dialog { max-height: calc(100dvh - 32px); }
 .cm-editor .hunting-completions > ul > li:hover { background: var(--ink-250); }
 .cm-editor .hunting-completions > ul > li[aria-selected] {
   color: var(--paper);
-  background: #263f55;
-  box-shadow: inset 2px 0 var(--amber);
+  background: #094771;
+  box-shadow: inset 2px 0 #75baf2;
 }
 .cm-editor .hunting-completions > ul > li[aria-selected] .cm-completionDetail { color: #9fd0f5; }
 .cm-editor .cm-tooltip.cm-completionInfo {
@@ -2690,6 +2690,19 @@ dialog { max-height: calc(100dvh - 32px); }
   overflow: auto;
   border-width: 1px 0 0;
   border-radius: 0;
+}
+.cm-editor .hunting-completions::after {
+  content: '↑↓ navigate · Tab / Enter accept · Esc close';
+  order: 3;
+  flex: none;
+  padding: 6px 10px;
+  border-top: 1px solid var(--rule-hi);
+  color: var(--paper-3);
+  white-space: normal;
+  font: 400 10px/1.4 var(--font-sans);
+}
+@media (max-width: 600px), (max-height: 600px) {
+  .cm-editor .hunting-completions::after { display: none; }
 }
 .completion-documentation { min-width: 0; overflow-wrap: anywhere; }
 .completion-documentation code { color: var(--paper); font: 600 12px/1.4 var(--font-mono); }

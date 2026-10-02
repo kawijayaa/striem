@@ -163,7 +163,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
     const target = queryCompletionContext(context.state.doc.toString(), context.pos);
-    if (!target || (!context.explicit && !target.prefix && !/[\s(,]$/.test(context.state.sliceDoc(0, context.pos)))) return null;
+    if (!target || (!context.explicit && !target.prefix && !/[\s(,|]$/.test(context.state.sliceDoc(0, context.pos)))) return null;
     const completions = target.kind === 'source' ? [...options.getTableCompletions(),
       ...operatorCompletions.filter(completion => completion.label === 'let'),
       { label: 'print', type: 'keyword', apply: 'print ' },
@@ -171,9 +171,10 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
       : target.kind === 'table' ? options.getTableCompletions()
       : target.kind === 'operator' ? operatorCompletions
       : target.kind === 'comparison' ? comparisonCompletions
+      : target.kind === 'column' ? options.getFieldCompletions()
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
-      : [...functionCompletions, ...options.getFieldCompletions(),
+      : [...functionCompletions, ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
         { label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }, { label: 'null', type: 'constant' }];
     return {
       from: target.from,
@@ -196,6 +197,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         closeBrackets(),
         autocompletion({
           override: [completionSource], activateOnTyping: true,
+          aboveCursor: false,
           activateOnCompletion: completion => ['operator', 'keyword', 'function'].includes(completion.type || ''),
           tooltipClass: () => 'hunting-completions',
           positionInfo: (_view, list, option, info, space) => {
