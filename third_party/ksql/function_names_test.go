@@ -24,6 +24,22 @@ func TestURLFunctionGeneratedNames(t *testing.T) {
 	}
 }
 
+func TestExtractAllGeneratedNames(t *testing.T) {
+	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
+		for _, name := range []string{"extract_all", "extractall"} {
+			compiler := ksql.New(dialect.SQLite(), ksql.WithParameterization(mode), ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+				return ksql.TypedExpression{SQL: args[len(args)-1].SQL, Type: ksql.TypeDynamic}, nil
+			}))
+			for _, query := range []string{`print raw="a" | project ` + name + `("(a)",raw)`, `print raw="a" | extend ` + name + `("(a)",dynamic([1]),raw) | project Column1`} {
+				result := compiler.Compile(query)
+				if !result.OK() || len(result.Columns) != 1 || result.Columns[0].Name != "Column1" || result.Columns[0].Type != ksql.TypeDynamic {
+					t.Fatalf("%s: %#v", query, result)
+				}
+			}
+		}
+	}
+}
+
 func TestFirstArgumentFunctionNames(t *testing.T) {
 	db := openInvestigationDB(t)
 	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {

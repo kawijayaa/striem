@@ -348,7 +348,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"tostring", "countif", "parse_json", "parse_csv", "parse_xml", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
+	for _, value := range []string{"tostring", "countif", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}
@@ -1205,6 +1205,33 @@ func TestParseXMLThroughAPI(t *testing.T) {
 	array, ok := element["a"].([]any)
 	if !ok || len(array) != 2 || array[0] != "one" || array[1] != "two" {
 		t.Fatalf("repeated elements=%#v", element)
+	}
+}
+
+func TestExtractAllThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print flat=extract_all("(a)","a a"),nested=extractall("(a)(b)",dynamic([2,1]),"ab"),missing=extract_all("(a)","none") | project flat,nested,missing`)
+	if len(rows) != 1 || rows[0]["missing"] != nil {
+		t.Fatalf("rows=%#v", rows)
+	}
+	flat, ok := rows[0]["flat"].([]any)
+	if !ok || len(flat) != 2 || flat[0] != "a" || flat[1] != "a" {
+		t.Fatalf("flat=%#v", rows)
+	}
+	nested, ok := rows[0]["nested"].([]any)
+	if !ok || len(nested) != 1 {
+		t.Fatalf("nested=%#v", rows)
+	}
+	groups, ok := nested[0].([]any)
+	if !ok || len(groups) != 2 || groups[0] != "b" || groups[1] != "a" {
+		t.Fatalf("groups=%#v", nested)
+	}
+	for _, query := range []string{`print extract_all("a","a")`, `print extract_all("(a)",dynamic([0]),"a")`, `print extract_all("(a)","[1]","a")`} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
 	}
 }
 

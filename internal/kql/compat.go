@@ -12,6 +12,41 @@ import (
 
 func compatibilityOptions() []ksql.Option {
 	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	for _, name := range []string{"extract_all", "extractall"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) < 2 || len(args) > 3 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 2 or 3 arguments", name)
+			}
+			for _, index := range []int{0, len(args) - 1} {
+				if args[index].Type != ksql.TypeString && args[index].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s regex and source must be strings", name)
+				}
+			}
+			pattern, ok := args[0].SQL.(*sqlast.Literal)
+			if !ok || pattern.Kind != sqlast.StringLiteral {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex must be a constant string", name)
+			}
+			if len(pattern.Value) > 512 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
+			}
+			expression, err := regexp.Compile(pattern.Value)
+			if err != nil {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
+			}
+			if expression.NumSubexp() < 1 || expression.NumSubexp() > 16 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s regex requires between 1 and 16 capture groups", name)
+			}
+			groups := sqlast.Expr(&sqlast.Literal{Kind: sqlast.NullLiteral})
+			if len(args) == 3 {
+				if args[1].Type != ksql.TypeDynamic && args[1].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s capture groups must be a dynamic array", name)
+				}
+				groups = args[1].SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_extract_all", Args: []sqlast.Expr{args[0].SQL, groups, args[len(args)-1].SQL}}}, nil
+		}))
+	}
 	options = append(options, ksql.WithTypedFunction("parse_xml", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 1 {
 			return ksql.TypedExpression{}, fmt.Errorf("parse_xml requires 1 argument")
