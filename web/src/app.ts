@@ -152,6 +152,12 @@ const queryEditor = createQueryEditor({
 });
 const editor = queryEditor.view;
 
+$('.skip-link').addEventListener('click', event => {
+  event.preventDefault();
+  mobileWorkspace.show('query');
+  editor.focus();
+});
+
 function asQueryError(error: unknown): QueryError {
   if (!error || typeof error !== 'object') return { message: String(error) };
   const candidate = error as Record<string, unknown>;

@@ -399,7 +399,7 @@
   font: 400 13.5px/1.75 var(--font-mono);
 }
 .cm-editor.cm-focused { outline: 0; }
-.cm-scroller { min-height: 190px; overflow: auto; }
+.cm-scroller { min-height: 190px; max-height: clamp(190px, 32dvh, 360px); overflow: auto; overscroll-behavior: contain; }
 .cm-content { min-height: 190px; padding: 14px 0; caret-color: var(--amber); }
 .cm-line { padding: 0 16px 0 10px; }
 .cm-gutters {
@@ -2574,3 +2574,51 @@ pre mark { color: #201f1e; background: #f7d774; }
 }
 
 .primary:disabled { cursor: not-allowed; }
+
+/* ---------- 26. Workspace accessibility and constrained screens --------- */
+
+.skip-link {
+  position: fixed;
+  z-index: 40;
+  top: 8px;
+  left: 8px;
+  padding: 10px 14px;
+  color: var(--ink-000);
+  background: var(--amber);
+  border-radius: 2px;
+  transform: translateY(calc(-100% - 12px));
+}
+.skip-link:focus { transform: none; }
+.query-shortcut { color: var(--paper-3); font: 400 11px/1.3 var(--font-sans); white-space: nowrap; }
+.query-shortcut kbd { font: inherit; }
+.query-footer { flex-wrap: wrap; padding-block: 6px; }
+.error, .load-failure, .active-task-feedback, .hunt-empty p { overflow-wrap: anywhere; }
+.toast-message, #toast-message { min-width: 0; overflow-wrap: anywhere; }
+.toast-action { flex: none; }
+.question-card-head strong { overflow-wrap: anywhere; }
+.question-select, .question-card-head { min-width: 0; }
+.question-prompt { overflow-wrap: anywhere; }
+.question-state { flex: none; }
+.query-panel .panel-toolbar { flex-wrap: wrap; gap: 8px; padding-block: 6px; }
+.column-sort { padding-right: 12px; }
+
+dialog { max-height: calc(100dvh - 32px); }
+.event-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.event-dialog .dialog-head, .event-dialog .dialog-toolbar { flex: none; }
+.event-dialog pre { flex: 1; min-height: 0; max-height: none; overscroll-behavior: contain; }
+
+@media (max-width: 900px) {
+  .query-shortcut { display: none; }
+}
+@media (max-width: 600px) {
+  .dialog-toolbar { gap: 8px; }
+  .dialog-search { flex-basis: 100%; min-width: 0; }
+  .dialog-search input, .dialog-form-body input { min-height: 42px; font-size: 16px; }
+  .dialog-toolbar .muted-inline { flex: 1; }
+  .dialog-head > button { width: 42px; }
+  .active-task-resolution input { min-height: 42px; }
+  .toast-action { min-height: 42px; }
+}
+@media (max-width: 900px) and (max-height: 600px) {
+  .workspace-context-stack { position: static; }
+}

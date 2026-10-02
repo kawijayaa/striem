@@ -17,6 +17,85 @@ async function run(page: Page, count: number, mobile = false) {
   await expect(page.locator('#query-error')).toBeHidden();
 }
 
+test('long queries keep results accessible across desktop and constrained mobile layouts', async ({ page }) => {
+  const query = `Telemetry\n${Array.from({ length: 60 }, (_, index) => `// Investigation note ${index}`).join('\n')}\n| take 3`;
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const viewport of [
+    { width: 1440, height: 900 }, { width: 1280, height: 720 },
+    { width: 900, height: 700 }, { width: 390, height: 844 },
+    { width: 320, height: 640 }, { width: 844, height: 390 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await open(page, query);
+    const scroller = page.locator('.cm-scroller');
+    const dimensions = await scroller.evaluate(element => ({ height: element.clientHeight, content: element.scrollHeight }));
+    expect(dimensions.height).toBeLessThanOrEqual(360);
+    expect(dimensions.content).toBeGreaterThan(dimensions.height);
+    await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect(page.locator('.cm-line').last()).toContainText('| take 3');
+    const mobile = viewport.width <= 900;
+    await run(page, 3, mobile);
+    await expect(page.locator('#results-panel')).toBeVisible();
+    if (!mobile) {
+      const results = (await page.locator('#results-panel').boundingBox())!;
+      expect(results.height).toBeGreaterThan(160);
+      expect(results.y).toBeLessThan(viewport.height - 100);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await page.locator('.skip-link').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.cm-content')).toBeFocused();
+    await expect(page.locator('#query-panel')).toBeVisible();
+  }
+});
+
+test('JSON dialogs keep search, copy, close and scrollable content within short and narrow screens', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const viewport of [{ width: 320, height: 640 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await open(page, 'Telemetry | project host,details');
+    await run(page, 3, true);
+    const details = viewport.width <= 600
+      ? page.locator('.mobile-result-card-main').first()
+      : page.getByRole('button', { name: 'View event details for row 1' });
+    await details.click();
+    await page.locator('#raw-search').fill('nested');
+    await expect(page.locator('#raw-search-status')).toContainText('1 match');
+    for (const selector of ['#raw-dialog', '#raw-search', '#copy-raw', '#close-dialog', '#raw-json']) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+      expect(box.height).toBeGreaterThan(0);
+    }
+    await page.locator('#close-dialog').click();
+    await expect(page.locator('#raw-dialog')).toBeHidden();
+    await expect(details).toBeFocused();
+  }
+});
+
+test('long task titles and evidence strings remain readable in the task list', async ({ page }) => {
+  const title = `Investigate${'LongTitle'.repeat(20)}`;
+  const prompt = `Find the event containing ${'abcdef0123456789'.repeat(24)} and identify its host.`;
+  await page.route('**/api/questions', route => route.fulfill({ json: {
+    questions: [{ id: 'long', title, prompt, solved: false }],
+    totalQuestions: 1, solvedQuestions: 0, completed: false,
+  } }));
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page.locator('#show-all-tasks').click();
+    const task = page.locator('.question-select');
+    await expect(task).toContainText(title);
+    await expect(task).toContainText(prompt);
+    for (const selector of ['.question-card-head', '.question-prompt']) {
+      expect(await page.locator(selector).evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+});
+
 test('desktop results: sorting, resizing, JSON search, safe rendering, keyboard navigation and pivots', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const errors: string[] = [];

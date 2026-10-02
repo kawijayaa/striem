@@ -252,6 +252,12 @@ The 286px desktop sidebar contains three equal-width tabs: Fields, Tasks, and Hu
 
 KQL and Results are the visual and functional primary. The editor sits in a recessed near-black well with a charcoal line-number gutter, blue-charcoal active line, restrained multi-hue syntax, and IBM Plex Mono. Results remain one uninterrupted plane beneath the editor rather than splitting into auxiliary regions. Its sticky command-plane header, dense 12px mono cells, one-pixel row rules, blue-charcoal selection, and blue numeric emphasis preserve scan speed; mobile translates the hierarchy into stacked result records rather than shrinking the table.
 
+Long queries scroll inside an editor bounded to 190–360px, keeping query status and desktop results available. The query footer exposes the run shortcut on desktop. A keyboard-visible skip link moves directly into the editor and selects the Query view on mobile.
+
+### Constrained Screens And Content
+
+Event dialogs fit within the dynamic viewport, with fixed search and close controls above a separately scrolling JSON body. Narrow screens give search its own row and use 16px input text and 42px touch controls. Task titles and uninterrupted evidence strings wrap in the full Tasks list; the task strip keeps its compact summary. In short mobile landscapes, the context strip scrolls with the page so it cannot cover the working area.
+
 ## Do's and Don'ts
 
 ### Do:
