@@ -32,7 +32,7 @@ const logicalOperators = new Set([
 const functions = new Set([
   'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
-  'base64_decode_tostring', 'url_decode', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
+  'base64_decode_tostring', 'url_decode', 'parse_url', 'parseurl', 'parse_urlquery', 'parseurlquery', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'trim', 'trim_start', 'trim_end', 'replace_string', 'replace_strings', 'replace_regex',
@@ -89,6 +89,8 @@ const functionCompletions = createCompletions('function', [
   ['bag_merge', 'Merge bags with leftmost values taking precedence'], ['bag_remove_keys', 'Remove root keys or nested object properties'], ['bag_set_key', 'Set a root key or nested object property'],
   ['bag_has_key', 'Test for a dynamic object key'], ['set_has_element', 'Test dynamic array membership'],
   ['base64_decode_tostring', 'Decode Base64 text'], ['url_decode', 'Decode URL-escaped text'],
+  ['parse_url', 'Parse an absolute URL into its components'], ['parseurl', 'Legacy alias for parse_url'],
+  ['parse_urlquery', 'Parse URL query parameters'], ['parseurlquery', 'Legacy alias for parse_urlquery'],
   ['ipv4_is_private', 'Test for an RFC1918 address'],
   ['ipv4_is_in_range', 'Test an address against IPv4 ranges'],
   ['todatetime', 'Convert ISO text to UTC datetime'],

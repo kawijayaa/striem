@@ -348,7 +348,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"tostring", "countif", "parse_json", "parsejson", "todynamic", "toobject", "array_length"} {
+	for _, value := range []string{"tostring", "countif", "parse_json", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}
@@ -1142,6 +1142,30 @@ func TestJaccardThroughAPI(t *testing.T) {
 	rows := queryRows(t, server.URL, `print j=jaccard_index(dynamic([1,2,3]),dynamic([1,2,3,4])) | project renamed=j`)
 	if len(rows) != 1 || rows[0]["renamed"] != float64(0.75) {
 		t.Fatalf("real output=%#v", rows)
+	}
+}
+
+func TestURLParsingThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print u=parse_url("https://host/path?key=value"),q=parse_urlquery("a=b") | project renamed=u,q`)
+	if len(rows) != 1 {
+		t.Fatalf("rows=%#v", rows)
+	}
+	u, ok := rows[0]["renamed"].(map[string]any)
+	if !ok || u["Host"] != "host" || u["Path"] != "path" {
+		t.Fatalf("dynamic URL output=%#v", rows)
+	}
+	parameters, ok := u["Query Parameters"].(map[string]any)
+	if !ok || parameters["key"] != "value" {
+		t.Fatalf("nested parameters=%#v", u)
+	}
+	q, ok := rows[0]["q"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic query output=%#v", rows)
+	}
+	parameters, ok = q["Query Parameters"].(map[string]any)
+	if !ok || parameters["a"] != "b" {
+		t.Fatalf("nested query parameters=%#v", q)
 	}
 }
 

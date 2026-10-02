@@ -12,6 +12,21 @@ import (
 
 func compatibilityOptions() []ksql.Option {
 	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	for _, config := range []struct{ name, runtime string }{
+		{"parse_url", "kql_parse_url"}, {"parseurl", "kql_parse_url"},
+		{"parse_urlquery", "kql_parse_urlquery"}, {"parseurlquery", "kql_parse_urlquery"},
+	} {
+		config := config
+		options = append(options, ksql.WithTypedFunction(config.name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 argument", config.name)
+			}
+			if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires string input", config.name)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: config.runtime, Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}))
+	}
 	for _, name := range []string{"variance", "variancep", "varianceif", "variancepif", "stdev", "stdevp", "stdevif", "stdevpif"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

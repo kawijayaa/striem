@@ -44,6 +44,8 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 
 		"kql_jaccard_index":   kqlJaccardIndex,
 		"kql_parse_json":      kqlParseJSON,
+		"kql_parse_url":       kqlParseURL,
+		"kql_parse_urlquery":  kqlParseURLQuery,
 		"kql_repeat":          kqlRepeat,
 		"kql_bag_pack":        kqlBagPack,
 		"kql_bag_merge":       kqlBagMerge,
