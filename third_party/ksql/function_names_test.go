@@ -27,7 +27,7 @@ func TestURLFunctionGeneratedNames(t *testing.T) {
 func TestFirstArgumentFunctionNames(t *testing.T) {
 	db := openInvestigationDB(t)
 	for _, mode := range []ksql.ParameterizationMode{ksql.LiteralParameters, ksql.BoundParameters} {
-		for _, name := range []string{"parse_json", "parsejson", "todynamic", "toobject"} {
+		for _, name := range []string{"parse_json", "parse_csv", "parsejson", "todynamic", "toobject"} {
 			compiler := ksql.New(dialect.SQLite(), ksql.WithParameterization(mode), ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 				if args[0].Type == ksql.TypeDynamic {
 					return args[0], nil

@@ -348,7 +348,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"tostring", "countif", "parse_json", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
+	for _, value := range []string{"tostring", "countif", "parse_json", "parse_csv", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}
@@ -1166,6 +1166,25 @@ func TestURLParsingThroughAPI(t *testing.T) {
 	parameters, ok = q["Query Parameters"].(map[string]any)
 	if !ok || parameters["a"] != "b" {
 		t.Fatalf("nested query parameters=%#v", q)
+	}
+}
+
+func TestParseCSVThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print raw='a,"b,c",1,true' | project renamed=parse_csv(raw)`)
+	if len(rows) != 1 {
+		t.Fatalf("rows=%#v", rows)
+	}
+	array, ok := rows[0]["renamed"].([]any)
+	if !ok || len(array) != 4 || array[0] != "a" || array[1] != "b,c" || array[2] != "1" || array[3] != "true" {
+		t.Fatalf("dynamic string array=%#v", rows)
+	}
+	for _, query := range []string{`print parse_csv()`, `print parse_csv(1)`, `print parse_csv("a","b")`} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
 	}
 }
 

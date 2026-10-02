@@ -12,6 +12,15 @@ import (
 
 func compatibilityOptions() []ksql.Option {
 	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	options = append(options, ksql.WithTypedFunction("parse_csv", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 1 {
+			return ksql.TypedExpression{}, fmt.Errorf("parse_csv requires 1 argument")
+		}
+		if args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown {
+			return ksql.TypedExpression{}, fmt.Errorf("parse_csv requires string input")
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_parse_csv", Args: []sqlast.Expr{args[0].SQL}}}, nil
+	}))
 	for _, config := range []struct{ name, runtime string }{
 		{"parse_url", "kql_parse_url"}, {"parseurl", "kql_parse_url"},
 		{"parse_urlquery", "kql_parse_urlquery"}, {"parseurlquery", "kql_parse_urlquery"},
