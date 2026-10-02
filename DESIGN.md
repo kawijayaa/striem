@@ -254,6 +254,8 @@ KQL and Results are the visual and functional primary. The editor sits in a rece
 
 Long queries scroll inside an editor bounded to 190–360px, keeping query status and desktop results available. The query footer exposes the run shortcut on desktop. A keyboard-visible skip link moves directly into the editor and selects the Query view on mobile.
 
+Autocomplete follows the KQL IntelliSense interaction pattern: compact rows show a kind glyph, the suggestion, and its type. Documentation for the selected item sits beside the list on desktop and below it on narrow screens. Suggestions follow the query context, including comparison and string operators after an operand. Ctrl+Space opens suggestions, arrow keys navigate, Tab or Enter accepts, and Escape dismisses. Strings and comments suppress suggestions.
+
 ### Constrained Screens And Content
 
 Event dialogs fit within the dynamic viewport, with fixed search and close controls above a separately scrolling JSON body. Narrow screens give search its own row and use 16px input text and 42px touch controls. Task titles and uninterrupted evidence strings wrap in the full Tasks list; the task strip keeps its compact summary. In short mobile landscapes, the context strip scrolls with the page so it cannot cover the working area.

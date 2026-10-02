@@ -526,6 +526,48 @@ test('undo clearing history keeps newer runs and persists both histories', async
   await expect(page.locator('#query-history .query-preview')).toHaveText([newer, previous]);
 });
 
+test('hunting autocomplete offers string and symbolic comparisons and accepts Tab', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  for (const [prefix, label, value, count] of [
+    ['ha', 'has', '"alpha"', 1], ['con', 'contains', '"ph"', 1],
+    ['=', '==', '"alpha"', 1], ['!', '!=', '"alpha"', 2],
+    ['!ha', '!has', '"alpha"', 2], ['has_', 'has_cs', '"alpha"', 1],
+    ['contains_', 'contains_cs', '"ph"', 1], ['in', 'in', '("alpha", "beta")', 2],
+  ] as const) {
+    await edit(page, `Telemetry | where host ${prefix}`);
+    await editor.press('End');
+    await editor.press('Control+Space');
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await page.locator('.cm-completionLabel').filter({ hasText: new RegExp(`^${escaped}$`) }).click();
+    await editor.pressSequentially(value);
+    await expect(editor).toHaveText(`Telemetry | where host ${label} ${value}`);
+    await run(page, count);
+  }
+  await edit(page, 'Telemetry | where host ');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  for (const label of ['has', 'contains', '==', '!=']) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: new RegExp(`^${escaped}$`) })).toHaveCount(1);
+  }
+  await page.keyboard.press('Escape');
+  await editor.pressSequentially('cont', { delay: 80 });
+  await expect(page.locator('.cm-tooltip-autocomplete')).toBeVisible();
+  await page.waitForTimeout(100);
+  await editor.press('Tab');
+  await editor.pressSequentially('"ph"');
+  await expect(editor).toHaveText('Telemetry | where host contains "ph"');
+  await run(page, 1);
+  await edit(page, 'Telemetry | where host="alpha"');
+  await editor.press('End');
+  for (let index = 0; index < 7; index++) await editor.press('ArrowLeft');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({ hasText: /^==$/ }).click();
+  await expect(editor).toHaveText('Telemetry | where host== "alpha"');
+  await run(page, 1);
+});
+
 test('autocomplete replaces only its token and inserts functions without duplicate parentheses', async ({ page }) => {
   await open(page);
   const editor = page.locator('.cm-content');
@@ -639,12 +681,22 @@ test('autocomplete descriptions and selection remain readable inside narrow view
       background: getComputedStyle(element).backgroundColor,
       text: getComputedStyle(element).color,
     }));
-    expect(colors).toEqual({ background: 'rgb(117, 186, 242)', text: 'rgb(14, 24, 32)' });
+    expect(colors).toEqual({ background: 'rgb(38, 63, 85)', text: 'rgb(243, 242, 241)' });
+    await expect(page.locator('.completion-documentation')).toBeVisible();
+    const info = (await page.locator('.cm-completionInfo').boundingBox())!;
+    expect(info.x).toBeGreaterThanOrEqual(0);
+    expect(info.x + info.width).toBeLessThanOrEqual(viewport.width);
+    expect(info.y + info.height).toBeLessThanOrEqual(viewport.height);
+    if (viewport.width <= 600) {
+      const list = (await popup.locator('ul').boundingBox())!;
+      expect(info.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
+    }
     await page.waitForTimeout(100);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    await expect(popup).toBeHidden();
     await expect(editor).toContainText('()');
+    await page.keyboard.press('Escape');
+    await expect(popup).toBeHidden();
   }
 });
 

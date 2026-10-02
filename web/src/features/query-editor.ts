@@ -1,4 +1,4 @@
-import { autocompletion, closeBrackets, closeBracketsKeymap, snippet, pickedCompletion, insertCompletionText } from '@codemirror/autocomplete';
+import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionStatus, snippet, pickedCompletion, insertCompletionText } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
@@ -15,6 +15,7 @@ import { tags } from '@lezer/highlight';
 import { Vim, vim } from '@replit/codemirror-vim';
 import type { QueryError } from '../types';
 import { queryCompletionContext } from './completion-context';
+import { expressionOperatorDefinitions } from './expression-operators';
 
 const keywords = new Set([
   'let', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
@@ -42,6 +43,9 @@ const functions = new Set([
 ]);
 const literals = new Set(['true', 'false', 'null']);
 const types = new Set(['string', 'long', 'real', 'dynamic']);
+const comparisonCompletions = createCompletions('operator', expressionOperatorDefinitions, label => `${label} `)
+  .map(completion => ({ ...completion, boost: completion.label === '==' ? 30 : completion.label === '!=' ? 25
+    : completion.label === 'has' ? 15 : completion.label === 'contains' ? 10 : 0 }));
 
 const operatorCompletions = createCompletions('keyword', [
   ['let', 'Declare a scalar or tabular value'],
@@ -157,20 +161,22 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
     const target = queryCompletionContext(context.state.doc.toString(), context.pos);
-    if (!target || (!context.explicit && !target.prefix)) return null;
+    if (!target || (!context.explicit && !target.prefix && !/[\s(,]$/.test(context.state.sliceDoc(0, context.pos)))) return null;
     const completions = target.kind === 'source' ? [...options.getTableCompletions(),
       ...operatorCompletions.filter(completion => completion.label === 'let'),
       { label: 'print', type: 'keyword', apply: 'print ' },
       { label: 'range', type: 'keyword', apply: 'range ' }]
       : target.kind === 'table' ? options.getTableCompletions()
       : target.kind === 'operator' ? operatorCompletions
+      : target.kind === 'comparison' ? comparisonCompletions
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
-      : [...functionCompletions, ...options.getFieldCompletions()];
+      : [...functionCompletions, ...options.getFieldCompletions(),
+        { label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }, { label: 'null', type: 'constant' }];
     return {
       from: target.from,
       to: target.to,
-      options: completions,
+      options: completions.map(completionPresentation),
     };
   };
 
@@ -186,7 +192,33 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         indentOnInput(),
         bracketMatching(),
         closeBrackets(),
-        autocompletion({ override: [completionSource], activateOnTyping: true }),
+        autocompletion({
+          override: [completionSource], activateOnTyping: true,
+          activateOnCompletion: completion => ['operator', 'keyword', 'function'].includes(completion.type || ''),
+          tooltipClass: () => 'hunting-completions',
+          positionInfo: (_view, list, option, info, space) => {
+            const right = space.right - list.right;
+            const left = list.left - space.left;
+            if (window.innerWidth <= 600 || Math.max(right, left) < 240) {
+              return { style: 'position: static; width: auto; max-width: 100%;', class: 'completion-info-stacked' };
+            }
+            const top = Math.max(space.top - list.top,
+              Math.min(option.top - list.top, space.bottom - list.top - (info.bottom - info.top)));
+            const side = right >= left ? 'left: calc(100% + 4px)' : 'right: calc(100% + 4px)';
+            return { style: `${side}; top: ${top}px; width: ${Math.min(300, Math.max(right, left) - 8)}px;` };
+          },
+          icons: false,
+          addToOptions: [{ position: 20, render: completion => {
+            const icon = document.createElement('span');
+            icon.className = `completion-kind completion-kind-${completion.type}`;
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = completion.type === 'function' ? 'ƒ'
+              : completion.type === 'operator' ? '=' : completion.type === 'keyword' ? '|'
+              : completion.type === 'class' ? '▦' : completion.type === 'constant' ? '#'
+              : completion.type === 'property' ? '{}' : 'a';
+            return icon;
+          } }],
+        }),
         language,
         syntaxHighlighting(highlightStyle),
         editorTheme,
@@ -202,6 +234,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         keymap.of([
           { key: 'Shift-Enter', run: () => { options.onRun(); return true; } },
           { key: 'Ctrl-Enter', run: insertPipelineLine },
+          { key: 'Tab', run: view => completionStatus(view.state) === 'active' && acceptCompletion(view) },
           ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
@@ -243,6 +276,26 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
       button.classList.toggle('active', vimEnabled);
       button.setAttribute('aria-pressed', String(vimEnabled));
       view.dispatch({ effects: vimCompartment.reconfigure(vimEnabled ? vim() : []) });
+    },
+  };
+}
+
+function completionPresentation(completion: Completion): Completion {
+  const kind = completion.type === 'function' ? 'Function' : completion.type === 'operator' ? 'Operator'
+    : completion.type === 'keyword' ? 'Keyword' : completion.type === 'class' ? 'Table'
+    : completion.type === 'constant' ? 'Literal' : completion.detail?.split(' · ')[0] || 'Column';
+  return {
+    ...completion,
+    detail: kind,
+    info: () => {
+      const panel = document.createElement('div');
+      panel.className = 'completion-documentation';
+      const title = document.createElement('code');
+      title.textContent = completion.label;
+      const description = document.createElement('p');
+      description.textContent = completion.detail || kind;
+      panel.append(title, description);
+      return panel;
     },
   };
 }

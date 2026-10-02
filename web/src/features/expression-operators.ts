@@ -1,0 +1,26 @@
+export const expressionOperatorDefinitions: [string, string][] = [
+  ['==', 'Equal to (case-sensitive for strings)'], ['!=', 'Not equal to'],
+  ['=~', 'Equal to, ignoring case'], ['!~', 'Not equal to, ignoring case'],
+  ['>', 'Greater than'], ['>=', 'Greater than or equal to'],
+  ['<', 'Less than'], ['<=', 'Less than or equal to'],
+  ['has', 'Contains a complete term, ignoring case'], ['!has', 'Does not contain a complete term'],
+  ['has_cs', 'Contains a complete term, matching case'], ['!has_cs', 'Does not contain a term, matching case'],
+  ['contains', 'Contains a substring, ignoring case'], ['!contains', 'Does not contain a substring'],
+  ['contains_cs', 'Contains a substring, matching case'], ['!contains_cs', 'Does not contain a substring, matching case'],
+  ['startswith', 'Starts with a substring, ignoring case'], ['!startswith', 'Does not start with a substring'],
+  ['startswith_cs', 'Starts with a substring, matching case'], ['!startswith_cs', 'Does not start with a substring, matching case'],
+  ['endswith', 'Ends with a substring, ignoring case'], ['!endswith', 'Does not end with a substring'],
+  ['endswith_cs', 'Ends with a substring, matching case'], ['!endswith_cs', 'Does not end with a substring, matching case'],
+  ['hasprefix', 'Has a term beginning with this prefix'], ['!hasprefix', 'Has no term beginning with this prefix'],
+  ['hasprefix_cs', 'Has a term beginning with this prefix, matching case'], ['!hasprefix_cs', 'Has no matching term prefix'],
+  ['hassuffix', 'Has a term ending with this suffix'], ['!hassuffix', 'Has no term ending with this suffix'],
+  ['hassuffix_cs', 'Has a term ending with this suffix, matching case'], ['!hassuffix_cs', 'Has no matching term suffix'],
+  ['in', 'Matches a value in a list'], ['!in', 'Matches no value in a list'],
+  ['in~', 'Matches a value in a list, ignoring case'], ['!in~', 'Matches no value in a list, ignoring case'],
+  ['between', 'Within an inclusive range'], ['!between', 'Outside an inclusive range'],
+  ['has_any', 'Contains any of the listed terms'], ['has_all', 'Contains all of the listed terms'],
+  ['matches regex', 'Matches a regular expression'],
+  ['and', 'Both conditions must be true'], ['or', 'Either condition must be true'],
+];
+
+export const expressionOperatorWords = new Set(expressionOperatorDefinitions.flatMap(([label]) => label.split(' ')));

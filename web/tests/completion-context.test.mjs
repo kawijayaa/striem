@@ -40,3 +40,26 @@ test('completion detects table, operator and expression positions without crossi
     ['Events | order\nho', 'expression'],
   ]) assert.equal(queryCompletionContext(query, query.length).kind, kind, query);
 });
+
+test('comparison operators complete after operands and preserve adjacent values', () => {
+  for (const [query, prefix] of [
+    ['Events | where host ', ''], ['Events | where host ha', 'ha'],
+    ['Events | where host !ha', '!ha'], ['Events | where host con', 'con'],
+    ['Events | where host =', '='], ['Events | where host !=', '!='],
+    ['Events | where host == "alpha" a', 'a'], ['Events | where score > 1 a', 'a'],
+    ['Events | where tostring(host) con', 'con'],
+  ]) {
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(context.kind, 'comparison', query);
+    assert.equal(context.prefix, prefix, query);
+  }
+  for (const query of ['Events | where host contains ', 'Events | where host == ', 'Events | where ']) {
+    assert.equal(queryCompletionContext(query, query.length).kind, 'expression', query);
+  }
+  const query = 'Events | where host=="alpha"';
+  const position = query.indexOf('==') + 1;
+  const comparison = queryCompletionContext(query, position);
+  assert.equal(query.slice(comparison.from, comparison.to), '==');
+  const field = queryCompletionContext(query, query.indexOf('host') + 2);
+  assert.equal(query.slice(field.from, field.to), 'host');
+});

@@ -1,7 +1,9 @@
+import { expressionOperatorWords } from './expression-operators.ts';
+
 export interface QueryCompletionContext {
   from: number;
   to: number;
-  kind: 'source' | 'table' | 'operator' | 'expression' | 'sort';
+  kind: 'source' | 'table' | 'operator' | 'expression' | 'comparison' | 'sort';
   prefix: string;
 }
 
@@ -23,6 +25,7 @@ function queryCodeBeforeCursor(source: string): string | null {
     if (multiline) {
       if (source.startsWith(multiline, index)) {
         code.fill(' ', index, index + 3);
+        code[index + 2] = '0';
         index += 2;
         multiline = '';
       } else code[index] = ' ';
@@ -36,7 +39,7 @@ function queryCodeBeforeCursor(source: string): string | null {
         if (index + 1 < source.length) code[++index] = ' ';
       } else if (char === quote) {
         if (verbatim && source[index + 1] === quote) code[++index] = ' ';
-        else quote = '';
+        else { quote = ''; code[index] = '0'; }
       }
       continue;
     }
@@ -69,15 +72,27 @@ export function queryCompletionContext(query: string, position: number): QueryCo
     const from = boundary + 1 + segment.search(/\S/);
     return { from, to: position, kind: 'operator', prefix: query.slice(from, position) };
   }
-  const kind = /^\s*[A-Za-z_-]*$/.test(segment)
+  let kind: QueryCompletionContext['kind'] = /^\s*[A-Za-z_-]*$/.test(segment)
     ? source ? 'source' : 'operator'
     : /^\s*(?:order|sort)\s+by\b/i.test(segment) ? 'sort'
     : /\b(?:join|union|lookup)\b\s*(?:kind\s*=\s*[A-Za-z_]+\s+)?\(?\s*[A-Za-z_0-9]*$/i.test(segment)
       || /^\s*\(\s*[A-Za-z_0-9]*$/.test(segment) ? 'table' : 'expression';
   const token = kind === 'operator'
     ? code.match(/[A-Za-z_][A-Za-z_0-9-]*$/)
-    : code.match(/[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_0-9]*)*$/);
+    : code.match(/!?[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_0-9]*)*~?$|[=!<>~]{1,2}$/);
   const from = token ? position - token[0].length : position;
-  const suffix = query.slice(position).match(kind === 'operator' ? /^[A-Za-z_0-9-]*/ : /^[A-Za-z_0-9.]*/)?.[0] ?? '';
+  if (kind === 'expression') {
+    const before = code.slice(boundary + 1, from).trimEnd();
+    const lastWord = before.match(/[A-Za-z_][A-Za-z_0-9]*$/)?.[0]?.toLowerCase();
+    const needsOperand = /^\s*(?:where|filter|search|project|extend|summarize|distinct|take|limit|top|print|order|sort)\s*$/i.test(before)
+      || (lastWord !== undefined && expressionOperatorWords.has(lastWord));
+    if ((!source || /^\s*(?:print|let)\b/i.test(segment)) && !needsOperand && /[A-Za-z_0-9.)\]]$/.test(before)) kind = 'comparison';
+  }
+  const rest = query.slice(position);
+  const suffixPattern = kind === 'operator' ? /^[A-Za-z_0-9-]*/
+    : token && /^[=!<>~]+$/.test(token[0]) ? token[0] === '!' && /^[A-Za-z_]/.test(rest)
+      ? /^[A-Za-z_0-9]*~?/ : /^[=!<>~]*/
+    : kind === 'comparison' ? /^[A-Za-z_0-9]*~?/ : /^[A-Za-z_0-9.]*/;
+  const suffix = rest.match(suffixPattern)?.[0] ?? '';
   return { from, to: position + suffix.length, kind, prefix: query.slice(from, position) };
 }
