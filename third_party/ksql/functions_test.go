@@ -106,6 +106,9 @@ func FuzzQueryFunctions(f *testing.F) {
 		`let f=(T:(*)){T}; datatable(x:long)[1] | invoke f()`,
 		`let f=(T:(*)){T}; f(datatable(x:long))`,
 		`print 1 | invoke`,
+		`datatable(['a' ' b']:long)[1] | project ['output name']=['a b']`,
+		`let f=(['a']:long){['a']}; print f(['a']=)`,
+		`print ['a' 1]=1`, `print ['a']=`,
 	} {
 		f.Add(source)
 	}

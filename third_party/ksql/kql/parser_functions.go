@@ -32,13 +32,11 @@ func parseFunctionDefinition(tokens []Token, closeParameters int) (*FunctionDefi
 			if colon < 1 || colon+1 >= len(part) {
 				return fail("function parameter requires a name and type", tokensSpan(part))
 			}
-			name, nameErrors := parseExpressionTokens(part[:colon])
-			parameterName, ok := name.(*NameExpression)
-			simpleName := colon == 1 && part[0].Kind == IdentifierToken || colon == 3 && part[0].Text == "[" && part[1].Kind == StringToken && part[2].Text == "]"
-			if !simpleName || !ok || len(nameErrors) > 0 {
+			parameterName, valid := declarationName(part[:colon])
+			if !valid {
 				return fail("function parameter requires an identifier", tokensSpan(part))
 			}
-			parameter := FunctionParameter{Name: parameterName.Name, Span: tokensSpan(part)}
+			parameter := FunctionParameter{Name: parameterName, Span: tokensSpan(part)}
 			typeTokens := part[colon+1:]
 			if equal := topLevelToken(typeTokens, "="); equal >= 0 {
 				var defaultErrors []ParseError
@@ -59,12 +57,11 @@ func parseFunctionDefinition(tokens []Token, closeParameters int) (*FunctionDefi
 						if colon < 1 || colon+2 != len(column) || column[colon+1].Kind != IdentifierToken {
 							return fail("tabular parameter requires column name:type pairs or (*)", parameter.Span)
 						}
-						name, errors := parseExpressionTokens(column[:colon])
-						identifier, valid := name.(*NameExpression)
-						if !valid || len(errors) != 0 || !(colon == 1 && column[0].Kind == IdentifierToken || colon == 3 && column[0].Text == "[" && column[1].Kind == StringToken && column[2].Text == "]") {
+						name, valid := declarationName(column[:colon])
+						if !valid {
 							return fail("tabular parameter column requires an identifier", parameter.Span)
 						}
-						parameter.Columns = append(parameter.Columns, ColumnDefinition{Name: identifier.Name, Type: lower(column[colon+1])})
+						parameter.Columns = append(parameter.Columns, ColumnDefinition{Name: name, Type: lower(column[colon+1])})
 					}
 				}
 			} else {

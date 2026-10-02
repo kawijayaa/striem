@@ -1292,6 +1292,33 @@ func TestTabularQueryFunctionsThroughAPI(t *testing.T) {
 	}
 }
 
+func TestQuotedColumnDeclarationsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print ['a.b']=dynamic({"x":193}),['bool value']=not(false) | project-rename ['renamed data']=['a.b'] | project ['renamed data'],['bool value']`)
+	if len(rows) != 1 || rows[0]["bool value"] != true {
+		t.Fatalf("quoted Boolean result=%#v", rows)
+	}
+	object, ok := rows[0]["renamed data"].(map[string]any)
+	if !ok || object["x"] != float64(193) {
+		t.Fatalf("quoted dynamic result=%#v", rows)
+	}
+	rows = queryRows(t, server.URL, `let f=(T:(['some column']:long)){T}; f(datatable(['some' ' column']:long)[197])`)
+	if len(rows) != 1 || rows[0]["some column"] != float64(197) {
+		t.Fatalf("quoted datatable result=%#v", rows)
+	}
+	for _, query := range []string{
+		`datatable(['a']:long,a:long)[1,2]`, `print ['a']=`,
+		`let a=dynamic({"b":1}); print ['a.b']`,
+		`let f=(['a']:long){['a']}; print f(['a']=)`,
+	} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
+	}
+}
+
 func TestSetEqualsThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
 	rows := queryRows(t, server.URL, `print same=set_equals(dynamic([2,1,2]),dynamic([1,2])),different=set_equals(dynamic([9007199254740992]),dynamic([9007199254740993])),empty=set_equals(dynamic([]),dynamic([])) | project same,different,empty`)

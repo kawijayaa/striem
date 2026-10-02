@@ -77,3 +77,28 @@ func TestTabularQueryFunctionsExecution(t *testing.T) {
 		t.Fatal("lost Boolean table return metadata")
 	}
 }
+
+func TestQuotedColumnDeclarationsExecution(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`LeftEvents | project ['some number']=n,['a.b']=user | where ['some number']==2 | project-rename ['user name']=['a.b'] | project ['user name']`, `[[bob]]`},
+		{`LeftEvents | extend ['some number']=n*2 | project ['some number'] | order by ['some number'] asc`, `[[2] [4]]`},
+		{`datatable(['some number']:long)[3,5] | summarize ['row count']=count() by ['some number'] | order by ['some number'] asc`, `[[3 1] [5 1]]`},
+		{`let f=(T:(['some number']:long)){T}; f(datatable(['some' ' number']:long)[7])`, `[[7]]`},
+		{`let ['some' ' text']="hello"; print ['result name']=['some text']`, `[[hello]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s", tc.query, got, tc.want)
+		}
+	}
+	compiled, err := Compile(`print ['a.b']=dynamic([1]),['bool value']=not(false) | project-rename ['renamed data']=['a.b'] | project ['renamed data'],['bool value']`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := compiled.DynamicColumns["renamed data"]; !ok {
+		t.Fatal("lost quoted dynamic output metadata")
+	}
+	if _, ok := compiled.BooleanColumns["bool value"]; !ok {
+		t.Fatal("lost quoted Boolean output metadata")
+	}
+}

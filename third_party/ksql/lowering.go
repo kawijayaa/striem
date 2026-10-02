@@ -184,7 +184,11 @@ func (s *compileState) hasInputName(name string) bool {
 }
 
 func (s *compileState) name(value *kql.NameExpression) boundExpr {
-	parts := splitName(unquoteKQL(value.Name))
+	logicalName := unquoteKQL(value.Name)
+	parts := []string{logicalName}
+	if logicalName == value.Name {
+		parts = splitName(logicalName)
+	}
 	if len(parts) > 1 {
 		if bound, ok := s.scalarLets[strings.ToLower(parts[0])]; ok && !s.hasInputName(parts[0]) && !s.hasInputName(unquoteKQL(value.Name)) {
 			if bound.Type != TypeDynamic && bound.Type != TypeUnknown {
@@ -232,7 +236,7 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 	if len(parts) == 1 && s.qualifier != "" {
 		parts = append([]string{s.qualifier}, parts...)
 	}
-	return boundExpr{SQL: &sqlast.Identifier{Parts: parts}, Type: TypeUnknown, Name: lastName(value.Name)}
+	return boundExpr{SQL: &sqlast.Identifier{Parts: parts}, Type: TypeUnknown, Name: parts[len(parts)-1]}
 }
 
 func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationScope, parts []string) boundExpr {
@@ -293,7 +297,7 @@ func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions [
 		name := ""
 		valueExpression := expression
 		if named, ok := expression.(*kql.NamedExpression); ok {
-			name, valueExpression = named.Name, named.Value
+			name, valueExpression = unquoteKQL(named.Name), named.Value
 		}
 		value := s.expression(valueExpression)
 		if name == "" {
@@ -354,16 +358,16 @@ func (s *compileState) projectionOperator(from *sqlast.Subquery, input Schema, o
 	for _, expression := range spec.Expressions {
 		if named, ok := expression.(*kql.NamedExpression); ok && operator.Kind == "project-rename" {
 			old, ok := named.Value.(*kql.NameExpression)
-			if !ok || strings.Contains(old.Name, ".") {
+			if !ok || (unquoteKQL(old.Name) == old.Name && strings.Contains(old.Name, ".")) {
 				s.bindError("KQLB0341", expression.NodeSpan(), "operator."+operator.Kind, "project-rename requires new=old column names")
 				continue
 			}
-			column, _, found, ambiguous := input.Lookup(old.Name)
+			column, _, found, ambiguous := input.Lookup(unquoteKQL(old.Name))
 			if ambiguous || !found {
 				s.bindError("KQLB0401", old.Span, "operator."+operator.Kind, "unknown column "+old.Name)
 				continue
 			}
-			renames[strings.ToLower(column.Name)] = named.Name
+			renames[strings.ToLower(column.Name)] = unquoteKQL(named.Name)
 			continue
 		}
 		if pattern, ok := expression.(*kql.ColumnPatternExpression); ok {

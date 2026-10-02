@@ -254,7 +254,7 @@ func (s *compileState) source(source kql.Source) Relation {
 	case "datatable":
 		columns := make([]string, len(source.Columns))
 		for i, column := range source.Columns {
-			columns[i] = column.Name
+			columns[i] = unquoteKQL(column.Name)
 		}
 		rows := make([][]sqlast.Expr, len(source.Rows))
 		for i, row := range source.Rows {
@@ -262,8 +262,9 @@ func (s *compileState) source(source kql.Source) Relation {
 		}
 		schema := Schema{Columns: make([]Column, len(source.Columns))}
 		for i, column := range source.Columns {
-			schema.Columns[i] = Column{Name: column.Name, Type: parseScalarType(column.Type)}
+			schema.Columns[i] = Column{Name: unquoteKQL(column.Name), Type: parseScalarType(column.Type)}
 		}
+		s.validateUnique(schema.Columns, source.Span, "source.datatable")
 		return Relation{Query: &sqlast.Select{From: &sqlast.Values{Columns: columns, Rows: rows, Alias: s.nextAlias()}}, Schema: schema}
 	case "range":
 		from, to, step := s.expression(source.From), s.expression(source.To), s.expression(source.Step)
@@ -514,7 +515,7 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 		if named, ok := expression.(*kql.NamedExpression); ok {
 			bound = s.expression(named.Value)
 			item.Expr = bound.SQL
-			item.Alias = named.Name
+			item.Alias = unquoteKQL(named.Name)
 		} else {
 			bound = s.expression(expression)
 			item.Expr = bound.SQL

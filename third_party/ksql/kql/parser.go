@@ -84,20 +84,17 @@ func parseStatement(tokens []Token) (Statement, []ParseError) {
 
 func parseLet(tokens []Token) (Statement, []ParseError) {
 	statement := &LetStatement{Raw: tokens, Span: tokensSpan(tokens)}
-	equal := 2
-	if len(tokens) >= 5 && tokens[1].Text == "[" && tokens[2].Kind == StringToken && tokens[3].Text == "]" {
-		name, err := DecodeString(tokens[2].Text)
-		if err != nil {
-			return statement, []ParseError{{Code: "KQLP0101", Message: err.Error(), Span: tokens[2].Span}}
-		}
-		statement.Name, equal = name, 4
-	} else if len(tokens) >= 3 && tokens[1].Kind == IdentifierToken {
-		statement.Name = tokens[1].Text
-	} else {
+	equal := topLevelToken(tokens, "=")
+	if equal < 2 {
 		return statement, []ParseError{{Code: "KQLP0101", Message: "expected 'let name = expression'", Span: statement.Span}}
 	}
-	if tokens[equal].Text != "=" {
-		return statement, []ParseError{{Code: "KQLP0101", Message: "expected '=' after let name", Span: tokens[equal].Span}}
+	name, valid := declarationName(tokens[1:equal])
+	if !valid {
+		return statement, []ParseError{{Code: "KQLP0101", Message: "let requires an identifier declaration", Span: tokensSpan(tokens[1:equal])}}
+	}
+	statement.Name = name
+	if tokens[1].Text == "[" {
+		statement.Name, _ = DecodeString(name)
 	}
 	value := trimParentheses(tokens[equal+1:])
 	if len(value) == 0 {
@@ -253,11 +250,18 @@ func parseDatatableSource(source Source, tokens []Token) (Source, []ParseError) 
 		return source, []ParseError{{Code: "KQLP0212", Message: "datatable requires a bracketed value list", Span: source.Span}}
 	}
 	for _, definition := range splitTopLevel(tokens[1:closeSchema], ",") {
+		if len(definition) == 0 {
+			return source, []ParseError{{Code: "KQLP0213", Message: "expected datatable column name:type", Span: tokens[closeSchema].Span}}
+		}
 		colon := topLevelToken(definition, ":")
-		if colon != 1 || len(definition) != 3 {
+		if colon < 1 || colon+2 != len(definition) || definition[colon+1].Kind != IdentifierToken {
 			return source, []ParseError{{Code: "KQLP0213", Message: "expected datatable column name:type", Span: tokensSpan(definition)}}
 		}
-		source.Columns = append(source.Columns, ColumnDefinition{Name: definition[0].Text, Type: lower(definition[2])})
+		name, valid := declarationName(definition[:colon])
+		if !valid {
+			return source, []ParseError{{Code: "KQLP0213", Message: "datatable column requires an identifier declaration", Span: tokensSpan(definition)}}
+		}
+		source.Columns = append(source.Columns, ColumnDefinition{Name: name, Type: lower(definition[colon+1])})
 	}
 	closeValues := matchingClose(tokens, closeSchema+1)
 	if closeValues < 0 {
@@ -718,11 +722,17 @@ func parseExpressionList(tokens []Token) ([]Expression, []ParseError) {
 		if len(part) == 0 {
 			continue
 		}
-		if equal := topLevelToken(part, "="); equal == 1 && part[0].Kind == IdentifierToken {
-			value, valueErrs := parseExpressionTokens(part[2:])
-			expressions = append(expressions, &NamedExpression{Name: part[0].Text, Value: value, Span: tokensSpan(part)})
-			errs = append(errs, valueErrs...)
-			continue
+		if equal := topLevelToken(part, "="); equal > 0 {
+			if name, valid := declarationName(part[:equal]); valid {
+				if equal+1 == len(part) {
+					errs = append(errs, ParseError{Code: "KQLP0401", Message: "named expression requires a value", Span: part[equal].Span})
+					continue
+				}
+				value, valueErrs := parseExpressionTokens(part[equal+1:])
+				expressions = append(expressions, &NamedExpression{Name: name, Value: value, Span: tokensSpan(part)})
+				errs = append(errs, valueErrs...)
+				continue
+			}
 		}
 		expr, exprErrs := parseExpressionTokens(part)
 		expressions = append(expressions, expr)

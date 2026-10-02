@@ -140,10 +140,20 @@ func (p *expressionParser) parsePrefix() Expression {
 		if !p.consume(")") {
 			p.errors = append(p.errors, ParseError{Code: "KQLP0404", Message: "missing closing parenthesis", Span: token.Span})
 		}
-	case token.Text == "[" && p.position+2 < len(p.tokens) && p.tokens[p.position+1].Kind == StringToken && p.tokens[p.position+2].Text == "]":
-		nameTokens := p.tokens[p.position : p.position+3]
-		p.position += 3
-		expr = &NameExpression{Name: nameTokens[1].Text, Span: tokensSpan(nameTokens)}
+	case token.Text == "[":
+		close := matchingClose(p.tokens, p.position)
+		if close < 0 {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0406", Message: "missing closing bracket", Span: token.Span})
+			return nil
+		}
+		nameTokens := p.tokens[p.position : close+1]
+		name, valid := declarationName(nameTokens)
+		if !valid {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0405", Message: "expected bracketed string name", Span: tokensSpan(nameTokens)})
+			return nil
+		}
+		p.position = close + 1
+		expr = &NameExpression{Name: name, Span: tokensSpan(nameTokens)}
 	case token.Text == "{":
 		start := p.position
 		for p.position < len(p.tokens) && p.tokens[p.position].Text != "}" {
@@ -256,9 +266,17 @@ func (p *expressionParser) parseCommaExpressions(close string) []Expression {
 		start := p.position
 		expr := p.parse(0)
 		if expr != nil {
-			if equal := p.position; equal < len(p.tokens) && p.tokens[equal].Text == "=" && start+1 == equal {
+			if equal := p.position; equal < len(p.tokens) && p.tokens[equal].Text == "=" {
 				if name, ok := expr.(*NameExpression); ok {
+					if _, valid := declarationName(p.tokens[start:equal]); !valid {
+						p.errors = append(p.errors, ParseError{Code: "KQLP0401", Message: "named argument requires an identifier declaration", Span: name.Span})
+						return expressions
+					}
 					p.position++
+					if p.position == len(p.tokens) || p.tokens[p.position].Text == close || p.tokens[p.position].Text == "," {
+						p.errors = append(p.errors, ParseError{Code: "KQLP0401", Message: "named argument requires a value", Span: p.tokens[equal].Span})
+						return expressions
+					}
 					value := p.parse(0)
 					if value == nil {
 						p.errors = append(p.errors, ParseError{Code: "KQLP0401", Message: "named argument requires a value", Span: name.Span})
