@@ -82,38 +82,12 @@ func (c *Compiler) Compile(source string) Result {
 		return result
 	}
 
-	state := compileState{compiler: c, scalarLets: make(map[string]boundExpr), tabularLets: make(map[string]Relation)}
+	state := compileState{compiler: c, scalarLets: make(map[string]boundExpr), tabularLets: make(map[string]Relation), functions: make(map[string]*boundFunction)}
 	var relation Relation
 	for _, statement := range tree.Statements {
 		switch node := statement.(type) {
 		case *kql.LetStatement:
-			key := strings.ToLower(node.Name)
-			_, scalarExists := state.scalarLets[key]
-			_, tabularExists := state.tabularLets[key]
-			if scalarExists || tabularExists {
-				state.bindError("KQLB0101", node.Span, "statement.let", "variable already declared: "+node.Name)
-				continue
-			}
-			if node.Pipeline != nil {
-				value := state.pipeline(node.Pipeline)
-				if value.Query != nil {
-					state.tabularLets[strings.ToLower(node.Name)] = value
-				}
-			} else if node.Value != nil {
-				if value, tabular := state.tabularLetValue(node.Value); tabular {
-					if value.Query != nil {
-						state.tabularLets[key] = value
-					}
-				} else {
-					value := state.expression(node.Value)
-					if value.SQL != nil {
-						state.scalarLets[key] = value
-					}
-				}
-			} else {
-				state.error("KQLL0101", node.Span, "statement.let", "function declarations require semantic parameter binding")
-			}
-			state.use("statement.let", "equivalent", node.Span)
+			state.bindLet(node, nil)
 		case *kql.ControlStatement:
 			state.error("KQLL0102", node.Span, "statement."+node.Kind, node.Kind+" is a KQL session/control statement with no SQL query equivalent")
 		case *kql.ExpressionStatement:
@@ -149,17 +123,21 @@ func (c *Compiler) Compile(source string) Result {
 }
 
 type compileState struct {
-	compiler      *Compiler
-	scalarLets    map[string]boundExpr
-	tabularLets   map[string]Relation
-	diagnostics   []Diagnostic
-	features      []FeatureUse
-	args          []any
-	alias         int
-	defaultColumn int
-	qualifiers    map[string]relationScope
-	qualifier     string
-	input         Schema
+	compiler        *Compiler
+	scalarLets      map[string]boundExpr
+	tabularLets     map[string]Relation
+	functions       map[string]*boundFunction
+	functionDepth   int
+	functionWork    int
+	functionSQLWork int
+	diagnostics     []Diagnostic
+	features        []FeatureUse
+	args            []any
+	alias           int
+	defaultColumn   int
+	qualifiers      map[string]relationScope
+	qualifier       string
+	input           Schema
 }
 
 type boundExpr struct {
@@ -557,6 +535,15 @@ func (s *compileState) expressions(expressions []kql.Expression) []sqlast.Expr {
 func (s *compileState) expression(expression kql.Expression) boundExpr {
 	if expression == nil {
 		return boundExpr{}
+	}
+	if s.functionDepth > 0 {
+		s.functionWork++
+		if s.functionWork > maxFunctionWork {
+			if s.functionWork == maxFunctionWork+1 {
+				s.bindError("KQLB0119", expression.NodeSpan(), "statement.let", "function expansion work limit exceeded")
+			}
+			return boundExpr{}
+		}
 	}
 	switch value := expression.(type) {
 	case *kql.NameExpression:
@@ -1119,7 +1106,10 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 		s.error("KQLL0501", value.Span, "function.dynamic", "dynamic function references are not supported")
 		return boundExpr{}
 	}
-	function := strings.ToLower(name.Name)
+	function := strings.ToLower(unquoteKQL(name.Name))
+	if declaration, ok := s.functions[function]; ok {
+		return s.callFunction(declaration, value)
+	}
 	if function == "datetime" || function == "date" || function == "timespan" || function == "time" {
 		if len(value.Args) != 1 {
 			return s.arity(value, function, 1)

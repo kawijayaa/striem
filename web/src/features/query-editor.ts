@@ -48,7 +48,7 @@ const comparisonCompletions = createCompletions('operator', expressionOperatorDe
     : completion.label === 'has' ? 15 : completion.label === 'contains' ? 10 : 0 }));
 
 const operatorCompletions = createCompletions('keyword', [
-  ['let', 'Declare a scalar or tabular value'],
+  ['let', 'Define a value, query, or function'],
   ['where', 'Filter rows'], ['filter', 'Filter rows'], ['search', 'Search visible columns'],
   ['getschema', 'Describe output columns and types'], ['project', 'Select columns'], ['project-away', 'Remove columns'], ['project-keep', 'Keep columns'],
   ['project-rename', 'Rename columns'], ['project-reorder', 'Reorder columns'],

@@ -1235,6 +1235,34 @@ func TestExtractAllThroughAPI(t *testing.T) {
 	}
 }
 
+func TestScalarQueryFunctionsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let f=(x:bool){bag_pack("value",not(x))}; let g=(x:bool){not(x)}; print d=f(false),b=g(false) | project renamed=d,b`)
+	if len(rows) != 1 || rows[0]["b"] != true {
+		t.Fatalf("Boolean function output=%#v", rows)
+	}
+	object, ok := rows[0]["renamed"].(map[string]any)
+	if !ok || object["value"] != true {
+		t.Fatalf("dynamic function output=%#v", rows)
+	}
+	rows = queryRows(t, server.URL, `let getQueryParamValue=(querystring:string,param:string){let params=parse_urlquery(querystring); tostring(params["Query Parameters"].[param])}; print result=getQueryParamValue("view=vs-2019&preserve-view=true","preserve-view")`)
+	if len(rows) != 1 || rows[0]["result"] != "true" {
+		t.Fatalf("parameter accessor=%#v", rows)
+	}
+	for _, query := range []string{
+		`let f=(x:long){x}; print result=f("bad")`,
+		`let f=(){unknown}; print 1`,
+		`let f=(x:long){x}; print f(x=)`,
+		`let f=(x:long){x+x}; print ` + strings.Repeat("f(", 40) + "1" + strings.Repeat(")", 40),
+	} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
+	}
+}
+
 func TestSetEqualsThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
 	rows := queryRows(t, server.URL, `print same=set_equals(dynamic([2,1,2]),dynamic([1,2])),different=set_equals(dynamic([9007199254740992]),dynamic([9007199254740993])),empty=set_equals(dynamic([]),dynamic([])) | project same,different,empty`)

@@ -162,6 +162,9 @@ func (p *expressionParser) parsePrefix() Expression {
 		return nil
 	}
 
+	if expr == nil {
+		return nil
+	}
 	for p.position < len(p.tokens) {
 		switch p.tokens[p.position].Text {
 		case "(":
@@ -177,20 +180,21 @@ func (p *expressionParser) parsePrefix() Expression {
 			start := expr.NodeSpan()
 			p.position++
 			index := p.parse(0)
-			if !p.consume("]") {
+			closed := p.consume("]")
+			if !closed {
 				p.errors = append(p.errors, ParseError{Code: "KQLP0406", Message: "missing closing bracket", Span: start})
 			}
 			if index != nil {
-				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(start, index.NodeSpan())}
+				end := index.NodeSpan()
+				if closed {
+					end = p.tokens[p.position-1].Span
+				}
+				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(start, end)}
 			}
 		case ".":
-			// A quoted entity name after a dot denotes one literal property,
-			// including keys containing dots or reserved words.
-			if p.position+3 < len(p.tokens) && p.tokens[p.position+1].Text == "[" && p.tokens[p.position+2].Kind == StringToken && p.tokens[p.position+3].Text == "]" {
-				key, close := p.tokens[p.position+2], p.tokens[p.position+3]
-				p.position += 4
-				index := &LiteralExpression{Text: key.Text, Kind: StringToken, Span: key.Span}
-				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(expr.NodeSpan(), close.Span)}
+			// Dot-bracket access accepts both literal keys and key expressions.
+			if p.position+1 < len(p.tokens) && p.tokens[p.position+1].Text == "[" {
+				p.position++
 				continue
 			}
 			if p.position+1 >= len(p.tokens) || p.tokens[p.position+1].Kind != IdentifierToken {
@@ -231,6 +235,10 @@ func (p *expressionParser) parseCommaExpressions(close string) []Expression {
 				if name, ok := expr.(*NameExpression); ok {
 					p.position++
 					value := p.parse(0)
+					if value == nil {
+						p.errors = append(p.errors, ParseError{Code: "KQLP0401", Message: "named argument requires a value", Span: name.Span})
+						return expressions
+					}
 					expr = &NamedExpression{Name: name.Name, Value: value, Span: joinSpan(name.Span, value.NodeSpan())}
 				}
 			}

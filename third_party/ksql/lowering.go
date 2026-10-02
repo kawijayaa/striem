@@ -155,6 +155,9 @@ func (s *compileState) defaultColumnName(span kql.Span, includeRowScope bool) st
 		if _, found := s.tabularLets[key]; found {
 			continue
 		}
+		if _, found := s.functions[key]; found {
+			continue
+		}
 		if _, found := s.compiler.functionRules[key]; found {
 			continue
 		}

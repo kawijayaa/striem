@@ -210,11 +210,22 @@ func TestQuotedDotProperty(t *testing.T) {
 			t.Fatalf("span=%#v", index.Span)
 		}
 	}
-	for _, source := range []string{`d.[key]`, `d.['where'`, `d.[]`, `d.`, `d.['where']junk`} {
+	for _, source := range []string{`d.['where'`, `d.[]`, `d.`, `d.['where']junk`} {
 		tokens, _ := Lex(source)
 		_, errs := parseExpressionTokens(tokens[:len(tokens)-1])
 		if len(errs) == 0 {
 			t.Fatalf("accepted %s", source)
+		}
+	}
+}
+
+func TestDotBracketKeyExpressions(t *testing.T) {
+	for _, source := range []string{`d.[key]`, `f().[key]`, `d.[1+2]`} {
+		tokens, _ := Lex(source)
+		expr, errs := parseExpressionTokens(tokens[:len(tokens)-1])
+		index, ok := expr.(*IndexExpression)
+		if len(errs) != 0 || !ok || index.Span.Offset+index.Span.Length != len(source) {
+			t.Fatalf("%s: expression=%#v errors=%v", source, expr, errs)
 		}
 	}
 }

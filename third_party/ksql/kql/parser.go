@@ -103,6 +103,14 @@ func parseLet(tokens []Token) (Statement, []ParseError) {
 	if len(value) == 0 {
 		return statement, []ParseError{{Code: "KQLP0102", Message: "let requires a value", Span: tokens[equal].Span}}
 	}
+	if value[0].Text == "(" {
+		close := matchingClose(value, 0)
+		if close >= 0 && close+1 < len(value) && value[close+1].Text == "{" {
+			function, errs := parseFunctionDefinition(value, close)
+			statement.Function = function
+			return statement, errs
+		}
+	}
 	if hasTopLevel(value, "|") || beginsTabularSource(value) {
 		pipeline, errs := parsePipeline(value)
 		statement.Pipeline = pipeline

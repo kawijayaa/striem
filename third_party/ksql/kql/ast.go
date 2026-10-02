@@ -24,6 +24,22 @@ type ExpressionStatement struct {
 	Span     Span
 }
 
+type FunctionParameter struct {
+	Name    string
+	Type    string
+	Default Expression
+	Span    Span
+}
+
+// FunctionDefinition keeps the declaration's typed parameters and local scope.
+type FunctionDefinition struct {
+	Parameters []FunctionParameter
+	Lets       []*LetStatement
+	Result     Expression
+	Pipeline   *Pipeline
+	Span       Span
+}
+
 func (*ExpressionStatement) statementNode()   {}
 func (s *ExpressionStatement) NodeSpan() Span { return s.Span }
 
@@ -32,6 +48,7 @@ type LetStatement struct {
 	Name     string
 	Value    Expression
 	Pipeline *Pipeline
+	Function *FunctionDefinition
 	Raw      []Token
 	Span     Span
 }

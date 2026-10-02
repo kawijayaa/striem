@@ -85,7 +85,9 @@ The built-in relational compiler currently lowers:
 - single-array SQLite `mv-expand` and row-wise `mv-apply` subqueries using
   `where`, `extend`, and `serialize`; unsupported replacement, multi-array,
   and aggregating forms return diagnostics
-- scalar and tabular `let` bindings
+- scalar and tabular `let` bindings, plus scalar query-defined functions with
+  typed parameters, literal defaults, named arguments, lexical captures,
+  local declarations, and nested functions
 - table, `print`, `datatable`, and dialect-capable `range` sources
 - arithmetic, comparisons, Boolean logic, membership, ranges, substring
   matching, regular expressions, conditionals, common aggregates, string
@@ -120,3 +122,29 @@ This project is an independent implementation. See [`NOTICE`](NOTICE).
 ## License
 
 Apache-2.0. See [`NOTICE`](NOTICE) for upstream attribution.
+
+## Scalar query-defined functions
+
+```kusto
+let adjust = (value:long, offset:long = 2) {
+    let increment = () { offset };
+    value + increment()
+};
+print result = adjust(offset=3, value=10)
+```
+
+Function calls inline a bound scalar expression and retain its output type.
+Arguments resolve in the caller; bodies resolve in their declaration scope.
+Parameters and local declarations stay local. Validation also checks unused
+function declarations. Scalar parameter types currently supported are bool,
+int, long, real/double, string, datetime, and dynamic; numeric widening supports
+int to long and int/long to real. Unsupported types, tabular parameters/bodies,
+recursive or unresolved functions, invalid defaults, and invalid argument
+contracts produce diagnostics with no SQL.
+
+Declaration/call depth, parameter count, binding work, and expanded SQL work
+are bounded. Shared argument trees are counted at their expanded size before
+parameter traversal/rendering, preventing exponentially large SQL from small
+function definitions. These are compiler resource policies. Full Microsoft
+function type coercion, views/tabular functions, invocation, expression result
+naming, and engine conformance remain unfinished.
