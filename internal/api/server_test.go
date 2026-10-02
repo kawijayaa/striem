@@ -348,7 +348,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"tostring", "countif", "parse_json", "parse_csv", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
+	for _, value := range []string{"tostring", "countif", "parse_json", "parse_csv", "parse_xml", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}
@@ -1185,6 +1185,26 @@ func TestParseCSVThroughAPI(t *testing.T) {
 		if response.StatusCode != http.StatusBadRequest {
 			t.Fatalf("%s: status=%d", query, response.StatusCode)
 		}
+	}
+}
+
+func TestParseXMLThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print d=parse_xml('<e name="value"><a>one</a><a>two</a></e>'),invalid=parse_xml("bad") | project renamed=d,invalid`)
+	if len(rows) != 1 || rows[0]["invalid"] != nil {
+		t.Fatalf("rows=%#v", rows)
+	}
+	object, ok := rows[0]["renamed"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic XML output=%#v", rows)
+	}
+	element, ok := object["e"].(map[string]any)
+	if !ok || element["@name"] != "value" {
+		t.Fatalf("element=%#v", object)
+	}
+	array, ok := element["a"].([]any)
+	if !ok || len(array) != 2 || array[0] != "one" || array[1] != "two" {
+		t.Fatalf("repeated elements=%#v", element)
 	}
 }
 
