@@ -15,13 +15,21 @@ const maxFunctionWork = 65536
 const maxFunctionSQLWork = 4 << 20
 
 type boundFunction struct {
-	name       string
-	definition *kql.FunctionDefinition
-	parameters []Column
-	defaults   []boundExpr
-	scalars    map[string]boundExpr
-	tables     map[string]Relation
-	functions  map[string]*boundFunction
+	name         string
+	definition   *kql.FunctionDefinition
+	parameters   []Column
+	tableSchemas []*Schema
+	tabular      bool
+	defaults     []boundExpr
+	scalars      map[string]boundExpr
+	tables       map[string]Relation
+	functions    map[string]*boundFunction
+}
+
+// A function can accept and return scalar or tabular values.
+type functionValue struct {
+	scalar boundExpr
+	table  Relation
 }
 
 func (s *compileState) bindLet(node *kql.LetStatement, locals map[string]struct{}) {
@@ -114,10 +122,6 @@ func functionArgument(value boundExpr, expected ScalarType) (boundExpr, bool) {
 
 func (s *compileState) defineFunction(node *kql.LetStatement) *boundFunction {
 	definition := node.Function
-	if definition.Pipeline != nil {
-		s.bindError("KQLB0110", definition.Span, "statement.let", "tabular function bodies require tabular function lowering")
-		return nil
-	}
 	if len(definition.Parameters) > 64 {
 		s.bindError("KQLB0111", definition.Span, "statement.let", "function parameter limit exceeded")
 		return nil
@@ -125,7 +129,8 @@ func (s *compileState) defineFunction(node *kql.LetStatement) *boundFunction {
 	function := &boundFunction{name: node.Name, definition: definition, scalars: maps.Clone(s.scalarLets), tables: maps.Clone(s.tabularLets), functions: maps.Clone(s.functions)}
 	seen := map[string]struct{}{}
 	optional := false
-	placeholders := make([]boundExpr, len(definition.Parameters))
+	placeholders := make([]functionValue, len(definition.Parameters))
+	scalarSeen := false
 	for i, parameter := range definition.Parameters {
 		name := unquoteKQL(parameter.Name)
 		key := strings.ToLower(name)
@@ -135,13 +140,29 @@ func (s *compileState) defineFunction(node *kql.LetStatement) *boundFunction {
 		}
 		seen[key] = struct{}{}
 		var kind ScalarType
-		switch strings.ToLower(parameter.Type) {
-		case "bool", "int", "long", "real", "double", "string", "datetime", "dynamic":
-			kind = parseScalarType(parameter.Type)
-		default:
+		if parameter.Type == "tabular" {
+			if scalarSeen || parameter.Default != nil {
+				s.bindError("KQLB0113", parameter.Span, "statement.let", "tabular parameters must precede scalar parameters and cannot have defaults")
+				return nil
+			}
+			schema, valid := s.functionParameterSchema(parameter)
+			if !valid {
+				return nil
+			}
+			function.parameters = append(function.parameters, Column{Name: name, Type: ScalarType("tabular")})
+			function.tableSchemas = append(function.tableSchemas, &schema)
+			function.defaults = append(function.defaults, boundExpr{})
+			placeholders[i] = functionValue{table: functionTablePlaceholder(schema)}
+			continue
+		}
+		scalarSeen = true
+		var valid bool
+		kind, valid = functionScalarType(parameter.Type)
+		if !valid {
 			s.bindError("KQLB0113", parameter.Span, "statement.let", "function parameter type is not supported: "+parameter.Type)
 			return nil
 		}
+		function.tableSchemas = append(function.tableSchemas, nil)
 		function.parameters = append(function.parameters, Column{Name: name, Type: kind})
 		var defaultValue boundExpr
 		if parameter.Default != nil {
@@ -161,12 +182,16 @@ func (s *compileState) defineFunction(node *kql.LetStatement) *boundFunction {
 			return nil
 		}
 		function.defaults = append(function.defaults, defaultValue)
-		placeholders[i] = boundExpr{SQL: &sqlast.Identifier{Parts: []string{name}}, Type: kind}
+		placeholders[i] = functionValue{scalar: boundExpr{SQL: &sqlast.Identifier{Parts: []string{name}}, Type: kind}}
 	}
 	// Validate unused declarations as well as calls, without taking the caller's
 	// row scope. Defaults/body parameters used only here are pruned before render.
 	before := len(s.diagnostics)
-	s.functionBody(function, placeholders, definition.Span)
+	validation := s.functionValidation
+	s.functionValidation = true
+	result := s.functionBody(function, placeholders, definition.Span)
+	s.functionValidation = validation
+	function.tabular = result.table.Query != nil
 	if len(s.diagnostics) != before {
 		return nil
 	}
@@ -174,15 +199,38 @@ func (s *compileState) defineFunction(node *kql.LetStatement) *boundFunction {
 }
 
 func (s *compileState) callFunction(function *boundFunction, call *kql.CallExpression) boundExpr {
-	if len(call.Args) > len(function.parameters) {
-		s.bindError("KQLB0117", call.Span, "statement.let", "too many function arguments for "+function.name)
+	if function.tabular {
+		s.bindError("KQLB0120", call.Span, "statement.let", "tabular function requires a tabular expression context")
 		return boundExpr{}
 	}
-	arguments := make([]boundExpr, len(function.parameters))
+	return s.callFunctionValue(function, call, nil).scalar
+}
+
+func (s *compileState) callFunctionValue(function *boundFunction, call *kql.CallExpression, implicit *Relation) functionValue {
+	offset := 0
+	if implicit != nil {
+		offset = 1
+	}
+	if len(call.Args)+offset > len(function.parameters) {
+		s.bindError("KQLB0117", call.Span, "statement.let", "too many function arguments for "+function.name)
+		return functionValue{}
+	}
+	arguments := make([]functionValue, len(function.parameters))
 	supplied := make([]bool, len(arguments))
+	if implicit != nil {
+		if len(function.tableSchemas) == 0 || function.tableSchemas[0] == nil {
+			s.bindError("KQLB0121", call.Span, "operator.invoke", "invoke requires a first tabular parameter")
+			return functionValue{}
+		}
+		table, valid := s.functionTableArgument(*implicit, *function.tableSchemas[0], function.definition.Parameters[0].Wildcard, call.Span)
+		if !valid {
+			return functionValue{}
+		}
+		arguments[0], supplied[0] = functionValue{table: table}, true
+	}
 	named := false
 	for position, expression := range call.Args {
-		index := position
+		index := position + offset
 		if argument, ok := expression.(*kql.NamedExpression); ok {
 			named = true
 			index = -1
@@ -195,38 +243,54 @@ func (s *compileState) callFunction(function *boundFunction, call *kql.CallExpre
 			expression = argument.Value
 		} else if named {
 			s.bindError("KQLB0117", expression.NodeSpan(), "statement.let", "positional arguments must precede named arguments")
-			return boundExpr{}
+			return functionValue{}
 		}
 		if index < 0 || supplied[index] {
 			s.bindError("KQLB0117", expression.NodeSpan(), "statement.let", "unknown or duplicate function argument")
-			return boundExpr{}
+			return functionValue{}
 		}
-		value, valid := functionArgument(s.expression(expression), function.parameters[index].Type)
-		if !valid || value.SQL == nil {
-			s.bindError("KQLB0118", expression.NodeSpan(), "statement.let", fmt.Sprintf("argument %s requires %s", function.parameters[index].Name, function.parameters[index].Type))
-			return boundExpr{}
+		if schema := function.tableSchemas[index]; schema != nil {
+			relation, valid := s.functionTableExpression(expression)
+			if !valid || relation.Query == nil {
+				s.bindError("KQLB0122", expression.NodeSpan(), "statement.let", "function argument requires a table")
+				return functionValue{}
+			}
+			relation, valid = s.functionTableArgument(relation, *schema, function.definition.Parameters[index].Wildcard, expression.NodeSpan())
+			if !valid {
+				return functionValue{}
+			}
+			arguments[index] = functionValue{table: relation}
+		} else {
+			value, valid := functionArgument(s.expression(expression), function.parameters[index].Type)
+			if !valid || value.SQL == nil {
+				s.bindError("KQLB0118", expression.NodeSpan(), "statement.let", fmt.Sprintf("argument %s requires %s", function.parameters[index].Name, function.parameters[index].Type))
+				return functionValue{}
+			}
+			arguments[index] = functionValue{scalar: value}
 		}
-		arguments[index], supplied[index] = value, true
+		supplied[index] = true
 	}
 	for i, provided := range supplied {
 		if !provided {
 			if function.defaults[i].SQL == nil {
 				s.bindError("KQLB0117", call.Span, "statement.let", "missing function argument "+function.parameters[i].Name)
-				return boundExpr{}
+				return functionValue{}
 			}
-			arguments[i] = function.defaults[i]
+			arguments[i] = functionValue{scalar: function.defaults[i]}
 		}
 	}
 	return s.functionBody(function, arguments, call.Span)
 }
 
-func (s *compileState) functionBody(function *boundFunction, arguments []boundExpr, span kql.Span) boundExpr {
+func (s *compileState) functionBody(function *boundFunction, arguments []functionValue, span kql.Span) functionValue {
 	if s.functionDepth >= maxFunctionDepth {
 		s.bindError("KQLB0119", span, "statement.let", "function call nesting exceeds 64 levels")
-		return boundExpr{}
+		return functionValue{}
 	}
 	scalars, tables, functions := s.scalarLets, s.tabularLets, s.functions
 	input, qualifier, qualifiers := s.input, s.qualifier, s.qualifiers
+	defaultColumn := s.defaultColumn
+	s.defaultColumn = 0
 	s.scalarLets, s.tabularLets, s.functions = maps.Clone(function.scalars), maps.Clone(function.tables), maps.Clone(function.functions)
 	s.input, s.qualifier, s.qualifiers = Schema{}, "", nil
 	s.functionDepth++
@@ -234,35 +298,54 @@ func (s *compileState) functionBody(function *boundFunction, arguments []boundEx
 		s.scalarLets, s.tabularLets, s.functions = scalars, tables, functions
 		s.input, s.qualifier, s.qualifiers = input, qualifier, qualifiers
 		s.functionDepth--
+		s.defaultColumn = defaultColumn
 	}()
 	locals := map[string]struct{}{}
 	for i, parameter := range function.parameters {
 		key := strings.ToLower(parameter.Name)
-		s.scalarLets[key] = arguments[i]
-		delete(s.tabularLets, key)
+		if function.tableSchemas[i] != nil {
+			s.tabularLets[key] = arguments[i].table
+			delete(s.scalarLets, key)
+		} else {
+			s.scalarLets[key] = arguments[i].scalar
+			delete(s.tabularLets, key)
+		}
 		delete(s.functions, key)
 		locals[key] = struct{}{}
 	}
 	for _, declaration := range function.definition.Lets {
 		s.bindLet(declaration, locals)
 	}
-	result := s.expression(function.definition.Result)
-	if result.SQL != nil {
-		cost := functionExpressionSize(result.SQL)
+	var result functionValue
+	if function.definition.Pipeline != nil {
+		result.table = s.pipeline(function.definition.Pipeline)
+	} else if relation, tabular := s.functionTableResult(function.definition.Result); tabular {
+		result.table = relation
+	} else {
+		result.scalar = s.expression(function.definition.Result)
+	}
+	var tree any
+	if result.table.Query != nil {
+		tree = result.table.Query
+	} else {
+		tree = result.scalar.SQL
+	}
+	if tree != nil {
+		cost := functionExpressionSize(tree)
 		if cost > maxFunctionSQLWork-s.functionSQLWork {
 			s.bindError("KQLB0119", span, "statement.let", "expanded function SQL exceeds work limit")
-			return boundExpr{}
+			return functionValue{}
 		}
 		s.functionSQLWork += cost
 	}
-	result.Name = ""
+	result.scalar.Name = ""
 	return result
 }
 
 // Count expanded SQL, including repeated references to shared argument trees.
 // Memoization makes the check linear in the compact DAG; a small declaration
 // such as f(x) { x+x } must not expand exponentially during SQL rendering.
-func functionExpressionSize(expression sqlast.Expr) int {
+func functionExpressionSize(expression any) int {
 	type pointerKey struct {
 		kind    reflect.Type
 		address uintptr

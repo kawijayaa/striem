@@ -25,10 +25,12 @@ type ExpressionStatement struct {
 }
 
 type FunctionParameter struct {
-	Name    string
-	Type    string
-	Default Expression
-	Span    Span
+	Name     string
+	Type     string
+	Default  Expression
+	Span     Span
+	Columns  []ColumnDefinition
+	Wildcard bool
 }
 
 // FunctionDefinition keeps the declaration's typed parameters and local scope.
@@ -246,6 +248,14 @@ type DynamicExpression struct {
 	Tokens []Token
 	Span   Span
 }
+
+type PipelineExpression struct {
+	Pipeline *Pipeline
+	Span     Span
+}
+
+func (*PipelineExpression) expressionNode()  {}
+func (e *PipelineExpression) NodeSpan() Span { return e.Span }
 
 type RawExpression struct {
 	Tokens []Token

@@ -69,6 +69,12 @@ func (s *compileState) union(input Relation, operator kql.Operator) Relation {
 		return Relation{}
 	}
 	if len(selected) == 0 {
+		if s.functionValidation {
+			// Wildcard function parameters intentionally expose no named
+			// columns while declarations are checked. Bind the concrete union
+			// schema at the call site, where the argument schemas are available.
+			return functionTablePlaceholder(Schema{})
+		}
 		s.error("KQLL0323", operator.Span, "operator.union", "zero-column union results are not yet supported")
 		return Relation{}
 	}

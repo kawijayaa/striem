@@ -50,6 +50,23 @@ func parseFunctionDefinition(tokens []Token, closeParameters int) (*FunctionDefi
 				parameter.Type = typeTokens[0].Text
 			} else if len(typeTokens) > 1 && typeTokens[0].Text == "(" && matchingClose(typeTokens, 0) == len(typeTokens)-1 {
 				parameter.Type = "tabular"
+				schema := typeTokens[1 : len(typeTokens)-1]
+				if len(schema) == 1 && schema[0].Text == "*" {
+					parameter.Wildcard = true
+				} else {
+					for _, column := range splitTopLevel(schema, ",") {
+						colon := topLevelToken(column, ":")
+						if colon < 1 || colon+2 != len(column) || column[colon+1].Kind != IdentifierToken {
+							return fail("tabular parameter requires column name:type pairs or (*)", parameter.Span)
+						}
+						name, errors := parseExpressionTokens(column[:colon])
+						identifier, valid := name.(*NameExpression)
+						if !valid || len(errors) != 0 || !(colon == 1 && column[0].Kind == IdentifierToken || colon == 3 && column[0].Text == "[" && column[1].Kind == StringToken && column[2].Text == "]") {
+							return fail("tabular parameter column requires an identifier", parameter.Span)
+						}
+						parameter.Columns = append(parameter.Columns, ColumnDefinition{Name: identifier.Name, Type: lower(column[colon+1])})
+					}
+				}
 			} else {
 				return fail("invalid function parameter type", parameter.Span)
 			}

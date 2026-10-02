@@ -123,21 +123,22 @@ func (c *Compiler) Compile(source string) Result {
 }
 
 type compileState struct {
-	compiler        *Compiler
-	scalarLets      map[string]boundExpr
-	tabularLets     map[string]Relation
-	functions       map[string]*boundFunction
-	functionDepth   int
-	functionWork    int
-	functionSQLWork int
-	diagnostics     []Diagnostic
-	features        []FeatureUse
-	args            []any
-	alias           int
-	defaultColumn   int
-	qualifiers      map[string]relationScope
-	qualifier       string
-	input           Schema
+	compiler           *Compiler
+	scalarLets         map[string]boundExpr
+	tabularLets        map[string]Relation
+	functions          map[string]*boundFunction
+	functionDepth      int
+	functionValidation bool
+	functionWork       int
+	functionSQLWork    int
+	diagnostics        []Diagnostic
+	features           []FeatureUse
+	args               []any
+	alias              int
+	defaultColumn      int
+	qualifiers         map[string]relationScope
+	qualifier          string
+	input              Schema
 }
 
 type boundExpr struct {
@@ -169,6 +170,13 @@ func (s *compileState) pipeline(pipeline *kql.Pipeline) Relation {
 // local bindings before catalog tables, and lower tables through the normal
 // source rule so application filtering and typed schemas remain attached.
 func (s *compileState) tabularLetValue(expression kql.Expression) (Relation, bool) {
+	if call, ok := expression.(*kql.CallExpression); ok {
+		if name, ok := call.Function.(*kql.NameExpression); ok {
+			if function := s.functions[strings.ToLower(unquoteKQL(name.Name))]; function != nil && function.tabular {
+				return s.callFunctionValue(function, call, nil).table, true
+			}
+		}
+	}
 	name, ok := expression.(*kql.NameExpression)
 	if !ok {
 		return Relation{}, false
@@ -180,6 +188,9 @@ func (s *compileState) tabularLetValue(expression kql.Expression) (Relation, boo
 	}
 	if relation, tabular := s.tabularLets[key]; tabular {
 		return relation, true
+	}
+	if function := s.functions[key]; function != nil && function.tabular {
+		return s.callFunctionValue(function, &kql.CallExpression{Function: name, Span: name.Span}, nil).table, true
 	}
 	// An unquoted dotted expression is property access, not a table name.
 	if logicalName == name.Name && strings.Contains(name.Name, ".") {
@@ -199,6 +210,13 @@ func (s *compileState) source(source kql.Source) Relation {
 	if source.Kind == "table" {
 		if bound, ok := s.tabularLets[strings.ToLower(unquoteKQL(source.Name))]; ok {
 			return bound
+		}
+		if function := s.functions[strings.ToLower(unquoteKQL(source.Name))]; function != nil {
+			if !function.tabular {
+				s.bindError("KQLB0120", source.Span, "source.expression", "function does not return a table")
+				return Relation{}
+			}
+			return s.callFunctionValue(function, &kql.CallExpression{Function: &kql.NameExpression{Name: source.Name, Span: source.Span}, Span: source.Span}, nil).table
 		}
 	}
 	if rule, ok := s.compiler.sourceRules[strings.ToLower(source.Kind)]; ok {
@@ -274,6 +292,15 @@ func (s *compileState) source(source kql.Source) Relation {
 		return Relation{Query: &sqlast.Select{From: &sqlast.Series{Column: source.Name, From: from.SQL, To: to.SQL, Step: step.SQL, Alias: s.nextAlias()}}, Schema: Schema{Columns: []Column{{Name: source.Name, Type: columnType}}}}
 	case "expression":
 		if call, ok := source.Expr.(*kql.CallExpression); ok {
+			if name, ok := call.Function.(*kql.NameExpression); ok {
+				if function := s.functions[strings.ToLower(unquoteKQL(name.Name))]; function != nil {
+					if !function.tabular {
+						s.bindError("KQLB0120", call.Span, "source.expression", "function does not return a table")
+						return Relation{}
+					}
+					return s.callFunctionValue(function, call, nil).table
+				}
+			}
 			if table := s.entityCall(call); table != nil {
 				return Relation{Query: &sqlast.Select{From: table}, Schema: Schema{Unknown: true}}
 			}
@@ -323,6 +350,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	}
 	if operator.Kind == "mv-expand" {
 		return s.mvExpand(input, operator.Body.(kql.MvExpandSpec), operator)
+	}
+	if operator.Kind == "invoke" {
+		return s.invoke(input, operator)
 	}
 	if operator.Kind == "mv-apply" {
 		return s.mvApply(input, operator.Body.(kql.MvApplySpec), operator)
@@ -550,6 +580,11 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok && !s.hasInputName(unquoteKQL(value.Name)) {
 			bound.Name = unquoteKQL(value.Name)
 			return bound
+		}
+		if !s.hasInputName(unquoteKQL(value.Name)) {
+			if function := s.functions[strings.ToLower(unquoteKQL(value.Name))]; function != nil && len(function.parameters) == 0 {
+				return s.callFunction(function, &kql.CallExpression{Function: value, Span: value.Span})
+			}
 		}
 		return s.name(value)
 	case *kql.LiteralExpression:

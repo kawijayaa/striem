@@ -48,3 +48,32 @@ func TestFunctionDiagnosticsAndExpansionLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestTabularQueryFunctionsExecution(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`let f=(T:(n:long),minimum:long=2){T|where n>=minimum}; LeftEvents | invoke f() | project n,user`, `[[2 bob]]`},
+		{`let f=(T:(n:long)){T}; f(LeftEvents) | project n,user | order by n asc`, `[[1 alice] [2 bob]]`},
+		{`let T=LeftEvents; let f=(){T}; let g=(){let T=RightEvents; f()}; g() | project n`, `[[1] [2]]`},
+		{`let f=(A:(host:string),B:(host:string,user:string)){A|join kind=inner (B|project host,Peer=user) on host}; f(LeftEvents,RightEvents) | project user,Peer`, `[[alice carol]]`},
+		{`let f=(T:(n:long)){T|where n>99}; f(LeftEvents) | count`, `[[0]]`},
+		{`let f=(T:(*)){T|count}; RightEvents | invoke f()`, `[[1]]`},
+		{`let f=(T:(n:long),v:long){T|where n==v}; f((LeftEvents|where n>1),2) | project user`, `[[bob]]`},
+		{`let f=(T:(items:dynamic)){T|extend b=not(false)}; f(RightEvents) | project items,b`, `[[[] 1]]`},
+		{`let f=(T:(n:long)){let g=(U:(n:long)){U|extend doubled=n*2}; g(T)}; LeftEvents | invoke f() | project doubled`, `[[2] [4]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s", tc.query, got, tc.want)
+		}
+	}
+	compiled, err := Compile(`let f=(T:(d:dynamic,b:bool)){T}; print d=dynamic({"n":2}),b=not(false) | invoke f() | project renamed=d,b`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := compiled.DynamicColumns["renamed"]; !ok {
+		t.Fatal("lost dynamic table return metadata")
+	}
+	if _, ok := compiled.BooleanColumns["b"]; !ok {
+		t.Fatal("lost Boolean table return metadata")
+	}
+}

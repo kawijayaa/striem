@@ -361,6 +361,13 @@ func parseOperator(tokens []Token) (Operator, []ParseError) {
 		return parseAs(op, body)
 	case "sample-distinct":
 		return parseSampleDistinct(op, body)
+	case "invoke":
+		if len(body) == 0 {
+			return op, []ParseError{{Code: "KQLP0121", Message: "invoke requires a function call", Span: op.Span}}
+		}
+		expression, errors := parseExpressionTokens(body)
+		op.Body = ExpressionSpec{Expressions: []Expression{expression}}
+		return op, errors
 	case "count":
 		op.Body = RawSpec{Tokens: body}
 		return op, nil

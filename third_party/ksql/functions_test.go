@@ -65,8 +65,6 @@ func TestScalarQueryFunctionDiagnostics(t *testing.T) {
 		`let f=(){let hidden=3; hidden}; print hidden`,
 		`let f=(){x}; datatable(x:long)[1] | project f()`,
 		`let f=(x:decimal){x}; print 1`,
-		`let f=(){print 1}; print 1`,
-		`let f=(t:(x:long)){1}; print 1`,
 		`let f=(x:long){x}; print f(x=)`,
 		`let f=(x:long){x}; print f(x=`,
 		`let f=(x:long){}; print 1`,
@@ -104,6 +102,10 @@ func FuzzQueryFunctions(f *testing.F) {
 		`print (())()`, `print (()).x`,
 		`let f=(x:long=1+1){x}; print 1`,
 		`let f=(x:dynamic){x.["a"]}; print f(dynamic({"a":1}))`,
+		`let f=(T:(x:long)){T}; f((print x=2))`,
+		`let f=(T:(*)){T}; datatable(x:long)[1] | invoke f()`,
+		`let f=(T:(*)){T}; f(datatable(x:long))`,
+		`print 1 | invoke`,
 	} {
 		f.Add(source)
 	}

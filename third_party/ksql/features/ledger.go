@@ -97,6 +97,7 @@ func initEntries() {
 		}
 
 		setSupport(coreEquivalent, Validated, Equivalent, "lowered through the dialect-neutral SQL AST")
+		setSupport("operator.invoke", Validated, Equivalent, "named query functions with a first tabular parameter; inline functions and stored functions remain unsupported")
 		setSupport(coreLossy, Validated, Lossy, "translation has a documented KQL/SQL semantic difference")
 
 		sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })

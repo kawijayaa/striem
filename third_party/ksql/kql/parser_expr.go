@@ -94,6 +94,21 @@ func (p *expressionParser) parsePrefix() Expression {
 	case token.Text == "*":
 		p.position++
 		expr = &StarExpression{Span: token.Span}
+	case token.Kind == IdentifierToken && strings.EqualFold(token.Text, "datatable") && p.position+1 < len(p.tokens) && p.tokens[p.position+1].Text == "(":
+		closeSchema := matchingClose(p.tokens, p.position+1)
+		if closeSchema < 0 || closeSchema+1 >= len(p.tokens) || p.tokens[closeSchema+1].Text != "[" {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0212", Message: "datatable requires schema and bracketed values", Span: token.Span})
+			return nil
+		}
+		closeValues := matchingClose(p.tokens, closeSchema+1)
+		if closeValues < 0 {
+			p.errors = append(p.errors, ParseError{Code: "KQLP0214", Message: "unterminated datatable values", Span: token.Span})
+			return nil
+		}
+		pipeline, errors := parsePipeline(p.tokens[p.position : closeValues+1])
+		p.errors = append(p.errors, errors...)
+		expr = &PipelineExpression{Pipeline: pipeline, Span: tokensSpan(p.tokens[p.position : closeValues+1])}
+		p.position = closeValues + 1
 	case token.Kind == StringToken:
 		start := p.position
 		for p.position < len(p.tokens) && p.tokens[p.position].Kind == StringToken {
@@ -110,6 +125,16 @@ func (p *expressionParser) parsePrefix() Expression {
 		p.position++
 		expr = &LiteralExpression{Text: token.Text, Kind: token.Kind, Span: token.Span}
 	case token.Text == "(":
+		if close := matchingClose(p.tokens, p.position); close > p.position {
+			body := trimParentheses(p.tokens[p.position+1 : close])
+			if hasTopLevel(body, "|") || beginsTabularSource(body) {
+				pipeline, errors := parsePipeline(body)
+				p.errors = append(p.errors, errors...)
+				expr = &PipelineExpression{Pipeline: pipeline, Span: tokensSpan(p.tokens[p.position : close+1])}
+				p.position = close + 1
+				break
+			}
+		}
 		p.position++
 		expr = p.parse(0)
 		if !p.consume(")") {

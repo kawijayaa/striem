@@ -343,7 +343,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"where", "search", "project", "project-away", "project-rename", "summarize", "sample", "mv-expand", "mv-apply", "join"} {
+	for _, value := range []string{"where", "search", "project", "project-away", "project-rename", "summarize", "sample", "mv-expand", "mv-apply", "join", "invoke"} {
 		if !contains(schema.Operators, value) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
@@ -1254,6 +1254,35 @@ func TestScalarQueryFunctionsThroughAPI(t *testing.T) {
 		`let f=(){unknown}; print 1`,
 		`let f=(x:long){x}; print f(x=)`,
 		`let f=(x:long){x+x}; print ` + strings.Repeat("f(", 40) + "1" + strings.Repeat(")", 40),
+	} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
+	}
+}
+
+func TestTabularQueryFunctionsThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `let f=(T:(d:dynamic,b:bool)){T|where b}; print d=dynamic({"x":181}),b=not(false) | invoke f() | project renamed=d,b`)
+	if len(rows) != 1 || rows[0]["b"] != true {
+		t.Fatalf("Boolean table result=%#v", rows)
+	}
+	object, ok := rows[0]["renamed"].(map[string]any)
+	if !ok || object["x"] != float64(181) {
+		t.Fatalf("dynamic table result=%#v", rows)
+	}
+	rows = queryRows(t, server.URL, `let f=(T:(x:long),minimum:long=2){T|where x>=minimum}; f(datatable(x:long)[1,2,3]) | count`)
+	if len(rows) != 1 || rows[0]["Count"] != float64(2) {
+		t.Fatalf("table filter=%#v", rows)
+	}
+	for _, query := range []string{
+		`let f=(T:(x:long)){T}; f((print y=1))`,
+		`let f=(T:(*)){T|project hidden}; print 1`,
+		`let f=(T:(*),x:long){T}; print 1 | invoke f()`,
+		`print 1 | invoke`,
+		`let f=(T:(x:long)){union T,T}; f(` + strings.Repeat("f(", 25) + `(print x=1)` + strings.Repeat(")", 26),
 	} {
 		response := queryAPI(t, server.URL, query)
 		response.Body.Close()
