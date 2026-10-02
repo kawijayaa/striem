@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { queryCompletionContext } from '../src/features/completion-context.ts';
+
+test('completion stays out of comments, escaped, verbatim and multiline strings', () => {
+  for (const query of [
+    'Events // ho', 'Events | where host == "ho', "Events | where host == 'ho",
+    'Events | where host == "escaped\\" ho', 'Events | where host == @"doubled"" ho',
+    'Events | where host == h@"ho', 'Events | where host == ```line\nho',
+    'Events | where host == ~~~line\nho',
+  ]) assert.equal(queryCompletionContext(query, query.length), null, query);
+  for (const query of ['Events // comment\n| project ho', 'Events | where host == "a|b" | project ho',
+    'Events | where host == ```a|b``` | project ho', 'Events | where host == @"a""b" | project ho']) {
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(context.kind, 'expression', query);
+    assert.equal(context.prefix, 'ho', query);
+  }
+});
+
+test('completion replacement preserves arithmetic, pipeline operators and surrounding identifiers', () => {
+  for (const query of ['Events | extend value=score-ho', 'Events | project details.ac', 'Events | order by ho']) {
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(query.slice(context.from, context.to), query.endsWith('details.ac') ? 'details.ac' : 'ho');
+  }
+  const query = 'Events | extend value=tostr(score)';
+  const context = queryCompletionContext(query, query.indexOf('tostr') + 2);
+  assert.equal(query.slice(context.from, context.to), 'tostr');
+  const phrase = 'Events | order b';
+  const order = queryCompletionContext(phrase, phrase.length);
+  assert.equal(order.kind, 'operator');
+  assert.equal(phrase.slice(order.from, order.to), 'order b');
+});
+
+test('completion detects table, operator and expression positions without crossing lines', () => {
+  for (const [query, kind] of [
+    ['Tel', 'source'], ['Events | pro', 'operator'], ['Events | project-aw', 'operator'],
+    ['Events | where ', 'expression'], ['Events | order by ', 'sort'],
+    ['Events | join Tel', 'table'], ['let X = Events;\nTel', 'source'],
+    ['Events | join kind=inner (Tel', 'table'], ['(Tel', 'table'],
+    ['Events | order\nho', 'expression'],
+  ]) assert.equal(queryCompletionContext(query, query.length).kind, kind, query);
+});

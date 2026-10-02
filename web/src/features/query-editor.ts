@@ -1,4 +1,4 @@
-import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { autocompletion, closeBrackets, closeBracketsKeymap, snippet, pickedCompletion, insertCompletionText } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
@@ -14,6 +14,7 @@ import { drawSelection, dropCursor, EditorView, keymap, lineNumbers } from '@cod
 import { tags } from '@lezer/highlight';
 import { Vim, vim } from '@replit/codemirror-vim';
 import type { QueryError } from '../types';
+import { queryCompletionContext } from './completion-context';
 
 const keywords = new Set([
   'let', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
@@ -117,7 +118,19 @@ function createCompletions(
   definitions: [label: string, detail: string][],
   apply: (label: string) => string,
 ): Completion[] {
-  return definitions.map(([label, detail]) => ({ label, detail, type, apply: apply(label) }));
+  return definitions.map(([label, detail]) => ({
+    label, detail, type,
+    apply: type === 'function' ? (view, completion, from, to) => {
+      const existing = view.state.sliceDoc(to).match(/^[ \t]*\(/);
+      if (existing) {
+        view.dispatch({
+          ...insertCompletionText(view.state, label, from, to),
+          selection: { anchor: from + label.length + existing[0].length },
+          annotations: pickedCompletion.of(completion),
+        });
+      } else snippet(`${label}(\${})`)(view, completion, from, to);
+    } : apply(label),
+  }));
 }
 
 interface QueryEditorOptions {
@@ -143,17 +156,21 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
 
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
-    const word = context.matchBefore(/(?:order|sort)\s+[A-Za-z_]*|[A-Za-z_][A-Za-z0-9_.\[\]"-]*/i);
-    if (!context.explicit && (!word || word.from === word.to)) return null;
+    const target = queryCompletionContext(context.state.doc.toString(), context.pos);
+    if (!target || (!context.explicit && !target.prefix)) return null;
+    const completions = target.kind === 'source' ? [...options.getTableCompletions(),
+      ...operatorCompletions.filter(completion => completion.label === 'let'),
+      { label: 'print', type: 'keyword', apply: 'print ' },
+      { label: 'range', type: 'keyword', apply: 'range ' }]
+      : target.kind === 'table' ? options.getTableCompletions()
+      : target.kind === 'operator' ? operatorCompletions
+      : target.kind === 'sort' ? [...options.getFieldCompletions(),
+        { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
+      : [...functionCompletions, ...options.getFieldCompletions()];
     return {
-      from: word?.from ?? context.pos,
-      options: [
-        ...options.getTableCompletions(),
-        ...operatorCompletions,
-        ...functionCompletions,
-        ...options.getFieldCompletions(),
-      ],
-      validFor: /^[A-Za-z_][A-Za-z0-9_.\[\]"-]*(?:\s+[A-Za-z_][A-Za-z0-9_-]*)?$/,
+      from: target.from,
+      to: target.to,
+      options: completions,
     };
   };
 

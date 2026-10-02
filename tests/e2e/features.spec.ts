@@ -526,6 +526,128 @@ test('undo clearing history keeps newer runs and persists both histories', async
   await expect(page.locator('#query-history .query-preview')).toHaveText([newer, previous]);
 });
 
+test('autocomplete replaces only its token and inserts functions without duplicate parentheses', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  const complete = async (label: string) => {
+    await editor.press('Control+Space');
+    await page.locator('.cm-completionLabel').filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).click();
+  };
+  await edit(page, 'Tel');
+  await editor.press('End');
+  await complete('Telemetry');
+  await expect(editor).toHaveText('Telemetry');
+  await edit(page, 'Telemetry | extend value=score-ho');
+  await editor.press('End');
+  await complete('host');
+  await expect(editor).toHaveText('Telemetry | extend value=score-host');
+  await edit(page, 'Telemetry | project host');
+  await editor.press('End');
+  await editor.press('ArrowLeft');
+  await editor.press('ArrowLeft');
+  await complete('host');
+  await expect(editor).toHaveText('Telemetry | project host');
+  await edit(page, 'Telemetry | extend value=tostr(score)');
+  await editor.press('End');
+  for (let index = 0; index < 7; index++) await editor.press('ArrowLeft');
+  await complete('tostring');
+  await expect(editor).toHaveText('Telemetry | extend value=tostring(score)');
+  await run(page, 3);
+  await edit(page, 'Telemetry | project value=tostr');
+  await editor.press('End');
+  await complete('tostring');
+  await editor.pressSequentially('host');
+  await expect(editor).toHaveText('Telemetry | project value=tostring(host)');
+  await run(page, 3);
+  await edit(page, 'Telemetry | project details.ne');
+  await editor.press('End');
+  await complete('details.nested.ok');
+  await expect(editor).toHaveText('Telemetry | project details.nested.ok');
+  await run(page, 3);
+  await edit(page, 'Telemetry | project-aw');
+  await editor.press('End');
+  await complete('project-away');
+  await editor.pressSequentially('details');
+  await expect(editor).toHaveText('Telemetry | project-away details');
+  await run(page, 3);
+  await edit(page, 'Telemetry | order b');
+  await editor.press('End');
+  await complete('order by');
+  await editor.pressSequentially('score d');
+  await complete('desc');
+  await expect(editor).toHaveText('Telemetry | order by score desc');
+  await run(page, 3);
+});
+
+test('autocomplete ignores strings and comments and scopes unique field suggestions to the current table', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  for (const prefix of ['Telemetry // ', 'Telemetry | where host == "', 'Telemetry | where host == @"',
+    'Telemetry | where host == ```line\n']) {
+    await edit(page, prefix);
+    await editor.press('ControlOrMeta+End');
+    await editor.pressSequentially('ho', { delay: 80 });
+    await editor.press('Control+Space');
+    await page.waitForTimeout(200); // Allow both automatic and explicit completion to resolve.
+    await expect(page.locator('.cm-tooltip-autocomplete')).toHaveCount(0);
+  }
+  for (const source of ['Telemetry', 'CSV', 'Events']) {
+    await edit(page, `${source} | project ho`);
+    await editor.press('End');
+    await editor.press('Control+Space');
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: /^host$/ })).toHaveCount(1);
+    await page.keyboard.press('Escape');
+  }
+  await edit(page, 'Telemetry | project ident');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.waitForTimeout(200);
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^identifier$/ })).toHaveCount(0);
+  await edit(page, 'CSV | project ident');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^identifier$/ })).toHaveCount(1);
+  await page.waitForTimeout(100); // CodeMirror guards keyboard acceptance for 75ms after opening.
+  await page.keyboard.press('Enter');
+  await expect(editor).toHaveText('CSV | project identifier');
+  await run(page, 1);
+  await edit(page, 'Telemetry | join (CSV | project ident');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^identifier$/ })).toHaveCount(1);
+});
+
+test('autocomplete descriptions and selection remain readable inside narrow viewports', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 320, height: 640 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await open(page, 'Telemetry | extend value=array');
+    const editor = page.locator('.cm-content');
+    await editor.click();
+    await editor.press('End');
+    await editor.press('Control+Space');
+    const popup = page.locator('.cm-tooltip-autocomplete');
+    await expect(popup).toBeVisible();
+    const box = (await popup.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    const selected = popup.locator('[aria-selected="true"]');
+    expect(await selected.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const colors = await selected.evaluate(element => ({
+      background: getComputedStyle(element).backgroundColor,
+      text: getComputedStyle(element).color,
+    }));
+    expect(colors).toEqual({ background: 'rgb(117, 186, 242)', text: 'rgb(14, 24, 32)' });
+    await page.waitForTimeout(100);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(popup).toBeHidden();
+    await expect(editor).toContainText('()');
+  }
+});
+
 test('source selection, field filtering/insertion, autocomplete and timeline filtering', async ({ page }) => {
   await open(page);
   await page.locator('#source-list button').filter({ hasText: 'CSV' }).click();

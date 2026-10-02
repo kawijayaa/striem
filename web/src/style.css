@@ -2622,3 +2622,30 @@ dialog { max-height: calc(100dvh - 32px); }
 @media (max-width: 900px) and (max-height: 600px) {
   .workspace-context-stack { position: static; }
 }
+
+/* Completion descriptions wrap beneath labels instead of disappearing offscreen. */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete { max-width: min(520px, calc(100vw - 24px)); }
+.cm-editor .cm-tooltip-autocomplete > ul { max-height: min(320px, 40dvh); }
+.cm-editor .cm-tooltip-autocomplete > ul > li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 2px 6px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  white-space: normal;
+}
+.cm-editor .cm-completionIcon { grid-column: 1; grid-row: 1 / span 2; padding: 0; }
+.cm-editor .cm-completionLabel { grid-column: 2; overflow-wrap: anywhere; }
+.cm-editor .cm-completionDetail {
+  grid-column: 2;
+  margin: 0;
+  color: var(--paper-3);
+  font: 400 11px/1.4 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  color: #0e1820;
+  background: var(--amber);
+}
+.cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail { color: #243849; }

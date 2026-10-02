@@ -139,7 +139,19 @@ const queryEditor = createQueryEditor({
   initialDocument: sharedQuery || 'Events\n| order by TimeGenerated desc\n| take 100',
   availableTables,
   getTableCompletions: () => tableCompletions,
-  getFieldCompletions: () => fieldCompletions,
+  getFieldCompletions: () => {
+    const query = editor.state.doc.toString();
+    // Composite queries can expose fields from several sources or aliases.
+    const source = /\b(?:join|union|lookup|let)\b/i.test(query) ? 'Events' : querySource(query) || activeTable;
+    const seen = new Set<string>();
+    return fieldCompletions.filter(completion => {
+      if (source !== 'Events' && !completion.detail?.endsWith(` · ${source}`)
+        && !completion.detail?.endsWith(' · Common')) return false;
+      if (seen.has(completion.label)) return false;
+      seen.add(completion.label);
+      return true;
+    });
+  },
   onDocumentChange: () => {
     queryController?.abort();
     queryOutcome = 'idle';
