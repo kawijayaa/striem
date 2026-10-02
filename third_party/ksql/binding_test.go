@@ -190,11 +190,8 @@ func TestParameterOrderingAcrossNestedRelations(t *testing.T) {
 
 func TestQualifiedDynamicJoinAccess(t *testing.T) {
 	result := ksql.New(dialect.SQLite(), ksql.WithCatalog(investigationCatalog())).Compile(`Events | join kind=inner (Events) on $left.RawData.process.command_line == $right.RawData.process.command_line`)
-	if !result.OK() {
-		t.Fatalf("Compile() diagnostics = %#v", result.Diagnostics)
-	}
-	if !strings.Contains(result.SQL, `json_extract("_k0"."RawData", '$."process"."command_line"')`) || !strings.Contains(result.SQL, `json_extract("_k1"."RawData", '$."process"."command_line"')`) {
-		t.Fatalf("qualified dynamic SQL = %s", result.SQL)
+	if result.OK() || result.SQL != "" || len(result.Diagnostics) == 0 {
+		t.Fatalf("join on accepted dynamic property expressions: %#v", result)
 	}
 }
 

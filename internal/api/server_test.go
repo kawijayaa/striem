@@ -1319,6 +1319,35 @@ func TestQuotedColumnDeclarationsThroughAPI(t *testing.T) {
 	}
 }
 
+func TestQuotedJoinKeysAndLookupThroughAPI(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	rows := queryRows(t, server.URL, `print ['left key']=1,d=dynamic([1]),b=not(false) | lookup (print ['right key']=1,d=dynamic([2]),b=not(true)) on $left.['left key']==$right.['right key'] | project d,d1,b,b1`)
+	if len(rows) != 1 || rows[0]["b"] != true || rows[0]["b1"] != false {
+		t.Fatalf("lookup Boolean columns=%#v", rows)
+	}
+	first, ok := rows[0]["d"].([]any)
+	second, otherOK := rows[0]["d1"].([]any)
+	if !ok || !otherOK || len(first) != 1 || len(second) != 1 || first[0] != float64(1) || second[0] != float64(2) {
+		t.Fatalf("lookup dynamic columns=%#v", rows)
+	}
+	for _, query := range []string{
+		`print k=1 | join kind=inner (print k=1) on $right.k==$left.k`,
+		`print k=1 | join kind=inner (print k=1) on $left.k>$right.k`,
+		`print k=1 | join kind=inner (print k=1) on $left.k== $right.k or $left.k==$right.k`,
+		`print k=1 | join kind=inner (print k="a") on $left.k==$right.k`,
+		`print k=1 | join kind=inner (print k=1) where $left.k==`,
+		`print k=1 | lookup kind=rightsemi (print k=1) on k`,
+		`print k=1 | lookup (print k=1) on ,`,
+		`print k=1 | join kind=inner (print k=1) on ` + strings.Repeat(`$left.k==$right.k and `, 16) + `$left.k==$right.k`,
+	} {
+		response := queryAPI(t, server.URL, query)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status=%d", query, response.StatusCode)
+		}
+	}
+}
+
 func TestSetEqualsThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
 	rows := queryRows(t, server.URL, `print same=set_equals(dynamic([2,1,2]),dynamic([1,2])),different=set_equals(dynamic([9007199254740992]),dynamic([9007199254740993])),empty=set_equals(dynamic([]),dynamic([])) | project same,different,empty`)

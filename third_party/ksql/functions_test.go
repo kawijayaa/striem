@@ -109,6 +109,9 @@ func FuzzQueryFunctions(f *testing.F) {
 		`datatable(['a' ' b']:long)[1] | project ['output name']=['a b']`,
 		`let f=(['a']:long){['a']}; print f(['a']=)`,
 		`print ['a' 1]=1`, `print ['a']=`,
+		`print ['a.b']=1 | join (print ['a.b']=1) on $left.['a.b']==$right.['a.b']`,
+		`print k=1 | join kind=inner (print k=1) where $left.k ==`,
+		`print k=1 | lookup (print k=1) on ,`,
 	} {
 		f.Add(source)
 	}

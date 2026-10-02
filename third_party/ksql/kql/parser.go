@@ -575,10 +575,19 @@ func parseJoin(op Operator, tokens []Token) (Operator, []ParseError) {
 	right, errs := parsePipeline(rightTokens)
 	spec.Right = right
 	conditionTokens := tokens[conditionAt+1:]
+	if len(conditionTokens) == 0 {
+		op.Body = spec
+		return op, append(errs, ParseError{Code: "KQLP0310", Message: "join requires a condition expression", Span: tokens[conditionAt].Span})
+	}
 	if conditionKeyword == "where" {
-		spec.Condition, _ = parseExpressionTokens(conditionTokens)
+		var conditionErrors []ParseError
+		spec.Condition, conditionErrors = parseExpressionTokens(conditionTokens)
+		errs = append(errs, conditionErrors...)
 	} else {
 		spec.Conditions, errs = appendExpressions(spec.Conditions, conditionTokens, errs)
+		if len(spec.Conditions) == 0 && len(errs) == 0 {
+			errs = append(errs, ParseError{Code: "KQLP0310", Message: "join requires a condition expression", Span: tokensSpan(conditionTokens)})
+		}
 	}
 	op.Body = spec
 	return op, errs

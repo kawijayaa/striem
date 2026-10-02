@@ -200,6 +200,7 @@ func (p *expressionParser) parsePrefix() Expression {
 	if expr == nil {
 		return nil
 	}
+	pathSelector := false
 	for p.position < len(p.tokens) {
 		switch p.tokens[p.position].Text {
 		case "(":
@@ -224,12 +225,14 @@ func (p *expressionParser) parsePrefix() Expression {
 				if closed {
 					end = p.tokens[p.position-1].Span
 				}
-				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(start, end)}
+				expr = &IndexExpression{Value: expr, Index: index, Span: joinSpan(start, end), Path: pathSelector}
 			}
+			pathSelector = false
 		case ".":
 			// Dot-bracket access accepts both literal keys and key expressions.
 			if p.position+1 < len(p.tokens) && p.tokens[p.position+1].Text == "[" {
 				p.position++
+				pathSelector = true
 				continue
 			}
 			if p.position+1 >= len(p.tokens) || p.tokens[p.position+1].Kind != IdentifierToken {

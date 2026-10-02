@@ -509,52 +509,38 @@ func (s *compileState) joinCondition(spec kql.JoinSpec, left, right Schema, left
 	}
 	s.input = Schema{Unknown: true}
 	defer func() { s.qualifiers, s.input = previousQualifiers, previousInput }()
+	leftScope := relationScope{alias: leftAlias, schema: left}
+	rightScope := relationScope{alias: rightAlias, schema: right}
 	var result sqlast.Expr
+	keys := 0
 	for _, expression := range spec.Conditions {
-		if name, ok := expression.(*kql.NameExpression); ok && !strings.Contains(name.Name, ".") {
-			leftColumn, _, leftOK, leftAmbiguous := left.Lookup(name.Name)
-			rightColumn, _, rightOK, rightAmbiguous := right.Lookup(name.Name)
-			if !left.Unknown && (leftAmbiguous || !leftOK) || !right.Unknown && (rightAmbiguous || !rightOK) {
-				s.bindError("KQLB0310", name.Span, "operator.join", "invalid join key "+name.Name)
-				return nil
-			}
-			leftName, rightName := name.Name, name.Name
-			if leftOK {
-				leftName = leftColumn.Name
-			}
-			if rightOK {
-				rightName = rightColumn.Name
-			}
-			if leftOK && rightOK && leftColumn.Type != TypeUnknown && rightColumn.Type != TypeUnknown && leftColumn.Type != rightColumn.Type {
-				s.bindError("KQLB0311", name.Span, "operator.join", "join key types do not match for "+name.Name)
-				return nil
-			}
-			condition := &sqlast.Binary{Left: &sqlast.Identifier{Parts: []string{leftAlias, leftName}}, Operator: "=", Right: &sqlast.Identifier{Parts: []string{rightAlias, rightName}}}
-			result = andExpression(result, condition)
-			continue
+		condition := s.bindJoinCondition(expression, leftScope, rightScope, &keys)
+		if condition == nil {
+			return nil
 		}
-		condition := s.expression(expression)
-		result = andExpression(result, condition.SQL)
+		result = andExpression(result, condition)
 	}
 	if spec.Condition != nil {
 		condition := s.expression(spec.Condition)
+		if condition.SQL == nil {
+			return nil
+		}
+		if condition.Type != TypeBool {
+			s.bindError("KQLB0310", spec.Condition.NodeSpan(), "operator.join", "join where requires a Boolean condition")
+			return nil
+		}
 		result = andExpression(result, condition.SQL)
 	}
 	return result
 }
 
-func joinSchema(left, right Schema, omitRightKeys bool) Schema {
+func joinSchema(left, right Schema) Schema {
 	if left.Unknown || right.Unknown {
 		return Schema{Unknown: true}
 	}
 	result := left.Clone()
 	used := nameSetFromColumns(result.Columns)
 	for _, column := range right.Columns {
-		if omitRightKeys {
-			if _, _, found, _ := left.Lookup(column.Name); found {
-				continue
-			}
-		}
 		base := column.Name
 		if _, collision := used[strings.ToLower(column.Name)]; collision {
 			for suffix := 1; ; suffix++ {
@@ -571,18 +557,13 @@ func joinSchema(left, right Schema, omitRightKeys bool) Schema {
 	return result
 }
 
-func joinProjections(left, right, output Schema, leftAlias, rightAlias string, omitRightKeys bool) []sqlast.SelectItem {
+func joinProjections(left, right, output Schema, leftAlias, rightAlias string) []sqlast.SelectItem {
 	items := make([]sqlast.SelectItem, 0, len(output.Columns))
 	for _, column := range left.Columns {
 		items = append(items, sqlast.SelectItem{Expr: &sqlast.Identifier{Parts: []string{leftAlias, column.Name}}, Alias: column.Name})
 	}
 	used := nameSetFromColumns(left.Columns)
 	for _, column := range right.Columns {
-		if omitRightKeys {
-			if _, _, found, _ := left.Lookup(column.Name); found {
-				continue
-			}
-		}
 		alias := column.Name
 		if _, collision := used[strings.ToLower(alias)]; collision {
 			for suffix := 1; ; suffix++ {

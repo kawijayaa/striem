@@ -102,3 +102,33 @@ func TestQuotedColumnDeclarationsExecution(t *testing.T) {
 		t.Fatal("lost quoted Boolean output metadata")
 	}
 }
+
+func TestQuotedJoinKeysAndLookupExecution(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`LeftEvents | project ['left host']=host,user | join kind=inner (RightEvents|project ['right host']=host,Peer=user) on $left.['left host']==$right.['right host'] | project user,Peer`, `[[alice carol]]`},
+		{`LeftEvents | project ['a.b']=host,user | join (RightEvents|project ['a.b']=host,Peer=user) on ['a.b'] | project user,Peer`, `[[alice carol]]`},
+		{`LeftEvents | lookup kind=inner (RightEvents) on host | project user,user1`, `[[alice carol]]`},
+		{`LeftEvents | lookup (RightEvents|project RightHost=host,user) on $left.host==$right.RightHost | project host,user,user1 | order by user asc`, `[[a alice carol] [b bob <nil>]]`},
+		{`print d=dynamic({"key":1}) | extend k=tolong(d.key) | join kind=inner (print k=1) on k | count`, `[[1]]`},
+		{`LeftEvents | join kind=inner (RightEvents) where $left.['host']==$right.['host'] and $left.n<$right.n | project user,user1`, `[[alice carol]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s: got=%s want=%s", tc.query, got, tc.want)
+		}
+	}
+	compiled, err := Compile(`print k=1,d=dynamic([1]),b=not(false) | lookup (print RightKey=1,d=dynamic([2]),b=not(true)) on $left.k==$right.RightKey | project d,d1,b,b1`, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"d", "d1"} {
+		if _, ok := compiled.DynamicColumns[column]; !ok {
+			t.Fatal("lost lookup dynamic metadata: " + column)
+		}
+	}
+	for _, column := range []string{"b", "b1"} {
+		if _, ok := compiled.BooleanColumns[column]; !ok {
+			t.Fatal("lost lookup Boolean metadata: " + column)
+		}
+	}
+}

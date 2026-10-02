@@ -636,6 +636,23 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 	case *kql.CallExpression:
 		return s.call(value)
 	case *kql.IndexExpression:
+		if value.Path {
+			if root, ok := value.Value.(*kql.NameExpression); ok && unquoteKQL(root.Name) == root.Name {
+				if scope, found := s.qualifiers[strings.ToLower(root.Name)]; found {
+					key, literal := value.Index.(*kql.LiteralExpression)
+					if !literal || key.Kind != kql.StringToken {
+						s.bindError("KQLB0404", value.Span, "expression.name", "qualified column selector requires a string name")
+						return boundExpr{}
+					}
+					name, err := kql.StringValue(key)
+					if err != nil {
+						s.bindError("KQLB0404", value.Span, "expression.name", err.Error())
+						return boundExpr{}
+					}
+					return s.qualifiedName(&kql.NameExpression{Span: value.Span}, scope, []string{name})
+				}
+			}
+		}
 		base, index := s.expression(value.Value), s.expression(value.Index)
 		if base.Type != TypeDynamic && base.Type != TypeUnknown {
 			s.bindError("KQLB0405", value.Span, "expression.index", "property access requires a dynamic value")
@@ -656,9 +673,17 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 
 func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 	spec := operator.Body.(kql.JoinSpec)
+	if operator.Kind == "lookup" && (spec.Kind != "inner" && spec.Kind != "leftouter" || spec.Condition != nil) {
+		s.bindError("KQLB0316", operator.Span, "operator.lookup", "lookup requires kind=inner or kind=leftouter and an on clause")
+		return Relation{}
+	}
 	leftAlias := s.nextAlias()
 	right := s.pipeline(spec.Right)
 	if right.Query == nil {
+		return Relation{}
+	}
+	if operator.Kind == "lookup" && (input.Schema.Unknown || right.Schema.Unknown) {
+		s.bindError("KQLB0316", operator.Span, "operator.lookup", "lookup requires bound schemas to omit right-side key columns")
 		return Relation{}
 	}
 	rightAlias := s.nextAlias()
@@ -708,10 +733,24 @@ func (s *compileState) join(input Relation, operator kql.Operator) Relation {
 		s.error("KQLL0311", operator.Span, "operator."+operator.Kind+"."+spec.Kind, "join kind "+spec.Kind+" requires semi/anti relational lowering")
 		return Relation{}
 	}
-	output := joinSchema(input.Schema, right.Schema, operator.Kind == "lookup")
+	outputRight := right.Schema
+	if operator.Kind == "lookup" {
+		omitted := rightJoinKeys(condition, rightAlias)
+		outputRight = Schema{}
+		for _, column := range right.Schema.Columns {
+			if !omitted[column.Name] {
+				outputRight.Columns = append(outputRight.Columns, column)
+			}
+		}
+	}
+	output := joinSchema(input.Schema, outputRight)
+	if maximum := s.compiler.limits.MaxProjectionItems; maximum > 0 && !output.Unknown && len(output.Columns) > maximum {
+		s.bindError("KQLB0344", operator.Span, "operator."+operator.Kind, fmt.Sprintf("join output exceeds MaxProjectionItems (%d)", maximum))
+		return Relation{}
+	}
 	var projections []sqlast.SelectItem
 	if !output.Unknown {
-		projections = joinProjections(input.Schema, right.Schema, output, leftAlias, rightAlias, operator.Kind == "lookup")
+		projections = joinProjections(input.Schema, outputRight, output, leftAlias, rightAlias)
 	}
 	return Relation{Query: &sqlast.Select{From: join, Projections: projections}, Schema: output}
 }

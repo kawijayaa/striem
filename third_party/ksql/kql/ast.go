@@ -234,6 +234,9 @@ type IndexExpression struct {
 	Value Expression
 	Index Expression
 	Span  Span
+	// Path distinguishes a dot-bracket selector from direct indexing. A path
+	// through a join's tuple scope selects a column, not a dynamic property.
+	Path bool
 }
 type NamedExpression struct {
 	Name  string

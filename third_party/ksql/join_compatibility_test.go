@@ -36,12 +36,12 @@ func TestSQLiteJoinCompatibility(t *testing.T) {
 	for _, c := range []struct{ query, want string }{
 		{`Left | join kind=rightsemi (Right) on Key,K2 | project R | order by R asc`, `[[1000] [2000] [3000]]`},
 		{`Left | join kind=rightanti (Right) on Key,K2 | project R | order by R asc`, `[[4000] [5000]]`},
-		{`Left | join kind=rightsemi (Right) on $right.Key == $left.Key and $left.K2 == $right.K2 | count`, `[[3]]`},
+		{`Left | join kind=rightsemi (Right) on $left.Key == $right.Key and $left.K2 == $right.K2 | count`, `[[3]]`},
 		{`Left | where L < 0 | join kind=rightanti (Right) on Key | count`, `[[5]]`},
 		{`Left | join kind=rightsemi (Right | where R < 0) on Key | count`, `[[0]]`},
 		{`Left | join kind=inner (Right) on Key,K2 | count`, `[[5]]`},
 		{`Left | join (Right) on Key,K2 | count`, `[[3]]`},
-		{`Left | join kind=innerunique (Right) on $left.Key == $right.Key and $right.K2 == $left.K2 | count`, `[[3]]`},
+		{`Left | join kind=innerunique (Right) on $left.Key == $right.Key and $left.K2 == $right.K2 | count`, `[[3]]`},
 		{`Left | where L < 0 | join (Right) on Key,K2 | count`, `[[0]]`},
 		{`let Selected=Left | where L > 0; Selected | join (Right) on Key,K2 | count`, `[[3]]`},
 	} {

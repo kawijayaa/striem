@@ -195,7 +195,7 @@ func TestQuotedDotProperty(t *testing.T) {
 			t.Fatal(parseErrs)
 		}
 		index, ok := expr.(*IndexExpression)
-		if !ok {
+		if !ok || !index.Path {
 			t.Fatalf("%s: got %T", source, expr)
 		}
 		key, ok := index.Index.(*LiteralExpression)

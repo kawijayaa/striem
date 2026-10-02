@@ -179,3 +179,17 @@ their names in result metadata. Dots inside quoted column names stay part of
 the name; `['a.b']` is distinct from the property access `a.b`. SQL identifiers
 are quoted by the target dialect. Complete entity-name validation, exact case
 resolution, and all projection naming rules remain unfinished.
+
+Join `on` conditions bind common column names or `$left.column ==
+$right.column` pairs, combined with commas or `and`. Bracketed quoted columns
+work in both forms. Explicit operands must reference actual columns on the
+specified side; computed expressions, reversed sides, and dynamic explicit
+keys return diagnostics. Project a scalar expression before using it as a key.
+Legacy Boolean `join where` conditions remain supported for the join flavors
+that can lower them. Lookup supports inner/leftouter and omits only its
+right-side matching key columns, preserving other same-name columns with
+generated names. Lookup currently requires known schemas for correct column
+omission. Key-count limits include conjunctions, and join output width is
+checked against the configured projection limit. Complete hints/parameters,
+case resolution, unknown schemas, dynamic shorthand keys, and engine
+differential conformance remain open.
