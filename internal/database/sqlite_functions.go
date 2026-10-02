@@ -124,6 +124,15 @@ const (
 	regexpCacheEntries   = 256
 )
 
+// The SQLite driver passes SQL NULL to generic UDF arguments as []byte(nil).
+func sqliteNull(value any) bool {
+	if value == nil {
+		return true
+	}
+	bytes, ok := value.([]byte)
+	return ok && bytes == nil
+}
+
 var isoDatetimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?$`)
 
 var regexpCache = func() *lru.Cache {

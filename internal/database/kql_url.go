@@ -43,7 +43,7 @@ func urlParameters(query string) (map[string]string, error) {
 }
 
 func kqlParseURLQuery(value any) (any, error) {
-	if value == nil {
+	if sqliteNull(value) {
 		return nil, nil
 	}
 	text, err := urlInput(value)
@@ -59,7 +59,7 @@ func kqlParseURLQuery(value any) (any, error) {
 }
 
 func kqlParseURL(value any) (any, error) {
-	if value == nil {
+	if sqliteNull(value) {
 		return nil, nil
 	}
 	text, err := urlInput(value)

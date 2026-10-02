@@ -8,7 +8,7 @@ import (
 )
 
 func kqlParseJSON(value any) (any, error) {
-	if value == nil {
+	if sqliteNull(value) {
 		return nil, nil
 	}
 	text, ok := value.(string)
