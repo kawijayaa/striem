@@ -62,8 +62,16 @@ function queryCodeBeforeCursor(source: string): string | null {
 export function queryCompletionContext(query: string, position: number): QueryCompletionContext | null {
   const code = queryCodeBeforeCursor(query.slice(0, position));
   if (code === null) return null;
-  const pipe = code.lastIndexOf('|');
-  const statement = code.lastIndexOf(';');
+  // A completed subquery must not keep controlling the outer expression.
+  const scopes = [{ pipe: -1, statement: -1 }];
+  for (let index = 0; index < code.length; index++) {
+    const scope = scopes[scopes.length - 1]!;
+    if (code[index] === '(') scopes.push({ ...scope });
+    else if (code[index] === ')' && scopes.length > 1) scopes.pop();
+    else if (code[index] === '|') scope.pipe = index;
+    else if (code[index] === ';') scope.statement = index;
+  }
+  const { pipe, statement } = scopes[scopes.length - 1]!;
   const boundary = Math.max(pipe, statement);
   const segment = code.slice(boundary + 1);
   const source = pipe <= statement;
@@ -71,6 +79,12 @@ export function queryCompletionContext(query: string, position: number): QueryCo
   if (phrase) {
     const from = boundary + 1 + segment.search(/\S/);
     return { from, to: position, kind: 'operator', prefix: query.slice(from, position) };
+  }
+  const regexOperator = segment.match(/\bmatches[ \t]+(?:r(?:e(?:g(?:e(?:x)?)?)?)?)?$/i);
+  if (regexOperator && /^\s*(?:where|filter|search|extend|project|summarize|print|let)\b/i.test(segment)) {
+    const from = boundary + 1 + regexOperator.index!;
+    const suffix = query.slice(position).match(/^[A-Za-z_]*/)?.[0] ?? '';
+    return { from, to: position + suffix.length, kind: 'comparison', prefix: query.slice(from, position) };
   }
   let kind: QueryCompletionContext['kind'] = /^\s*[A-Za-z_-]*$/.test(segment)
     ? source ? 'source' : 'operator'

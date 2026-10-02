@@ -164,14 +164,15 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
   const language = createLanguage(options.availableTables);
   const completionSource = (context: CompletionContext) => {
     const target = queryCompletionContext(context.state.doc.toString(), context.pos);
-    if (!target || (!context.explicit && !target.prefix && !/[\s(,|]$/.test(context.state.sliceDoc(0, context.pos)))) return null;
+    if (!target || (!context.explicit && !target.prefix && !/[\s(,|)\]"']$/.test(context.state.sliceDoc(0, context.pos)))) return null;
     const completions = target.kind === 'source' ? [...options.getTableCompletions(),
       ...operatorCompletions.filter(completion => completion.label === 'let'),
       { label: 'print', type: 'keyword', apply: 'print ' },
       { label: 'range', type: 'keyword', apply: 'range ' }]
       : target.kind === 'table' ? options.getTableCompletions()
       : target.kind === 'operator' ? operatorCompletions
-      : target.kind === 'comparison' ? comparisonCompletions
+      : target.kind === 'comparison' ? comparisonCompletions.filter(completion =>
+        completion.label.startsWith(target.prefix.toLowerCase()))
       : target.kind === 'column' ? options.getFieldCompletions()
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
@@ -198,6 +199,8 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         closeBrackets(),
         autocompletion({
           override: [completionSource], activateOnTyping: true,
+          activateOnTypingDelay: 100,
+          maxRenderedOptions: 60,
           aboveCursor: false,
           activateOnCompletion: completion => ['operator', 'keyword', 'function'].includes(completion.type || ''),
           tooltipClass: () => 'hunting-completions',
@@ -234,7 +237,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
         }),
         EditorView.contentAttributes.of({
           'aria-label': 'KQL query editor',
-          'aria-keyshortcuts': 'Shift+Enter Control+Enter',
+          'aria-keyshortcuts': 'Shift+Enter Control+Enter Control+Space',
         }),
         keymap.of([
           { key: 'Shift-Enter', run: () => { options.onRun(); return true; } },

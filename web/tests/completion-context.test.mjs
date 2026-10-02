@@ -79,3 +79,30 @@ test('column lists and numeric limits do not suggest comparisons', () => {
     ['Events | PROJECT matched=host ha', 'comparison'],
   ]) assert.equal(queryCompletionContext(query, query.length).kind, kind, query);
 });
+
+test('multiword regex completion replaces the complete phrase, including its suffix', () => {
+  for (const suffix of ['', 'r', 're', 'reg', 'rege', 'regex']) {
+    const query = `Events | where host matches ${suffix}`;
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(context.kind, 'comparison');
+    assert.equal(context.prefix, `matches ${suffix}`);
+    assert.equal(query.slice(context.from, context.to), `matches ${suffix}`);
+  }
+  const query = 'Events | where host matches regex "alpha"';
+  const context = queryCompletionContext(query, query.indexOf('regex') + 2);
+  assert.equal(query.slice(context.from, context.to), 'matches regex');
+});
+
+test('closing a nested query restores the outer completion context', () => {
+  for (const [query, kind, prefix] of [
+    ['Events | where host in (Events | project host) a', 'comparison', 'a'],
+    ['Events | where host in (Events | project host) and ', 'expression', ''],
+    ['Events | join (Other | project user) on ho', 'expression', 'ho'],
+    ['Events | where host in (Events | project ho', 'expression', 'ho'],
+    ['Events | where (host in (Events | project host)) a', 'comparison', 'a'],
+  ]) {
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(context.kind, kind, query);
+    assert.equal(context.prefix, prefix, query);
+  }
+});

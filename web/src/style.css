@@ -2627,11 +2627,11 @@ dialog { max-height: calc(100dvh - 32px); }
 .cm-editor .cm-tooltip.hunting-completions {
   display: flex;
   flex-direction: column;
-  width: min(360px, calc(100vw - 24px));
+  width: min(340px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px);
   border-color: var(--rule-hi);
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .38);
 }
 .cm-editor .cm-tooltip.hunting-completions > ul {
@@ -2641,8 +2641,8 @@ dialog { max-height: calc(100dvh - 32px); }
   height: auto;
   min-width: 0;
   max-width: 100%;
-  max-height: min(280px, 40dvh);
-  padding: 3px 0;
+  max-height: min(264px, 40dvh);
+  padding: 2px 0;
 }
 .cm-editor .hunting-completions > ul > li {
   display: grid;
@@ -2650,8 +2650,8 @@ dialog { max-height: calc(100dvh - 32px); }
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 28px;
-  padding: 4px 10px;
+  min-height: 24px;
+  padding: 3px 8px;
   color: var(--paper-2);
   white-space: nowrap;
   font: 400 12px/1.4 var(--font-mono);
@@ -2661,7 +2661,7 @@ dialog { max-height: calc(100dvh - 32px); }
 .cm-editor .completion-kind-class { color: var(--amber); }
 .cm-editor .completion-kind-variable, .cm-editor .completion-kind-property { color: var(--paper-3); }
 .cm-editor .hunting-completions .cm-completionLabel { grid-column: 2; overflow: hidden; text-overflow: ellipsis; }
-.cm-editor .hunting-completions .cm-completionMatchedText { font-weight: 600; text-decoration: none; }
+.cm-editor .hunting-completions .cm-completionMatchedText { color: #75baf2; font-weight: 600; text-decoration: none; }
 .cm-editor .hunting-completions .cm-completionDetail {
   grid-column: 3;
   margin: 0;

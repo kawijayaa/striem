@@ -662,6 +662,31 @@ test('autocomplete replaces only its token and inserts functions without duplica
   await run(page, 3);
 });
 
+test('hunting autocomplete completes regex phrases and restores context after nested queries', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'Telemetry | where host matches re');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({ hasText: /^matches regex$/ }).click();
+  await editor.pressSequentially('"^alpha$"');
+  await expect(editor).toHaveText('Telemetry | where host matches regex "^alpha$"');
+  await run(page, 1);
+  await edit(page, 'Telemetry | where host in (Telemetry | project host) a');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^and$/ })).toBeVisible();
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^array_length$/ })).toHaveCount(0);
+  await page.locator('.cm-completionLabel').filter({ hasText: /^and$/ }).click();
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^host$/ })).toBeVisible();
+  await editor.press('Escape');
+  await edit(page, 'Telemetry | where host c');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^contains$/ })).toBeVisible();
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^has_cs$/ })).toHaveCount(0);
+});
+
 test('autocomplete ignores strings and comments and scopes unique field suggestions to the current table', async ({ page }) => {
   await open(page);
   const editor = page.locator('.cm-content');
@@ -732,6 +757,7 @@ test('autocomplete descriptions and selection remain readable inside narrow view
       const list = (await popup.locator('ul').boundingBox())!;
       expect(info.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
     }
+    await page.screenshot({ path: test.info().outputPath(`autocomplete-${viewport.width}x${viewport.height}.png`) });
     await page.waitForTimeout(100);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
