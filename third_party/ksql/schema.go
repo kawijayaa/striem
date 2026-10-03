@@ -75,8 +75,9 @@ func (f CatalogFunc) ResolveTable(name string) (Table, bool) { return f(name) }
 
 // Relation is a lowered SQL query paired with its ordered KQL output schema.
 type Relation struct {
-	Query  sqlast.Query
-	Schema Schema
+	Query           sqlast.Query
+	Schema          Schema
+	rowDependencies map[int]struct{}
 }
 
 // Limits bounds syntax-driven compiler expansion. Zero means unlimited. These

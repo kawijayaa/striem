@@ -33,18 +33,23 @@ INSERT INTO events(id, dataset_id, time_generated, source, raw_data) VALUES
 	}
 
 	for _, term := range []string{"powershell", "10.10.1.9"} {
-		compiled, err := Compile(`Suricata | search "`+term+`" | project host`, time.Now(), CompileConfig{
-			Tables: TableCatalog{"Suricata": {ID: 1, Fields: []Field{{Name: "host", Type: "string"}, {Name: "message", Type: "string"}}}}, FullTextIndex: true,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var host string
-		if err := store.DB().QueryRow(compiled.SQL, compiled.Args...).Scan(&host); err != nil {
-			t.Fatalf("search %q: %v\nSQL: %s\nArgs: %#v", term, err, compiled.SQL, compiled.Args)
-		}
-		if host != "valid" {
-			t.Fatalf("search %q host = %q, want valid", term, host)
+		for _, query := range []string{
+			`Suricata | search "` + term + `" | project host`,
+			`let T=Suricata | search "` + term + `"; let total=toscalar(T|count); T | where total==1 | project host`,
+		} {
+			compiled, err := Compile(query, time.Now(), CompileConfig{
+				Tables: TableCatalog{"Suricata": {ID: 1, Fields: []Field{{Name: "host", Type: "string"}, {Name: "message", Type: "string"}}}}, FullTextIndex: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var host string
+			if err := store.DB().QueryRow(compiled.SQL, compiled.Args...).Scan(&host); err != nil {
+				t.Fatalf("search %q: %v\nSQL: %s\nArgs: %#v", term, err, compiled.SQL, compiled.Args)
+			}
+			if host != "valid" {
+				t.Fatalf("search %q host = %q, want valid", term, host)
+			}
 		}
 	}
 }

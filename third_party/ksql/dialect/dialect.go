@@ -23,6 +23,10 @@ type Dialect interface {
 	SupportsJoinUsing() bool
 }
 
+// Materialization reports guaranteed reusable query evaluation. Dialects
+// without this capability cannot implement toscalar's constant semantics.
+type Materialization interface{ SupportsMaterializedBindings() bool }
+
 type standard struct{ name string }
 
 // ANSI returns the portable SQL renderer. It avoids vendor-only features.
@@ -61,6 +65,27 @@ type renderer struct{ dialect Dialect }
 
 func (r renderer) query(query sqlast.Query) (string, error) {
 	switch q := query.(type) {
+	case *sqlast.With:
+		capability, ok := r.dialect.(Materialization)
+		if !ok || !capability.SupportsMaterializedBindings() {
+			return "", fmt.Errorf("dialect %s has no guaranteed materialized bindings", r.dialect.Name())
+		}
+		parts := make([]string, 0, len(q.Bindings))
+		for _, binding := range q.Bindings {
+			query, err := r.query(binding.Query)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, r.dialect.QuoteIdentifier(binding.Name)+" AS MATERIALIZED ("+query+")")
+		}
+		body, err := r.query(q.Query)
+		if err != nil {
+			return "", err
+		}
+		if len(parts) == 0 {
+			return body, nil
+		}
+		return "WITH " + strings.Join(parts, ", ") + " " + body, nil
 	case *sqlast.Select:
 		return r.selectQuery(q)
 	case *sqlast.Union:
@@ -515,6 +540,8 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 			return "", err
 		}
 		return "EXISTS (" + query + ")", nil
+	case *sqlast.ScalarReference:
+		return "(SELECT " + r.dialect.QuoteIdentifier("value") + " FROM " + r.dialect.QuoteIdentifier(e.Name) + ")", nil
 	case *sqlast.Filtered:
 		expression, err := r.expr(e.Expr)
 		if err != nil {

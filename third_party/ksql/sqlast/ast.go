@@ -28,6 +28,18 @@ type Union struct {
 
 func (*Union) queryNode() {}
 
+// With materializes reusable query values before evaluating Query.
+type With struct {
+	Bindings []Binding
+	Query    Query
+}
+type Binding struct {
+	Name  string
+	Query Query
+}
+
+func (*With) queryNode() {}
+
 type SelectItem struct {
 	Expr  Expr
 	Alias string
@@ -157,28 +169,32 @@ type Regex struct {
 	CaseSensitive bool
 }
 type Exists struct{ Query Query }
+
+// ScalarReference reads the first value from a materialized scalar binding.
+type ScalarReference struct{ Name string }
 type Filtered struct {
 	Expr  Expr
 	Where Expr
 }
 
-func (*Identifier) exprNode()    {}
-func (*Literal) exprNode()       {}
-func (*Parameter) exprNode()     {}
-func (*Star) exprNode()          {}
-func (*QualifiedStar) exprNode() {}
-func (*Random) exprNode()        {}
-func (*Unary) exprNode()         {}
-func (*Binary) exprNode()        {}
-func (*Window) exprNode()        {}
-func (*Call) exprNode()          {}
-func (*List) exprNode()          {}
-func (*Case) exprNode()          {}
-func (*Cast) exprNode()          {}
-func (*Index) exprNode()         {}
-func (*Regex) exprNode()         {}
-func (*Exists) exprNode()        {}
-func (*Filtered) exprNode()      {}
+func (*Identifier) exprNode()      {}
+func (*Literal) exprNode()         {}
+func (*Parameter) exprNode()       {}
+func (*Star) exprNode()            {}
+func (*QualifiedStar) exprNode()   {}
+func (*Random) exprNode()          {}
+func (*Unary) exprNode()           {}
+func (*Binary) exprNode()          {}
+func (*Window) exprNode()          {}
+func (*Call) exprNode()            {}
+func (*List) exprNode()            {}
+func (*Case) exprNode()            {}
+func (*Cast) exprNode()            {}
+func (*Index) exprNode()           {}
+func (*Regex) exprNode()           {}
+func (*Exists) exprNode()          {}
+func (*ScalarReference) exprNode() {}
+func (*Filtered) exprNode()        {}
 
 type LiteralKind uint8
 

@@ -1,10 +1,17 @@
 package sqlast
 
+import "reflect"
+
 // NormalizeParameters renumbers each parameter occurrence in SQL rendering
 // order and returns the correspondingly ordered argument list. Reused
 // parameter nodes are copied per occurrence, which is required by dialects
 // whose anonymous placeholders cannot refer to an earlier argument.
 func NormalizeParameters(query Query, arguments []any) []any {
+	// Let/function expansion can share entire parent nodes, not just parameter
+	// leaves. Give every rendered occurrence its own mutable tree so visiting
+	// one occurrence cannot change a later occurrence's original argument index.
+	cloneParameterOccurrences(query)
+
 	result := make([]any, 0, len(arguments))
 	var expression func(Expr) Expr
 	var source func(Source)
@@ -82,6 +89,11 @@ func NormalizeParameters(query Query, arguments []any) []any {
 
 	visitQuery = func(query Query) {
 		switch value := query.(type) {
+		case *With:
+			for _, binding := range value.Bindings {
+				visitQuery(binding.Query)
+			}
+			visitQuery(value.Query)
 		case *Select:
 			for i := range value.Projections {
 				value.Projections[i].Expr = expression(value.Projections[i].Expr)
@@ -103,4 +115,50 @@ func NormalizeParameters(query Query, arguments []any) []any {
 	}
 	visitQuery(query)
 	return result
+}
+
+// SQL AST fields contain pointer nodes, structs, slices and scalar values.
+// Clone per occurrence (without pointer memoization): repeated SQL syntax must
+// receive independent parameter numbers, including across materialized bindings.
+func cloneParameterOccurrences(query Query) {
+	if query == nil {
+		return
+	}
+	var clone func(reflect.Value) reflect.Value
+	clone = func(value reflect.Value) reflect.Value {
+		switch value.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if value.IsNil() {
+				return reflect.Zero(value.Type())
+			}
+			child := clone(value.Elem())
+			if value.Kind() == reflect.Pointer {
+				result := reflect.New(value.Type().Elem())
+				result.Elem().Set(child)
+				return result
+			}
+			result := reflect.New(value.Type()).Elem()
+			result.Set(child)
+			return result
+		case reflect.Struct:
+			result := reflect.New(value.Type()).Elem()
+			for i := 0; i < value.NumField(); i++ {
+				result.Field(i).Set(clone(value.Field(i)))
+			}
+			return result
+		case reflect.Slice:
+			if value.IsNil() {
+				return reflect.Zero(value.Type())
+			}
+			result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+			for i := 0; i < value.Len(); i++ {
+				result.Index(i).Set(clone(value.Index(i)))
+			}
+			return result
+		default:
+			return value
+		}
+	}
+	root := reflect.ValueOf(query).Elem()
+	root.Set(clone(root))
 }

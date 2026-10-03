@@ -9,9 +9,10 @@ type postgres struct{}
 // PostgreSQL returns the PostgreSQL renderer.
 func PostgreSQL() Dialect { return postgres{} }
 
-func (postgres) Name() string                    { return "postgresql" }
-func (postgres) QuoteIdentifier(s string) string { return quoteDouble(s) }
-func (postgres) Placeholder(index int) string    { return fmt.Sprintf("$%d", index) }
+func (postgres) Name() string                       { return "postgresql" }
+func (postgres) SupportsMaterializedBindings() bool { return true }
+func (postgres) QuoteIdentifier(s string) string    { return quoteDouble(s) }
+func (postgres) Placeholder(index int) string       { return fmt.Sprintf("$%d", index) }
 func (postgres) Boolean(value bool) string {
 	if value {
 		return "TRUE"

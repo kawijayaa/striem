@@ -30,7 +30,7 @@ const logicalOperators = new Set([
   'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'toscalar', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parse_csv', 'parse_xml', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'parse_url', 'parseurl', 'parse_urlquery', 'parseurlquery', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
@@ -95,6 +95,7 @@ const functionCompletions = createCompletions('function', [
   ['ipv4_is_private', 'Test for an RFC1918 address'],
   ['ipv4_is_in_range', 'Test an address against IPv4 ranges'],
   ['todatetime', 'Convert ISO text to UTC datetime'],
+  ['toscalar', 'Evaluate a scalar or the first table value once'],
   ['iff', 'Conditional value'], ['case', 'Conditional branches'], ['coalesce', 'First non-null value'], ['strlen', 'String length'],
   ['substring', 'Extract text'], ['indexof', 'Find a literal string occurrence'], ['strcat', 'Concatenate values'],
   ['split', 'Split text into a dynamic array'], ['extract_all', 'Extract all regex matches and selected capture groups'], ['extractall', 'Legacy alias for extract_all'], ['extract', 'Extract a regular expression group'],

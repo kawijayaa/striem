@@ -38,9 +38,10 @@ func SQLite(options ...SQLiteOption) Dialect {
 	return d
 }
 
-func (sqlite) Name() string                    { return "sqlite" }
-func (sqlite) QuoteIdentifier(s string) string { return quoteDouble(s) }
-func (sqlite) Placeholder(index int) string    { return "?" }
+func (sqlite) Name() string                       { return "sqlite" }
+func (sqlite) SupportsMaterializedBindings() bool { return true }
+func (sqlite) QuoteIdentifier(s string) string    { return quoteDouble(s) }
+func (sqlite) Placeholder(index int) string       { return "?" }
 func (sqlite) Boolean(value bool) string {
 	if value {
 		return "1"

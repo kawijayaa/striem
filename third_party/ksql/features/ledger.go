@@ -75,6 +75,7 @@ func initEntries() {
 		add("statement", "statement.", statementNames, Recognized, Unsupported, "session and control-plane statements are not SQL queries")
 		add("operator", "operator.", operatorNames, Recognized, Unsupported, "recognized with a stable unsupported diagnostic")
 		add("scalar_operator", "operator.scalar.", scalarOperatorNames, Validated, Unsupported, "support depends on SQL semantics and target capabilities")
+		add("expression", "function.", "toscalar", Validated, Equivalent, "constant scalar or first table value, materialized once on supported dialects; caller row dependencies rejected")
 		add("function", "function.", scalarFunctionNames, Validated, Unsupported, "requires an explicit semantic SQL mapping or UDF")
 		add("conversion", "function.", conversionFunctionNames, Validated, Unsupported, "KQL conversions return null on failure")
 		add("aggregate", "aggregate.", aggregateNames, Validated, Unsupported, "aggregate empty-set and dynamic-value semantics must be preserved")

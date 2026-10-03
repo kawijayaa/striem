@@ -246,6 +246,11 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 // them in the AST so quoted SQL text is never rewritten accidentally.
 func normalizeDateTimeLiterals(query sqlast.Query) {
 	switch node := query.(type) {
+	case *sqlast.With:
+		for _, binding := range node.Bindings {
+			normalizeDateTimeLiterals(binding.Query)
+		}
+		normalizeDateTimeLiterals(node.Query)
 	case *sqlast.Select:
 		for index := range node.Projections {
 			node.Projections[index].Expr = normalizeDateTimeExpr(node.Projections[index].Expr)

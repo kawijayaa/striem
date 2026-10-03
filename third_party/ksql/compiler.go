@@ -98,6 +98,7 @@ func (c *Compiler) Compile(source string) Result {
 			relation = state.pipeline(node.Pipeline)
 		}
 	}
+	relation.Query = state.materializeScalars(relation.Query)
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features
 	if !result.OK() || relation.Query == nil {
@@ -131,6 +132,13 @@ type compileState struct {
 	functionValidation bool
 	functionWork       int
 	functionSQLWork    int
+	scalarBindings     []scalarBinding
+	scalarSQLWork      int
+	rowID              int
+	nextRowID          int
+	rowOrigins         map[*sqlast.Identifier]int
+	capturedRows       map[int]struct{}
+	blockedRows        map[string]bool
 	diagnostics        []Diagnostic
 	features           []FeatureUse
 	args               []any
@@ -145,6 +153,7 @@ type boundExpr struct {
 	SQL  sqlast.Expr
 	Type ScalarType
 	Name string
+	rows map[int]struct{}
 }
 
 type relationScope struct {
@@ -152,16 +161,30 @@ type relationScope struct {
 	schema Schema
 }
 
-func (s *compileState) pipeline(pipeline *kql.Pipeline) Relation {
+func (s *compileState) pipeline(pipeline *kql.Pipeline) (result Relation) {
+	previousRow, previousCaptures := s.rowID, s.capturedRows
+	s.nextRowID++
+	s.rowID, s.capturedRows = s.nextRowID, nil
+	defer func() {
+		dependencies := mergeRowDependencies(result.rowDependencies, s.capturedRows)
+		delete(dependencies, s.rowID)
+		result.rowDependencies = dependencies
+		s.rowID, s.capturedRows = previousRow, mergeRowDependencies(previousCaptures, dependencies)
+	}()
+
 	if pipeline == nil {
 		return Relation{}
 	}
 	relation := s.source(pipeline.Source)
+	relation.rowDependencies = mergeRowDependencies(relation.rowDependencies, s.capturedRows)
+	delete(relation.rowDependencies, s.rowID)
 	for _, operator := range pipeline.Operators {
 		if relation.Query == nil {
 			return Relation{}
 		}
 		relation = s.operator(relation, operator)
+		relation.rowDependencies = mergeRowDependencies(relation.rowDependencies, s.capturedRows)
+		delete(relation.rowDependencies, s.rowID)
 	}
 	return relation
 }
@@ -209,6 +232,7 @@ func (s *compileState) source(source kql.Source) Relation {
 	s.use("source."+source.Kind, "equivalent", source.Span)
 	if source.Kind == "table" {
 		if bound, ok := s.tabularLets[strings.ToLower(unquoteKQL(source.Name))]; ok {
+			s.captureRows(bound.rowDependencies)
 			return bound
 		}
 		if function := s.functions[strings.ToLower(unquoteKQL(source.Name))]; function != nil {
@@ -563,7 +587,9 @@ func (s *compileState) expressions(expressions []kql.Expression) []sqlast.Expr {
 	return result
 }
 
-func (s *compileState) expression(expression kql.Expression) boundExpr {
+func (s *compileState) expression(expression kql.Expression) (result boundExpr) {
+	defer func() { result.rows = mergeRowDependencies(result.rows, s.expressionRows(result.SQL)) }()
+
 	if expression == nil {
 		return boundExpr{}
 	}
@@ -579,6 +605,7 @@ func (s *compileState) expression(expression kql.Expression) boundExpr {
 	switch value := expression.(type) {
 	case *kql.NameExpression:
 		if bound, ok := s.scalarLets[strings.ToLower(unquoteKQL(value.Name))]; ok && !s.hasInputName(unquoteKQL(value.Name)) {
+			s.captureRows(bound.rows)
 			bound.Name = unquoteKQL(value.Name)
 			return bound
 		}
@@ -1184,6 +1211,9 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	function := strings.ToLower(unquoteKQL(name.Name))
 	if declaration, ok := s.functions[function]; ok {
 		return s.callFunction(declaration, value)
+	}
+	if function == "toscalar" {
+		return s.toScalar(value)
 	}
 	if function == "datetime" || function == "date" || function == "timespan" || function == "time" {
 		if len(value.Args) != 1 {

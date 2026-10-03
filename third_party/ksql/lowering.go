@@ -94,7 +94,7 @@ func valueLiteral(value any) sqlast.Expr {
 	case int64:
 		return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(value, 10)}
 	case float64:
-		return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatFloat(value, 'g', -1, 64)}
+		return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: realLiteralText(value, 64)}
 	}
 	valueOf := reflect.ValueOf(value)
 	if valueOf.IsValid() {
@@ -104,10 +104,20 @@ func valueLiteral(value any) sqlast.Expr {
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatUint(valueOf.Uint(), 10)}
 		case reflect.Float32, reflect.Float64:
-			return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatFloat(valueOf.Float(), 'g', -1, 64)}
+			return &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: realLiteralText(valueOf.Float(), valueOf.Type().Bits())}
 		}
 	}
 	return &sqlast.Literal{Kind: sqlast.StringLiteral, Value: fmt.Sprint(value)}
+}
+
+// Keep a floating-point SQL token even when its value is an integer. Losing
+// the decimal point changes SQLite division, aggregation and result storage.
+func realLiteralText(value float64, bits int) string {
+	text := strconv.FormatFloat(value, 'g', -1, bits)
+	if !strings.ContainsAny(text, ".eE") {
+		text += ".0"
+	}
+	return text
 }
 
 func (s *compileState) literal(value *kql.LiteralExpression) boundExpr {
@@ -195,6 +205,7 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 				s.bindError("KQLB0403", value.Span, "expression.name", parts[0]+" is not dynamic")
 				return boundExpr{}
 			}
+			s.captureRows(bound.rows)
 			expr := bound.SQL
 			for _, property := range parts[1:] {
 				expr = &sqlast.Index{Value: expr, Index: &sqlast.Literal{Kind: sqlast.StringLiteral, Value: property}}
@@ -230,13 +241,17 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 				return boundExpr{SQL: expr, Type: TypeDynamic, Name: strings.Join(append([]string{column.Name}, parts[1:]...), "_")}
 			}
 		}
+		if s.blockedRows[strings.ToLower(logicalName)] || s.blockedRows[strings.ToLower(parts[0])] {
+			s.bindError("KQLB0521", value.Span, "function.toscalar", "toscalar cannot use "+value.Name+" outside its row-context scope")
+			return boundExpr{}
+		}
 		s.bindError("KQLB0401", value.Span, "expression.name", "unknown column "+value.Name)
 		return boundExpr{}
 	}
 	if len(parts) == 1 && s.qualifier != "" {
 		parts = append([]string{s.qualifier}, parts...)
 	}
-	return boundExpr{SQL: &sqlast.Identifier{Parts: parts}, Type: TypeUnknown, Name: parts[len(parts)-1]}
+	return boundExpr{SQL: s.rowIdentifier(parts), Type: TypeUnknown, Name: parts[len(parts)-1]}
 }
 
 func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationScope, parts []string) boundExpr {
@@ -245,7 +260,7 @@ func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationSc
 		return boundExpr{}
 	}
 	if scope.schema.Unknown {
-		return boundExpr{SQL: &sqlast.Identifier{Parts: []string{scope.alias, parts[0]}}, Type: TypeUnknown, Name: parts[0]}
+		return boundExpr{SQL: s.rowIdentifier([]string{scope.alias, parts[0]}), Type: TypeUnknown, Name: parts[0]}
 	}
 	column, _, ok, ambiguous := scope.schema.Lookup(parts[0])
 	if ambiguous {
@@ -256,7 +271,7 @@ func (s *compileState) qualifiedName(value *kql.NameExpression, scope relationSc
 		s.bindError("KQLB0401", value.Span, "expression.name", "unknown column "+parts[0])
 		return boundExpr{}
 	}
-	expr := sqlast.Expr(&sqlast.Identifier{Parts: []string{scope.alias, column.Name}})
+	expr := s.rowIdentifier([]string{scope.alias, column.Name})
 	if len(parts) > 1 {
 		if column.Type != TypeDynamic {
 			s.bindError("KQLB0403", value.Span, "expression.name", column.Name+" is not dynamic")
@@ -275,7 +290,7 @@ func (s *compileState) columnIdentifier(name string) sqlast.Expr {
 	if s.qualifier != "" {
 		parts = append([]string{s.qualifier}, parts...)
 	}
-	return &sqlast.Identifier{Parts: parts}
+	return s.rowIdentifier(parts)
 }
 
 func (s *compileState) extend(from *sqlast.Subquery, input Schema, expressions []kql.Expression, operator kql.Operator) Relation {

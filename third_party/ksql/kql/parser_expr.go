@@ -204,6 +204,19 @@ func (p *expressionParser) parsePrefix() Expression {
 	for p.position < len(p.tokens) {
 		switch p.tokens[p.position].Text {
 		case "(":
+			if name, ok := expr.(*NameExpression); ok && strings.EqualFold(name.Name, "toscalar") {
+				if close := matchingClose(p.tokens, p.position); close > p.position {
+					body := trimParentheses(p.tokens[p.position+1 : close])
+					if hasTopLevel(body, "|") || beginsTabularSource(body) {
+						pipeline, errors := parsePipeline(body)
+						p.errors = append(p.errors, errors...)
+						span := joinSpan(name.Span, p.tokens[close].Span)
+						expr = &CallExpression{Function: name, Args: []Expression{&PipelineExpression{Pipeline: pipeline, Span: tokensSpan(body)}}, Span: span}
+						p.position = close + 1
+						continue
+					}
+				}
+			}
 			start := expr.NodeSpan()
 			p.position++
 			args := p.parseCommaExpressions(")")

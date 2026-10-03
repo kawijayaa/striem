@@ -83,6 +83,7 @@ func (s *compileState) functionTableResult(expression kql.Expression) (Relation,
 			return Relation{}, false
 		}
 		if relation, found := s.tabularLets[key]; found {
+			s.captureRows(relation.rowDependencies)
 			return relation, true
 		}
 		if function := s.functions[key]; function != nil && function.tabular {
