@@ -578,15 +578,6 @@ func compatibilityOptions() []ksql.Option {
 			return &sqlast.Call{Name: "kql_calendar", Args: []sqlast.Expr{args[0], stringLiteral(unit), offset, &sqlast.Literal{Kind: sqlast.BooleanLiteral, Value: strconv.FormatBool(strings.HasPrefix(name, "end"))}}}, nil
 		}))
 	}
-	for _, name := range []string{"avgif", "minif", "maxif"} {
-		name := name
-		options = append(options, ksql.WithFunction(name, func(args []sqlast.Expr) (sqlast.Expr, error) {
-			if len(args) != 2 {
-				return nil, fmt.Errorf("%s requires a value and a predicate", name)
-			}
-			return &sqlast.Call{Name: strings.TrimSuffix(name, "if"), Args: []sqlast.Expr{conditionalValue(args[0], args[1])}}, nil
-		}))
-	}
 	for _, name := range []string{"dcount", "dcountif", "count_distinct", "count_distinctif"} {
 		name := name
 		options = append(options, ksql.WithFunction(name, func(args []sqlast.Expr) (sqlast.Expr, error) {

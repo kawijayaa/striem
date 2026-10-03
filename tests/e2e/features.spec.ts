@@ -1191,3 +1191,22 @@ test('Boolean literal autocomplete executes typed conditional values', async ({ 
   await run(page, 1);
   await expect(page.locator('#result-body')).toContainText('2');
 });
+
+test('conditional aggregate autocomplete executes and excludes row expressions', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'Telemetry | summarize a=av');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^avgif$/ })).toBeVisible();
+  await page.locator('.cm-completionLabel').filter({ hasText: /^avgif$/ }).click();
+  await expect(editor).toHaveText('Telemetry | summarize a=avgif()');
+  await editor.pressSequentially('score, true');
+  await run(page, 1);
+  for (const query of ['Telemetry | project av', 'Telemetry | summarize sum(av']) {
+    await edit(page, query);
+    await editor.press('End');
+    await editor.press('Control+Space');
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: /^avg(?:if)?$/ })).toHaveCount(0);
+  }
+});

@@ -209,7 +209,7 @@ func TestQueryPrepareBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest || queryError.Error != "query contains an invalid column or expression" || queryError.Position.Line != 1 || queryError.Position.Column != 1 || prepareCalls != 1 {
+	if response.StatusCode != http.StatusBadRequest || queryError.Error != "count requires a summarize aggregation context" || queryError.Position.Line != 1 || queryError.Position.Column != 31 || prepareCalls != 1 {
 		t.Fatalf("invalid query status = %d, response = %#v, prepare calls = %d", response.StatusCode, queryError, prepareCalls)
 	}
 
@@ -219,7 +219,7 @@ func TestQueryPrepareBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest || queryError.Error != "query contains an invalid column or expression" || queryError.Position.Line != 1 || queryError.Position.Column != 1 || prepareCalls != 2 {
+	if response.StatusCode != http.StatusBadRequest || queryError.Error != "count requires a summarize aggregation context" || queryError.Position.Line != 1 || queryError.Position.Column != 31 || prepareCalls != 1 {
 		t.Fatalf("invalid validation status = %d, response = %#v, prepare calls = %d", response.StatusCode, queryError, prepareCalls)
 	}
 }

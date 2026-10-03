@@ -264,3 +264,23 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   [Common-type binder](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Symbols/TypeFacts.cs),
   [coalesce](https://learn.microsoft.com/en-us/kusto/query/coalesce-function),
   [null semantics](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/null-values).
+
+- Moved `avgif`/`minif`/`maxif` into KSQL with validated core aggregate
+  signatures and result types. Numeric sum/count conditional aggregates now
+  return zero on empty/all-null or ineligible inputs; average/minimum/maximum
+  retain null defaults. Int sums promote to long and Boolean minima/maxima keep
+  Boolean HTTP output. Core aggregates reject nested calls, scalar projections,
+  filters and grouping-key use before SQL preparation, while independent nested
+  summarize pipelines retain their own scope. The deprecated Boolean count
+  overload counts true predicates rather than non-null SQL expressions.
+  Execution tests cover both parameter modes, groups/nulls, volatile argument
+  evaluation, repeated execution, cached query functions and row selectors.
+  Autocomplete exposes these core aggregates in summarize positions.
+  PostgreSQL Boolean min/max rendering is checked but not execution-certified.
+  Other application aggregate context policies, ungrouped column validation,
+  temporal/decimal overloads, complete naming/order/overflow semantics and Kusto
+  differential testing remain open. Management commands and external-service
+  integration are still in scope and incomplete.
+  [Core aggregate behavior](../../ksql/docs/core-aggregates.md),
+  [Microsoft summarize defaults](https://learn.microsoft.com/en-us/kusto/query/summarize-operator?view=azure-monitor),
+  [conditional average](https://learn.microsoft.com/en-us/kusto/query/avgif-aggregation-function?view=microsoft-fabric).

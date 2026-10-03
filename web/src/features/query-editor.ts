@@ -70,7 +70,10 @@ const tabularFunctionCompletions = createCompletions('function', [
   ['materialize', 'Cache a table once for reuse during this query'],
 ], label => `${label}()`);
 
-const rowSelectionCompletions = createCompletions('function', [
+const aggregateCompletions = createCompletions('function', [
+  ['count', 'Count rows'], ['countif', 'Conditional count'], ['sumif', 'Conditional sum'],
+  ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
+  ['avgif', 'Conditional average'], ['minif', 'Conditional minimum'], ['maxif', 'Conditional maximum'],
   ['arg_max', 'Return values from the row with the maximum key in each group'],
   ['arg_min', 'Return values from the row with the minimum key in each group'],
   ['argmax', 'Legacy alias for arg_max with prefixed result names'],
@@ -116,8 +119,6 @@ const functionCompletions = createCompletions('function', [
   ['substring', 'Extract text'], ['indexof', 'Find a literal string occurrence'], ['strcat', 'Concatenate values'],
   ['split', 'Split text into a dynamic array'], ['extract_all', 'Extract all regex matches and selected capture groups'], ['extractall', 'Legacy alias for extract_all'], ['extract', 'Extract a regular expression group'],
   ['trim', 'Trim regex matches at both ends'], ['trim_start', 'Trim a leading regex match'], ['trim_end', 'Trim a trailing regex match'], ['replace_string', 'Replace literal text'], ['replace_strings', 'Replace literal strings in priority order'], ['replace_regex', 'Replace regex matches with capture substitutions'], ['replace', 'Legacy regex replacement (regex, rewrite, source)'],
-  ['count', 'Count rows'], ['countif', 'Conditional count'], ['sumif', 'Conditional sum'],
-  ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
   ['make_set', 'Collect distinct values'], ['make_list', 'Collect values'],
   ['make_bag', 'Merge property bags in a group'], ['make_bag_if', 'Merge property bags matching a predicate'],
   ['make_dictionary', 'Legacy property bag aggregate'],
@@ -129,7 +130,6 @@ const functionCompletions = createCompletions('function', [
   ['varianceif', 'Conditional sample variance'], ['variancepif', 'Conditional population variance'],
   ['stdev', 'Sample standard deviation'], ['stdevp', 'Population standard deviation'],
   ['stdevif', 'Conditional sample standard deviation'], ['stdevpif', 'Conditional population standard deviation'],
-  ['avgif', 'Conditional average'], ['minif', 'Conditional minimum'], ['maxif', 'Conditional maximum'],
   ['startofday', 'UTC start of day'], ['endofday', 'UTC end of day'],
   ['startofweek', 'UTC start of week (Sunday)'], ['endofweek', 'UTC end of week'],
   ['startofmonth', 'UTC start of month'], ['endofmonth', 'UTC end of month'],
@@ -192,7 +192,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
       : target.kind === 'column' ? options.getFieldCompletions()
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
-      : [...functionCompletions, ...(target.kind === 'aggregation' ? rowSelectionCompletions : []), ...(target.kind === 'binding' ? [...options.getTableCompletions(), ...tabularFunctionCompletions] : []), ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
+      : [...functionCompletions, ...(target.kind === 'aggregation' ? aggregateCompletions : []), ...(target.kind === 'binding' ? [...options.getTableCompletions(), ...tabularFunctionCompletions] : []), ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
         { label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }, { label: 'null', type: 'constant' }];
     return {
       from: target.from,
