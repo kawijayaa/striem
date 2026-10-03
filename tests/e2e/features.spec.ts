@@ -1209,4 +1209,17 @@ test('conditional aggregate autocomplete executes and excludes row expressions',
     await editor.press('Control+Space');
     await expect(page.locator('.cm-completionLabel').filter({ hasText: /^avg(?:if)?$/ })).toHaveCount(0);
   }
+  await edit(page, 'Telemetry | summarize v=va');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({ hasText: /^variance$/ }).click();
+  await expect(editor).toHaveText('Telemetry | summarize v=variance()');
+  await editor.pressSequentially('score');
+  await run(page, 1);
+  for (const query of ['Telemetry | project va', 'Telemetry | summarize sum(va']) {
+    await edit(page, query);
+    await editor.press('End');
+    await editor.press('Control+Space');
+    await expect(page.locator('.cm-completionLabel').filter({ hasText: /^variance(?:p|if|pif)?$/ })).toHaveCount(0);
+  }
 });

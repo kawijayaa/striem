@@ -180,7 +180,7 @@ func TestAlignedUnionsUseBundledCompiler(t *testing.T) {
 	}
 }
 
-func TestColumnPatternsUseBundledCompiler(t *testing.T) {
+func TestColumnPatternsUseIndependentCompiler(t *testing.T) {
 	db := featureDatabase(t)
 	for _, tc := range []struct{ query, want string }{
 		{`Events | where n == 1 | project-keep h*,u*`, `[[a alice]]`},

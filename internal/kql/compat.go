@@ -82,7 +82,7 @@ func compatibilityOptions() []ksql.Option {
 	}
 	for _, name := range []string{"variance", "variancep", "varianceif", "variancepif", "stdev", "stdevp", "stdevif", "stdevpif"} {
 		name := name
-		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		options = append(options, ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			required := 1
 			if strings.HasSuffix(name, "if") {
 				required = 2
@@ -528,7 +528,7 @@ func compatibilityOptions() []ksql.Option {
 	}
 	for _, name := range []string{"make_bag", "make_bag_if", "make_dictionary"} {
 		name := name
-		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		options = append(options, ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			required := 1
 			if name == "make_bag_if" {
 				required = 2
@@ -580,7 +580,7 @@ func compatibilityOptions() []ksql.Option {
 	}
 	for _, name := range []string{"dcount", "dcountif", "count_distinct", "count_distinctif"} {
 		name := name
-		options = append(options, ksql.WithFunction(name, func(args []sqlast.Expr) (sqlast.Expr, error) {
+		options = append(options, ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			required := 1
 			if strings.HasSuffix(name, "if") {
 				required = 2
@@ -590,23 +590,26 @@ func compatibilityOptions() []ksql.Option {
 				max++
 			}
 			if len(args) < required || len(args) > max {
-				return nil, fmt.Errorf("%s requires %d arguments%s", name, required, map[bool]string{true: " and optional accuracy 0–4"}[max > required])
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d arguments%s", name, required, map[bool]string{true: " and optional accuracy 0–4"}[max > required])
 			}
 			if len(args) > required {
-				literal, ok := args[required].(*sqlast.Literal)
+				literal, ok := args[required].SQL.(*sqlast.Literal)
 				if !ok || literal.Kind != sqlast.NumberLiteral {
-					return nil, fmt.Errorf("%s accuracy must be a constant integer from 0 to 4", name)
+					return ksql.TypedExpression{}, fmt.Errorf("%s accuracy must be a constant integer from 0 to 4", name)
 				}
 				accuracy, err := strconv.Atoi(literal.Value)
 				if err != nil || accuracy < 0 || accuracy > 4 {
-					return nil, fmt.Errorf("%s accuracy must be a constant integer from 0 to 4", name)
+					return ksql.TypedExpression{}, fmt.Errorf("%s accuracy must be a constant integer from 0 to 4", name)
 				}
 			}
-			value := args[0]
+			value := args[0].SQL
 			if required == 2 {
-				value = conditionalValue(value, args[1])
+				if args[1].Type != ksql.TypeBool && args[1].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s predicate must be Boolean", name)
+				}
+				value = conditionalValue(value, args[1].SQL)
 			}
-			return &sqlast.Call{Name: "kql_count_distinct", Args: []sqlast.Expr{value}}, nil
+			return ksql.TypedExpression{SQL: &sqlast.Call{Name: "kql_count_distinct", Args: []sqlast.Expr{value}}, Type: ksql.TypeLong}, nil
 		}))
 	}
 	return options

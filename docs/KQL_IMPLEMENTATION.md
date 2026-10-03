@@ -284,3 +284,26 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   [Core aggregate behavior](../../ksql/docs/core-aggregates.md),
   [Microsoft summarize defaults](https://learn.microsoft.com/en-us/kusto/query/summarize-operator?view=azure-monitor),
   [conditional average](https://learn.microsoft.com/en-us/kusto/query/avgif-aggregation-function?view=microsoft-fabric).
+
+- Matched the pinned Microsoft aggregate name scope: summarize result
+  expressions exclude input columns (even grouping columns), while aggregate
+  arguments use the input row scope. Scalar lets remain available outside
+  aggregates, including when an input column has the same name. Qualified and
+  dynamic accesses, scalar wrappers and wildcard projections follow that rule.
+  Constant-only ungrouped summaries now return one row on both nonempty and
+  empty input, with a hidden SQL count removed from output. Cached subqueries
+  and scalar extensions that discard aggregate arguments retain that cardinality
+  without duplicating output expressions or parameters.
+  Added independent KSQL `WithAggregate`/`WithTypedAggregate` APIs and migrated
+  Striem's statistics, bag/set and distinct-count runtime mappings. Invalid
+  scalar-context and nested calls now fail before database execution. Distinct
+  counts retain long metadata and conditional predicates require Boolean types.
+  Autocomplete restricts all exposed aggregate families to summarize positions.
+  Compiler/HTTP tests verify shadowing, grouping, wildcards, scope restoration,
+  registration precedence, null/empty input, runtime collections and hidden
+  projection bounds. SQLite execution is tested; PostgreSQL rendering is checked.
+  Aggregate helper functions, contexts in other operators, complete collection
+  tags/limits, approximate counts, temporal overloads and differential engine
+  conformance remain open. Management and external services remain unfinished.
+  [Pinned aggregate scope](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Binder/Binder_Names.cs),
+  [summarize cardinality](https://learn.microsoft.com/en-us/kusto/query/summarize-operator?view=azure-monitor).

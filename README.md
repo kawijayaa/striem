@@ -50,7 +50,7 @@ internal/api/        JSON API, query validation, and static serving
 internal/database/   SQLite schema, progress, and KQL SQL functions
 internal/deployment/ YAML loading and deployment reconciliation
 internal/ingest/     Streaming JSON, NDJSON, CSV, and gzip ingestion
-internal/kql/        KQL lexer, parser, AST, and SQL compiler
+internal/kql/        Independent KSQL compiler adapters and SQLite mappings
 web/src/             TypeScript application and Tailwind/CSS interface
 ```
 
