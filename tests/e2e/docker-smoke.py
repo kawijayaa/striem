@@ -61,7 +61,7 @@ datasets:
         assert docker('exec', name, 'id', '-u').strip() != '0'
         assert '<title>' in get('/')
         # Binary content is checked inside the container without text decoding.
-        docker('exec', name, 'wget', '-qO', '/tmp/font.woff2', 'http://127.0.0.1:8080/fonts/instrument-sans-var.woff2')
+        docker('exec', name, 'wget', '-qO', '/tmp/font.woff2', 'http://127.0.0.1:8080/fonts/plex-mono-400.woff2')
         assert int(docker('exec', name, 'stat', '-c', '%s', '/tmp/font.woff2')) > 1000
         assert post('/api/query', {'query': 'Fixture | search "alpha" | count'})['rows'][0]['Count'] == 1
         for kind, expected in [('innerunique', 1), ('rightsemi', 1), ('rightanti', 0)]:
