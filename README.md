@@ -56,7 +56,12 @@ web/src/             TypeScript application and Tailwind/CSS interface
 
 Read-only management commands use the logical database namespace `striem`: `.show tables`, `.show tables (Telemetry)`, and `.show table Telemetry cslschema` or `schema as json`. Their results support ordinary query pipelines, such as `.show tables | project TableName`. See [KQL implementation status](docs/KQL_IMPLEMENTATION.md) for remaining management and service work.
 
-The API parses and compiles every query into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
+The local query API parses and compiles queries into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
+
+Optional [native Kusto API routes](docs/NATIVE_KUSTO.md) execute query language,
+management commands and external-service features on a configured Kusto service.
+They use server-side credentials and preserve multiple typed result tables.
+The hunting editor continues to use the local SQLite API.
 
 Configuration:
 
@@ -66,6 +71,10 @@ Configuration:
 | `STRIEM_DATA_DIR` | `./data` | Persistent data directory |
 | `STRIEM_CONFIG` | unset | Deployment YAML manifest |
 | `STRIEM_MAX_INPUT_BYTES` | `2147483648` | Maximum expanded input size in bytes |
+| `STRIEM_KUSTO_ENDPOINT` | unset | Optional native Kusto cluster HTTPS URL |
+| `STRIEM_KUSTO_DATABASE` | unset | Native service database |
+| `STRIEM_KUSTO_TOKEN_FILE` | unset | Server-side bearer token file |
+| `STRIEM_KUSTO_MANAGEMENT` | `false` | Enable native management commands |
 
 ### Logs
 

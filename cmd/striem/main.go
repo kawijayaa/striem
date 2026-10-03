@@ -32,6 +32,14 @@ func main() {
 
 	manifestPath := os.Getenv("STRIEM_CONFIG")
 	apiServer := api.New(store, logger)
+	nativeKusto, err := nativeKustoFromEnv()
+	if err == nil {
+		err = apiServer.SetNativeKusto(nativeKusto)
+	}
+	if err != nil {
+		logger.Error("Could not configure native Kusto", "error", err)
+		os.Exit(1)
+	}
 	if manifestPath != "" {
 		if challengeName, err := deployment.ReadChallengeName(manifestPath); err == nil {
 			apiServer.SetChallengeName(challengeName)

@@ -34,6 +34,7 @@ type Server struct {
 	startupError  string
 	challengeName string
 	prepareQuery  func(context.Context, string) (*sql.Stmt, error)
+	nativeKusto   NativeKustoConfig
 }
 
 func New(store *database.Store, logger *slog.Logger) *Server {
@@ -172,6 +173,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/questions/{id}/answer", s.whenReady(requireSameOrigin(s.submitAnswer)))
 	mux.HandleFunc("POST /api/query", s.whenReady(requireSameOrigin(s.query)))
 	mux.HandleFunc("POST /api/query/validate", s.whenReady(requireSameOrigin(s.validateQuery)))
+	mux.HandleFunc("POST /api/kusto/query", s.whenReady(requireSameOrigin(s.nativeQuery)))
+	mux.HandleFunc("POST /api/kusto/management", s.whenReady(requireSameOrigin(s.nativeManagement)))
 
 	static, err := fs.Sub(webassets.Files, "dist")
 	if err != nil {
