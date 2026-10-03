@@ -76,3 +76,19 @@ return a diagnostic; they are never lowered to `LIKE`.
   operators can enforce them without claiming execution guarantees.
 
 SQLite inline `datatable` values use a derived VALUES relation with explicit column aliases. Empty value tables preserve their declared columns and return no rows. `getschema` reports the bound schema without reading input rows; `kind=csl` remains unsupported.
+
+## Join keys and lookup columns
+
+Join `on` conditions bind common column names or `$left.column ==
+$right.column` pairs, combined with commas or `and`. Bracketed quoted columns
+work in both forms. Explicit operands must reference actual columns on the
+specified side; computed expressions, reversed sides, and dynamic explicit
+keys return diagnostics. Project a scalar expression before using it as a key.
+Legacy Boolean `join where` conditions remain supported for the join flavors
+that can lower them. Lookup supports inner/leftouter and omits only its
+right-side matching key columns, preserving other same-name columns with
+generated names. Lookup currently requires known schemas for correct column
+omission. Key-count limits include conjunctions, and join output width is
+checked against the configured projection limit. Complete hints/parameters,
+case resolution, unknown schemas, dynamic shorthand keys, and engine
+differential conformance remain open.

@@ -119,100 +119,29 @@ grammar and catalog files are recorded in [`inventory/source.json`](inventory/so
 
 This project is an independent implementation. See [`NOTICE`](NOTICE).
 
+## Documentation
+
+- [Compiler architecture and extension rules](docs/architecture.md)
+- [Operator support and dialect limits](docs/operator-support.md)
+- [Scalar and tabular query-defined functions](docs/query-functions.md)
+- [Constant scalar queries with `toscalar()`](docs/scalar-queries.md)
+- [Quoted column declarations and aliases](docs/quoted-names.md)
+- [Feature ledger](features/README.md)
+- [Repository layout and development](docs/development.md)
+
+## Development
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+Public compiler regression and SQLite execution tests live in `tests/compiler`.
+Package-specific parser, renderer, ledger, and SQL AST tests stay beside their
+implementations. See [the development guide](docs/development.md) for focused
+test, coverage, and fuzzing commands.
+
 ## License
 
 Apache-2.0. See [`NOTICE`](NOTICE) for upstream attribution.
-
-## Scalar query-defined functions
-
-```kusto
-let adjust = (value:long, offset:long = 2) {
-    let increment = () { offset };
-    value + increment()
-};
-print result = adjust(offset=3, value=10)
-```
-
-Function calls inline a bound scalar expression and retain its output type.
-Arguments resolve in the caller; bodies resolve in their declaration scope.
-Parameters and local declarations stay local. Validation also checks unused
-function declarations. Scalar parameter types currently supported are bool,
-int, long, real/double, string, datetime, and dynamic; numeric widening supports
-int to long and int/long to real. Unsupported types,
-recursive or unresolved functions, invalid defaults, and invalid argument
-contracts produce diagnostics with no SQL.
-
-Declaration/call depth, parameter count, binding work, and expanded SQL work
-are bounded. Shared argument trees are counted at their expanded size before
-parameter traversal/rendering, preventing exponentially large SQL from small
-function definitions. These are compiler resource policies. Full Microsoft
-function type coercion, views/stored functions, inline invocation, expression result
-naming, and engine conformance remain unfinished.
-
-## Tabular query-defined functions
-
-```kusto
-let selectRecent = (T:(x:long), minimum:long = 2) {
-    T | where x >= minimum
-};
-range x from 1 to 4 step 1
-| invoke selectRecent()
-```
-
-Table-valued results can be used as sources, local bindings, and table
-arguments. Zero-parameter functions support both `f` and `f()`. Table
-parameters precede scalar parameters and use a declared column schema or
-`(*)`. Fixed schemas validate required columns and types while retaining extra
-argument columns; wildcard parameters permit star operations but cannot name
-input columns during declaration validation. Table expressions such as
-`selectRecent((range x from 1 to 4 step 1), 3)` are supported, along with direct
-datatable arguments, lexical table capture, and nested function declarations.
-`invoke` supplies its input as the first table argument. Both scalar and table
-expansion share the resource limits described above. Exact coercion, case
-resolution, schema-dependent function analysis and engine differential testing
-are still incomplete.
-
-Quoted column declarations use bracketed string names, including compound
-strings: `datatable(['some' ' column']:long)[1]`. Output aliases in print,
-project, extend, summarize, and project-rename decode the same form and retain
-their names in result metadata. Dots inside quoted column names stay part of
-the name; `['a.b']` is distinct from the property access `a.b`. SQL identifiers
-are quoted by the target dialect. Complete entity-name validation, exact case
-resolution, and all projection naming rules remain unfinished.
-
-Join `on` conditions bind common column names or `$left.column ==
-$right.column` pairs, combined with commas or `and`. Bracketed quoted columns
-work in both forms. Explicit operands must reference actual columns on the
-specified side; computed expressions, reversed sides, and dynamic explicit
-keys return diagnostics. Project a scalar expression before using it as a key.
-Legacy Boolean `join where` conditions remain supported for the join flavors
-that can lower them. Lookup supports inner/leftouter and omits only its
-right-side matching key columns, preserving other same-name columns with
-generated names. Lookup currently requires known schemas for correct column
-omission. Key-count limits include conjunctions, and join output width is
-checked against the configured projection limit. Complete hints/parameters,
-case resolution, unknown schemas, dynamic shorthand keys, and engine
-differential conformance remain open.
-
-## Constant scalar queries
-
-```kusto
-let total = toscalar(Events | count);
-Events | summarize groupCount=count() by Host
-       | extend fraction=1.0*groupCount/total
-```
-
-`toscalar()` accepts a scalar expression or a table expression; a table supplies
-its first column and first row. Materialized CTEs make reused scalar bindings
-constant across rows. SQLite 3.35+ and PostgreSQL 12+ support this lowering;
-PostgreSQL is covered by rendering tests, SQLite by execution tests. Other
-SQL dialects return a positioned capability diagnostic. Referencing a caller's
-row is rejected, including through functions or previously bound tables.
-Independent rows within the argument's own pipeline remain available.
-
-The first table column must have a known schema. Empty tables currently return
-SQL null; engine differential verification remains open. Optional `kind`
-syntax and full Kusto scalar typing remain unfinished. At most 1024 bindings
-and 4 MiB of estimated binding SQL work are accepted per compilation; these
-are compiler policies, not Kusto limits. Unused lets/function-validation
-bindings are removed before rendering and parameter normalization.
