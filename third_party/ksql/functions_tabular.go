@@ -75,6 +75,9 @@ func (s *compileState) functionTableResult(expression kql.Expression) (Relation,
 			if function := s.functions[strings.ToLower(unquoteKQL(name.Name))]; function != nil && function.tabular {
 				return s.callFunctionValue(function, value, nil).table, true
 			}
+			if strings.EqualFold(unquoteKQL(name.Name), "materialize") && s.functions["materialize"] == nil {
+				return s.materializeCall(value), true
+			}
 		}
 	case *kql.NameExpression:
 		name := unquoteKQL(value.Name)

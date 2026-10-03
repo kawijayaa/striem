@@ -40,8 +40,10 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 	if operator.Kind == "as" {
 		spec := operator.Body.(kql.AsSpec)
 		if spec.Materialized != nil && *spec.Materialized {
-			s.error("KQLL0306", operator.Span, feature, "as hint.materialized=true requires guaranteed single evaluation")
-			return Relation{}
+			input = s.materializeRelation(input, operator.Span, feature)
+			if input.Query == nil {
+				return Relation{}
+			}
 		}
 		s.tabularLets[strings.ToLower(spec.Name)] = input
 		return input

@@ -219,6 +219,8 @@ func (r renderer) selectQuery(query *sqlast.Select) (string, error) {
 
 func (r renderer) source(source sqlast.Source) (string, error) {
 	switch s := source.(type) {
+	case *sqlast.MaterializedReference:
+		return r.dialect.QuoteIdentifier(s.Name), nil
 	case *sqlast.Table:
 		parts := make([]string, len(s.Parts))
 		for i, part := range s.Parts {

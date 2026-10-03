@@ -204,7 +204,7 @@ func (p *expressionParser) parsePrefix() Expression {
 	for p.position < len(p.tokens) {
 		switch p.tokens[p.position].Text {
 		case "(":
-			if name, ok := expr.(*NameExpression); ok && strings.EqualFold(name.Name, "toscalar") {
+			if name, ok := expr.(*NameExpression); ok && (strings.EqualFold(name.Name, "toscalar") || strings.EqualFold(name.Name, "materialize")) {
 				if close := matchingClose(p.tokens, p.position); close > p.position {
 					body := trimParentheses(p.tokens[p.position+1 : close])
 					if hasTopLevel(body, "|") || beginsTabularSource(body) {

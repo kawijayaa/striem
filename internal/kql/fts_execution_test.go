@@ -36,6 +36,9 @@ INSERT INTO events(id, dataset_id, time_generated, source, raw_data) VALUES
 		for _, query := range []string{
 			`Suricata | search "` + term + `" | project host`,
 			`let T=Suricata | search "` + term + `"; let total=toscalar(T|count); T | where total==1 | project host`,
+			`let T=materialize(Suricata | search "` + term + `"); let total=toscalar(T|count); T | where total==1 | project host`,
+			`let T=materialize(Suricata | search "` + term + `"); union T,T | distinct host`,
+			`Suricata | search "` + term + `" | as hint.materialized=true T | union T | distinct host`,
 		} {
 			compiled, err := Compile(query, time.Now(), CompileConfig{
 				Tables: TableCatalog{"Suricata": {ID: 1, Fields: []Field{{Name: "host", Type: "string"}, {Name: "message", Type: "string"}}}}, FullTextIndex: true,

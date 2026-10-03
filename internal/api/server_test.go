@@ -348,7 +348,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}
 	}
-	for _, value := range []string{"toscalar", "tostring", "countif", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
+	for _, value := range []string{"toscalar", "materialize", "tostring", "countif", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "parse_url", "parseurl", "parse_urlquery", "parseurlquery"} {
 		if !contains(schema.Functions, value) {
 			t.Fatalf("functions do not include %q: %v", value, schema.Functions)
 		}

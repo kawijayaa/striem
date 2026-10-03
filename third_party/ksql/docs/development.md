@@ -11,7 +11,7 @@ in one large file.
 | `compiler_state.go` | Per-compilation state, pipeline binding, feature recording |
 | `binding_*.go` | Scalar expressions, names, literals, and scalar operators |
 | `lowering_*.go` | SQL lowering for sources, operators, projections, joins, search, and expansion; extension context |
-| `functions*.go`, `scalar_queries.go` | Built-in/query-defined functions and materialized scalar queries |
+| `functions*.go`, `scalar_queries.go`, `materialized_tables.go`, `query_bindings.go` | Built-in/query-defined functions and materialized scalar/table queries |
 | `schema.go`, `options.go`, `diagnostic.go`, `validation.go` | Public contracts, configuration, diagnostics, and validation |
 | Other root feature files | Specialized union, join, schema, and column-pattern implementation |
 | `kql/` | Lexer, parser, and KQL AST with package tests |

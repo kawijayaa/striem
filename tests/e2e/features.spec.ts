@@ -1096,3 +1096,32 @@ test('answer drafts persist, wrong answers recover, completion unlocks flag and 
   await expect(page.locator('#question-list')).toContainText('alpha');
   await expect(page.locator('#question-list')).toContainText('alice');
 });
+
+test('materialized table autocomplete inserts tabular functions and executes cached branches', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  const complete = async (label: string) => {
+    await editor.press('Control+Space');
+    await page.locator('.cm-completionLabel').filter({ hasText: new RegExp(`^${label}$`) }).click();
+  };
+  await edit(page, 'mat');
+  await editor.press('End');
+  await complete('materialize');
+  await expect(editor).toHaveText('materialize()');
+  await complete('Telemetry');
+  await expect(editor).toHaveText('materialize(Telemetry)');
+  await run(page, 3);
+  await edit(page, 'let T=mat');
+  await editor.press('End');
+  await complete('materialize');
+  await complete('Telemetry');
+  await expect(editor).toHaveText('let T=materialize(Telemetry)');
+  await edit(page, 'let T=materialize(Telemetry); union T,T');
+  await run(page, 6);
+  await edit(page, 'Telemetry | as hint.materialized=true T | union T');
+  await run(page, 6);
+  await edit(page, 'Telemetry | project mat');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^materialize$/ })).toHaveCount(0);
+});

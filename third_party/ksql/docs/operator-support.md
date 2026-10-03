@@ -92,3 +92,11 @@ omission. Key-count limits include conjunctions, and join output width is
 checked against the configured projection limit. Complete hints/parameters,
 case resolution, unknown schemas, dynamic shorthand keys, and engine
 differential conformance remain open.
+
+## Cached pipeline aliases
+
+`as hint.materialized=true Name` caches its input once for later references,
+using the same binding mechanism as `materialize()` and `toscalar()`. Without
+the hint, or with `false`, references recalculate the input. Guaranteed caching
+requires SQLite 3.35+ or PostgreSQL 12+; PostgreSQL currently has rendering
+checks only. See [materialized tables](materialized-tables.md).

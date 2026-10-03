@@ -18,6 +18,10 @@ func (s *compileState) call(value *kql.CallExpression) (result boundExpr) {
 	if declaration, ok := s.functions[function]; ok {
 		return s.callFunction(declaration, value)
 	}
+	if function == "materialize" {
+		s.bindError("KQLB0524", value.Span, "function.materialize", "materialize returns a table and cannot be used as a scalar expression")
+		return boundExpr{}
+	}
 	if function == "toscalar" {
 		return s.toScalar(value)
 	}

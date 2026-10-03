@@ -145,3 +145,10 @@ test, coverage, and fuzzing commands.
 ## License
 
 Apache-2.0. See [`NOTICE`](NOTICE) for upstream attribution.
+
+### Reusing a table without recalculation
+
+Use [`materialize()` or `as hint.materialized=true`](docs/materialized-tables.md)
+to cache a table for repeated references within one query. SQLite and PostgreSQL
+render these as explicitly materialized CTEs. See the guide for dialect and
+correlation limits.

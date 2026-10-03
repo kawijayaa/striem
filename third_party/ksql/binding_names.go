@@ -112,7 +112,11 @@ func (s *compileState) name(value *kql.NameExpression) boundExpr {
 			}
 		}
 		if s.blockedRows[strings.ToLower(logicalName)] || s.blockedRows[strings.ToLower(parts[0])] {
-			s.bindError("KQLB0521", value.Span, "function.toscalar", "toscalar cannot use "+value.Name+" outside its row-context scope")
+			if s.blockedFeature == "function.materialize" {
+				s.error("KQLL0524", value.Span, s.blockedFeature, "caller-row-dependent materialize requires correlated materialization, which this SQL lowering does not support")
+			} else {
+				s.bindError("KQLB0521", value.Span, "function.toscalar", "toscalar cannot use "+value.Name+" outside its row-context scope")
+			}
 			return boundExpr{}
 		}
 		s.bindError("KQLB0401", value.Span, "expression.name", "unknown column "+value.Name)

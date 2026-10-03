@@ -106,3 +106,20 @@ test('closing a nested query restores the outer completion context', () => {
     assert.equal(context.prefix, prefix, query);
   }
 });
+
+test('materialized tables complete in source, binding and table argument positions', () => {
+  for (const [query, kind, prefix] of [
+    ['mat', 'source', 'mat'], ['let T = mat', 'binding', 'mat'],
+    ['let T=materialize(Ev', 'table', 'Ev'], ['materialize(', 'table', ''],
+    ['let T=materialize(materialize(Ev', 'table', 'Ev'],
+    ['let T=materialize(Events | wh', 'operator', 'wh'],
+    ['let T=materialize(Events | where ho', 'expression', 'ho'],
+    ['let T=materialize(Events); Events | where ho', 'expression', 'ho'],
+    ['let T=materialize(Events | count); mat', 'source', 'mat'],
+    ['Events | project materialize(', 'table', ''],
+  ]) {
+    const context=queryCompletionContext(query,query.length);
+    assert.equal(context.kind,kind,query);
+    assert.equal(context.prefix,prefix,query);
+  }
+});

@@ -93,7 +93,7 @@ func (c *Compiler) Compile(source string) Result {
 			relation = state.pipeline(node.Pipeline)
 		}
 	}
-	relation.Query = state.materializeScalars(relation.Query)
+	relation.Query = state.materializeQueries(relation.Query)
 	result.Diagnostics = state.diagnostics
 	result.Features = state.features
 	if !result.OK() || relation.Query == nil {

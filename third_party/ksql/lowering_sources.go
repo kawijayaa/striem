@@ -104,6 +104,9 @@ func (s *compileState) source(source kql.Source) Relation {
 					}
 					return s.callFunctionValue(function, call, nil).table
 				}
+				if strings.EqualFold(unquoteKQL(name.Name), "materialize") {
+					return s.materializeCall(call)
+				}
 			}
 			if table := s.entityCall(call); table != nil {
 				return Relation{Query: &sqlast.Select{From: table}, Schema: Schema{Unknown: true}}

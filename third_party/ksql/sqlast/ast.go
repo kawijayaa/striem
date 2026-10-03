@@ -63,6 +63,11 @@ type Table struct {
 
 func (*Table) sourceNode() {}
 
+// MaterializedReference reads a reusable table binding without inlining its query.
+type MaterializedReference struct{ Name string }
+
+func (*MaterializedReference) sourceNode() {}
+
 type Subquery struct {
 	Query Query
 	Alias string

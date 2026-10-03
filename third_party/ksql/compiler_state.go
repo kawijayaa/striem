@@ -10,29 +10,30 @@ import (
 )
 
 type compileState struct {
-	compiler           *Compiler
-	scalarLets         map[string]boundExpr
-	tabularLets        map[string]Relation
-	functions          map[string]*boundFunction
-	functionDepth      int
-	functionValidation bool
-	functionWork       int
-	functionSQLWork    int
-	scalarBindings     []scalarBinding
-	scalarSQLWork      int
-	rowID              int
-	nextRowID          int
-	rowOrigins         map[*sqlast.Identifier]int
-	capturedRows       map[int]struct{}
-	blockedRows        map[string]bool
-	diagnostics        []Diagnostic
-	features           []FeatureUse
-	args               []any
-	alias              int
-	defaultColumn      int
-	qualifiers         map[string]relationScope
-	qualifier          string
-	input              Schema
+	compiler               *Compiler
+	scalarLets             map[string]boundExpr
+	tabularLets            map[string]Relation
+	functions              map[string]*boundFunction
+	functionDepth          int
+	functionValidation     bool
+	functionWork           int
+	functionSQLWork        int
+	queryBindings          []queryBinding
+	materializationSQLWork int
+	rowID                  int
+	nextRowID              int
+	rowOrigins             map[*sqlast.Identifier]int
+	capturedRows           map[int]struct{}
+	blockedRows            map[string]bool
+	blockedFeature         string
+	diagnostics            []Diagnostic
+	features               []FeatureUse
+	args                   []any
+	alias                  int
+	defaultColumn          int
+	qualifiers             map[string]relationScope
+	qualifier              string
+	input                  Schema
 }
 
 type boundExpr struct {
@@ -83,6 +84,9 @@ func (s *compileState) tabularLetValue(expression kql.Expression) (Relation, boo
 		if name, ok := call.Function.(*kql.NameExpression); ok {
 			if function := s.functions[strings.ToLower(unquoteKQL(name.Name))]; function != nil && function.tabular {
 				return s.callFunctionValue(function, call, nil).table, true
+			}
+			if strings.EqualFold(unquoteKQL(name.Name), "materialize") && s.functions["materialize"] == nil {
+				return s.materializeCall(call), true
 			}
 		}
 	}

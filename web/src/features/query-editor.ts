@@ -30,7 +30,7 @@ const logicalOperators = new Set([
   'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'toscalar', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'toscalar', 'materialize', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parse_csv', 'parse_xml', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'parse_url', 'parseurl', 'parse_urlquery', 'parseurlquery', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
@@ -65,6 +65,10 @@ const operatorCompletions = createCompletions('keyword', [
   ['lookup', 'Enrich rows by matching columns'],
   ['invoke', 'Apply a query function to this table'],
 ], label => `${label} `);
+
+const tabularFunctionCompletions = createCompletions('function', [
+  ['materialize', 'Cache a table once for reuse during this query'],
+], label => `${label}()`);
 
 const functionCompletions = createCompletions('function', [
   ['now', 'Current UTC time'], ['ago', 'Relative UTC time'], ['datetime', 'Datetime literal'],
@@ -166,18 +170,18 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
   const completionSource = (context: CompletionContext) => {
     const target = queryCompletionContext(context.state.doc.toString(), context.pos);
     if (!target || (!context.explicit && !target.prefix && !/[\s(,|)\]"']$/.test(context.state.sliceDoc(0, context.pos)))) return null;
-    const completions = target.kind === 'source' ? [...options.getTableCompletions(),
+    const completions = target.kind === 'source' ? [...options.getTableCompletions(), ...tabularFunctionCompletions,
       ...operatorCompletions.filter(completion => completion.label === 'let'),
       { label: 'print', type: 'keyword', apply: 'print ' },
       { label: 'range', type: 'keyword', apply: 'range ' }]
-      : target.kind === 'table' ? options.getTableCompletions()
+      : target.kind === 'table' ? [...options.getTableCompletions(), ...tabularFunctionCompletions]
       : target.kind === 'operator' ? operatorCompletions
       : target.kind === 'comparison' ? comparisonCompletions.filter(completion =>
         completion.label.startsWith(target.prefix.toLowerCase()))
       : target.kind === 'column' ? options.getFieldCompletions()
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
-      : [...functionCompletions, ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
+      : [...functionCompletions, ...(target.kind === 'binding' ? [...options.getTableCompletions(), ...tabularFunctionCompletions] : []), ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
         { label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }, { label: 'null', type: 'constant' }];
     return {
       from: target.from,

@@ -3,7 +3,7 @@ import { expressionOperatorWords } from './expression-operators.ts';
 export interface QueryCompletionContext {
   from: number;
   to: number;
-  kind: 'source' | 'table' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
+  kind: 'source' | 'table' | 'binding' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
   prefix: string;
 }
 
@@ -92,7 +92,9 @@ export function queryCompletionContext(query: string, position: number): QueryCo
     : /^\s*(?:project-away|project-keep|project-reorder|distinct)\s/i.test(segment)
       || /^\s*summarize\b[\s\S]*\bby\s+[^()]*$/i.test(segment) ? 'column'
     : /\b(?:join|union|lookup)\b\s*(?:kind\s*=\s*[A-Za-z_]+\s+)?\(?\s*[A-Za-z_0-9]*$/i.test(segment)
-      || /^\s*\(\s*[A-Za-z_0-9]*$/.test(segment) ? 'table' : 'expression';
+      || /\bmaterialize\(\s*[A-Za-z_0-9]*$/i.test(segment)
+      || /^\s*\(\s*[A-Za-z_0-9]*$/.test(segment) ? 'table'
+    : /^\s*let\s+[A-Za-z_][A-Za-z_0-9]*\s*=\s*[A-Za-z_0-9]*$/i.test(segment) ? 'binding' : 'expression';
   const token = kind === 'operator'
     ? code.match(/[A-Za-z_][A-Za-z_0-9-]*$/)
     : code.match(/!?[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_0-9]*)*~?$|[=!<>~]{1,2}$/);
