@@ -22,6 +22,12 @@ func (s *compileState) binary(value *kql.BinaryExpression) boundExpr {
 		right = s.expression(value.Right)
 	}
 	s.use(scalarOperatorID(op), "equivalent", value.Span)
+	if op == "+" || op == "-" || op == "*" || op == "/" || op == "%" {
+		if left.Type == TypeString || right.Type == TypeString || left.Type == TypeBool || right.Type == TypeBool {
+			s.bindError("KQLB0408", value.Span, scalarOperatorID(op), "arithmetic operators do not accept string or Boolean operands")
+			return boundExpr{}
+		}
+	}
 	boolean := func(expression sqlast.Expr) boundExpr { return boundExpr{SQL: expression, Type: TypeBool} }
 	if isNullExpression(right.SQL) && (op == "==" || op == "!=" || op == "<>") {
 		operator := "IS"

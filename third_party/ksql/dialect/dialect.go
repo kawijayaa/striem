@@ -27,6 +27,11 @@ type Dialect interface {
 // without this capability cannot implement toscalar's constant semantics.
 type Materialization interface{ SupportsMaterializedBindings() bool }
 
+// RankedSelection aggregates one ranked row without requiring orderable payloads.
+type RankedSelection interface {
+	RankedValue(value, rank string) (string, bool)
+}
+
 type standard struct{ name string }
 
 // ANSI returns the portable SQL renderer. It avoids vendor-only features.
@@ -544,6 +549,24 @@ func (r renderer) expr(expression sqlast.Expr) (string, error) {
 		return "EXISTS (" + query + ")", nil
 	case *sqlast.ScalarReference:
 		return "(SELECT " + r.dialect.QuoteIdentifier("value") + " FROM " + r.dialect.QuoteIdentifier(e.Name) + ")", nil
+	case *sqlast.RankedValue:
+		if e.Rank == nil {
+			return "", fmt.Errorf("ranked selection requires a rank identifier")
+		}
+		value, err := r.expr(e.Value)
+		if err != nil {
+			return "", err
+		}
+		rank, err := r.expr(e.Rank)
+		if err != nil {
+			return "", err
+		}
+		if capability, ok := r.dialect.(RankedSelection); ok {
+			if result, supported := capability.RankedValue(value, rank); supported {
+				return result, nil
+			}
+		}
+		return "", fmt.Errorf("dialect %s has no ranked row selection", r.dialect.Name())
 	case *sqlast.Filtered:
 		expression, err := r.expr(e.Expr)
 		if err != nil {

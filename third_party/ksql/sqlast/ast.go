@@ -177,6 +177,14 @@ type Exists struct{ Query Query }
 
 // ScalarReference reads the first value from a materialized scalar binding.
 type ScalarReference struct{ Name string }
+
+// RankedValue aggregates the value from the unique row numbered one.
+// Rank is an identifier so renderer-specific argument order cannot duplicate parameters.
+type RankedValue struct {
+	Value Expr
+	Rank  *Identifier
+}
+
 type Filtered struct {
 	Expr  Expr
 	Where Expr
@@ -199,6 +207,7 @@ func (*Index) exprNode()           {}
 func (*Regex) exprNode()           {}
 func (*Exists) exprNode()          {}
 func (*ScalarReference) exprNode() {}
+func (*RankedValue) exprNode()     {}
 func (*Filtered) exprNode()        {}
 
 type LiteralKind uint8

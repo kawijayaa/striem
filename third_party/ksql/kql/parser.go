@@ -732,6 +732,26 @@ func parseExpressionList(tokens []Token) ([]Expression, []ParseError) {
 			continue
 		}
 		if equal := topLevelToken(part, "="); equal > 0 {
+			if part[0].Text == "(" && matchingClose(part, 0) == equal-1 {
+				names := []string{}
+				valid := true
+				for _, nameTokens := range splitTopLevel(part[1:equal-1], ",") {
+					name, ok := declarationName(nameTokens)
+					if !ok {
+						valid = false
+						break
+					}
+					names = append(names, name)
+				}
+				if !valid || len(names) == 0 || equal+1 == len(part) {
+					errs = append(errs, ParseError{Code: "KQLP0401", Message: "tuple assignment requires names and a value", Span: tokensSpan(part)})
+					continue
+				}
+				value, valueErrs := parseExpressionTokens(part[equal+1:])
+				expressions = append(expressions, &CompoundNamedExpression{Names: names, Value: value, Span: tokensSpan(part)})
+				errs = append(errs, valueErrs...)
+				continue
+			}
 			if name, valid := declarationName(part[:equal]); valid {
 				if equal+1 == len(part) {
 					errs = append(errs, ParseError{Code: "KQLP0401", Message: "named expression requires a value", Span: part[equal].Span})

@@ -26,3 +26,25 @@ func TestNormalizeParametersSharedParents(t *testing.T) {
 		}
 	}
 }
+
+func TestRankedValueParametersRenderOnce(t *testing.T) {
+	for _, target := range []dialect.Dialect{dialect.SQLite(), dialect.PostgreSQL()} {
+		value := &sqlast.RankedValue{Value: &sqlast.Parameter{Index: 2}, Rank: &sqlast.Identifier{Parts: []string{"r"}}}
+		query := &sqlast.Select{Projections: []sqlast.SelectItem{{Expr: value}, {Expr: value}}}
+		args := sqlast.NormalizeParameters(query, []any{"unused", "selected"})
+		if fmt.Sprint(args) != `[selected selected]` {
+			t.Fatalf("%s args=%v", target.Name(), args)
+		}
+		rendered, err := dialect.Render(target, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `SELECT MAX(CASE WHEN "r" = 1 THEN ? END), MAX(CASE WHEN "r" = 1 THEN ? END)`
+		if target.Name() == "postgresql" {
+			want = `SELECT (ARRAY_AGG($1) FILTER (WHERE "r" = 1))[1], (ARRAY_AGG($2) FILTER (WHERE "r" = 1))[1]`
+		}
+		if rendered != want {
+			t.Fatalf("%s SQL=%s want=%s", target.Name(), rendered, want)
+		}
+	}
+}

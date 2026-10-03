@@ -352,6 +352,8 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 		node.Pattern = normalizeDateTimeExpr(node.Pattern)
 	case *sqlast.Exists:
 		normalizeDateTimeLiterals(node.Query)
+	case *sqlast.RankedValue:
+		node.Value = normalizeDateTimeExpr(node.Value)
 	case *sqlast.Filtered:
 		node.Expr = normalizeDateTimeExpr(node.Expr)
 		node.Where = normalizeDateTimeExpr(node.Where)

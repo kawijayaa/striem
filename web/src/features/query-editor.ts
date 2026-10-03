@@ -30,7 +30,7 @@ const logicalOperators = new Set([
   'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'toscalar', 'materialize', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'toscalar', 'materialize', 'arg_max', 'arg_min', 'argmax', 'argmin', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parse_csv', 'parse_xml', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'parse_url', 'parseurl', 'parse_urlquery', 'parseurlquery', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
@@ -68,6 +68,13 @@ const operatorCompletions = createCompletions('keyword', [
 
 const tabularFunctionCompletions = createCompletions('function', [
   ['materialize', 'Cache a table once for reuse during this query'],
+], label => `${label}()`);
+
+const rowSelectionCompletions = createCompletions('function', [
+  ['arg_max', 'Return values from the row with the maximum key in each group'],
+  ['arg_min', 'Return values from the row with the minimum key in each group'],
+  ['argmax', 'Legacy alias for arg_max with prefixed result names'],
+  ['argmin', 'Legacy alias for arg_min with prefixed result names'],
 ], label => `${label}()`);
 
 const functionCompletions = createCompletions('function', [
@@ -181,7 +188,7 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
       : target.kind === 'column' ? options.getFieldCompletions()
       : target.kind === 'sort' ? [...options.getFieldCompletions(),
         { label: 'asc', type: 'keyword' }, { label: 'desc', type: 'keyword' }]
-      : [...functionCompletions, ...(target.kind === 'binding' ? [...options.getTableCompletions(), ...tabularFunctionCompletions] : []), ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
+      : [...functionCompletions, ...(target.kind === 'aggregation' ? rowSelectionCompletions : []), ...(target.kind === 'binding' ? [...options.getTableCompletions(), ...tabularFunctionCompletions] : []), ...options.getFieldCompletions().map(completion => ({ ...completion, boost: 10 })),
         { label: 'true', type: 'constant' }, { label: 'false', type: 'constant' }, { label: 'null', type: 'constant' }];
     return {
       from: target.from,

@@ -3,7 +3,7 @@ import { expressionOperatorWords } from './expression-operators.ts';
 export interface QueryCompletionContext {
   from: number;
   to: number;
-  kind: 'source' | 'table' | 'binding' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
+  kind: 'source' | 'table' | 'binding' | 'aggregation' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
   prefix: string;
 }
 
@@ -109,6 +109,13 @@ export function queryCompletionContext(query: string, position: number): QueryCo
     const comparisonsAllowed = /^\s*(?:where|filter|search)\b/i.test(segment)
       || /^\s*(?:extend|project|summarize|print|let)\b[\s\S]*=/i.test(segment);
     if (comparisonsAllowed && !needsOperand && /[A-Za-z_0-9.)\]]$/.test(before)) kind = 'comparison';
+  }
+  if (kind === 'expression' && /^\s*summarize\s+(?:[\s\S]*,\s*)?(?:[A-Za-z_][A-Za-z_0-9]*\s*=\s*)?[A-Za-z_0-9]*$/i.test(segment)) {
+    // Only offer row aggregates between complete aggregate expressions; inside
+    // their arguments the available functions must remain scalar.
+    let depth = 0;
+    for (const char of segment) { if (char === '(') depth++; else if (char === ')') depth--; }
+    if (depth === 0) kind = 'aggregation';
   }
   const rest = query.slice(position);
   const suffixPattern = kind === 'operator' ? /^[A-Za-z_0-9-]*/

@@ -1125,3 +1125,29 @@ test('materialized table autocomplete inserts tabular functions and executes cac
   await editor.press('Control+Space');
   await expect(page.locator('.cm-completionLabel').filter({ hasText: /^materialize$/ })).toHaveCount(0);
 });
+
+test('row-selection autocomplete inserts aggregates and executes latest events per group', async ({ page }) => {
+  await open(page);
+  const editor=page.locator('.cm-content');
+  await edit(page,'Telemetry | summarize arg');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({hasText:/^arg_min$/})).toBeVisible();
+  await page.locator('.cm-completionLabel').filter({hasText:/^arg_max$/}).click();
+  await expect(editor).toHaveText('Telemetry | summarize arg_max()');
+  await editor.pressSequentially('score, *');
+  await editor.press('End');
+  await editor.pressSequentially(' by host');
+  await expect(editor).toHaveText('Telemetry | summarize arg_max(score, *) by host');
+  await run(page,3);
+  await edit(page,'Telemetry | summarize (last,lastUser)=arg_max(score,user),(first,firstUser)=arg_min(score,user),total=count()');
+  await run(page,1);
+  await edit(page,'Telemetry | project arg');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({hasText:/^arg_max$/})).toHaveCount(0);
+  await edit(page,'Telemetry | summarize arg_max(score, arg');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({hasText:/^arg_max$/})).toHaveCount(0);
+});

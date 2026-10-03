@@ -32,6 +32,13 @@ func (s *compileState) projectItems(expressions []kql.Expression, inferAlias boo
 			}
 			continue
 		}
+		if tuple, ok := expression.(*kql.CompoundNamedExpression); ok {
+			if len(tuple.Names) != 1 {
+				s.bindError("KQLB0353", tuple.Span, "expression.projection", "expression does not produce multiple result columns")
+				continue
+			}
+			expression = &kql.NamedExpression{Name: tuple.Names[0], Value: tuple.Value, Span: tuple.Span}
+		}
 		item := sqlast.SelectItem{}
 		bound := boundExpr{}
 		if named, ok := expression.(*kql.NamedExpression); ok {

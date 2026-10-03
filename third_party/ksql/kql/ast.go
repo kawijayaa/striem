@@ -243,6 +243,14 @@ type NamedExpression struct {
 	Value Expression
 	Span  Span
 }
+
+// CompoundNamedExpression assigns names to successive tuple output columns.
+type CompoundNamedExpression struct {
+	Names []string
+	Value Expression
+	Span  Span
+}
+
 type ListExpression struct {
 	Items []Expression
 	Span  Span
@@ -265,26 +273,28 @@ type RawExpression struct {
 	Span   Span
 }
 
-func (*NameExpression) expressionNode()    {}
-func (*LiteralExpression) expressionNode() {}
-func (*StarExpression) expressionNode()    {}
-func (*UnaryExpression) expressionNode()   {}
-func (*BinaryExpression) expressionNode()  {}
-func (*CallExpression) expressionNode()    {}
-func (*IndexExpression) expressionNode()   {}
-func (*NamedExpression) expressionNode()   {}
-func (*ListExpression) expressionNode()    {}
-func (*RawExpression) expressionNode()     {}
-func (*DynamicExpression) expressionNode() {}
+func (*NameExpression) expressionNode()          {}
+func (*LiteralExpression) expressionNode()       {}
+func (*StarExpression) expressionNode()          {}
+func (*UnaryExpression) expressionNode()         {}
+func (*BinaryExpression) expressionNode()        {}
+func (*CallExpression) expressionNode()          {}
+func (*IndexExpression) expressionNode()         {}
+func (*CompoundNamedExpression) expressionNode() {}
+func (*NamedExpression) expressionNode()         {}
+func (*ListExpression) expressionNode()          {}
+func (*RawExpression) expressionNode()           {}
+func (*DynamicExpression) expressionNode()       {}
 
-func (e *NameExpression) NodeSpan() Span    { return e.Span }
-func (e *LiteralExpression) NodeSpan() Span { return e.Span }
-func (e *StarExpression) NodeSpan() Span    { return e.Span }
-func (e *UnaryExpression) NodeSpan() Span   { return e.Span }
-func (e *BinaryExpression) NodeSpan() Span  { return e.Span }
-func (e *CallExpression) NodeSpan() Span    { return e.Span }
-func (e *IndexExpression) NodeSpan() Span   { return e.Span }
-func (e *NamedExpression) NodeSpan() Span   { return e.Span }
-func (e *ListExpression) NodeSpan() Span    { return e.Span }
-func (e *RawExpression) NodeSpan() Span     { return e.Span }
-func (e *DynamicExpression) NodeSpan() Span { return e.Span }
+func (e *NameExpression) NodeSpan() Span          { return e.Span }
+func (e *LiteralExpression) NodeSpan() Span       { return e.Span }
+func (e *StarExpression) NodeSpan() Span          { return e.Span }
+func (e *UnaryExpression) NodeSpan() Span         { return e.Span }
+func (e *BinaryExpression) NodeSpan() Span        { return e.Span }
+func (e *CallExpression) NodeSpan() Span          { return e.Span }
+func (e *IndexExpression) NodeSpan() Span         { return e.Span }
+func (e *CompoundNamedExpression) NodeSpan() Span { return e.Span }
+func (e *NamedExpression) NodeSpan() Span         { return e.Span }
+func (e *ListExpression) NodeSpan() Span          { return e.Span }
+func (e *RawExpression) NodeSpan() Span           { return e.Span }
+func (e *DynamicExpression) NodeSpan() Span       { return e.Span }

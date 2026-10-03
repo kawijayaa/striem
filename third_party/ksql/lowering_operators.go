@@ -74,6 +74,9 @@ func (s *compileState) operator(input Relation, operator kql.Operator) Relation 
 		return s.projectionOperator(from, input.Schema, operator)
 	case "summarize":
 		spec := operator.Body.(kql.SummarizeSpec)
+		if s.hasRowSelection(spec.Aggregates) {
+			return s.summarizeRows(input, spec, operator)
+		}
 		groups := s.expressions(spec.By)
 		groupItems, groupSchema := s.projectItems(spec.By, true, input.Schema, false)
 		if !s.checkNonDynamicColumns(groupSchema.Columns, spanOfExpressions(spec.By), feature) {

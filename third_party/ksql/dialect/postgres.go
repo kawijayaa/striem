@@ -36,3 +36,8 @@ func (postgres) Random() (string, bool)              { return "RANDOM()", true }
 func (postgres) ApplyLimit(sql, limit string) string { return sql + " LIMIT " + limit }
 func (postgres) SupportsNullOrdering() bool          { return true }
 func (postgres) SupportsJoinUsing() bool             { return true }
+
+func (postgres) RankedValue(value, rank string) (string, bool) {
+	// array_agg accepts Boolean and JSON payloads, unlike PostgreSQL MAX.
+	return "(ARRAY_AGG(" + value + ") FILTER (WHERE " + rank + " = 1))[1]", true
+}

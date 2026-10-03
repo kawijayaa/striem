@@ -123,3 +123,15 @@ test('materialized tables complete in source, binding and table argument positio
     assert.equal(context.prefix,prefix,query);
   }
 });
+
+test('row aggregates complete between summarize expressions and scalar functions inside arguments', () => {
+  for (const [query,kind] of [
+    ['Events | summarize arg','aggregation'], ['Events | summarize latest=arg','aggregation'],
+    ['Events | summarize count(), earliest=arg','aggregation'],
+    ['Events | summarize arg_max(n, label), arg','aggregation'],
+    ['let T=materialize(Events|summarize arg','aggregation'],
+    ['Events | summarize arg_max(','expression'], ['Events | summarize arg_max(n, la','expression'],
+    ['Events | summarize arg_max(n,*) by ho','column'], ['Events | project arg','expression'],
+    ['Events | summarize total=count()+arg','expression'],
+  ]) assert.equal(queryCompletionContext(query,query.length).kind,kind,query);
+});

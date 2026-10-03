@@ -158,3 +158,7 @@ func sqliteJSONExtract(value string, keys []string) string {
 	}
 	return "json_extract(" + value + ", " + quoteString(path.String()) + ")"
 }
+
+func (sqlite) RankedValue(value, rank string) (string, bool) {
+	return "MAX(CASE WHEN " + rank + " = 1 THEN " + value + " END)", true
+}

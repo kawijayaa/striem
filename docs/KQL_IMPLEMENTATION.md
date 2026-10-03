@@ -182,3 +182,43 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   multiple-result batches, other dialects and engine differential conformance
   remain open. [Microsoft materialize reference](https://learn.microsoft.com/en-us/kusto/query/materialize-function?view=microsoft-fabric),
   [as operator](https://learn.microsoft.com/en-us/kusto/query/as-operator?view=microsoft-fabric).
+
+- Added schema-bound `arg_max` / `arg_min` and deprecated `argmax` / `argmin`
+  in summarize. Input rows and selector expressions are materialized before
+  per-call ranking, preventing SQLite flattening from reevaluating a
+  nondeterministic source column differently for the ordering key, returned
+  key and sibling aggregate. Each call returns a coherent row; ties and
+  all-null groups select an unspecified representative, with non-null keys
+  taking priority. Multiple selectors and ordinary sibling aggregates retain
+  all group rows. Wildcards exclude grouping/already-returned columns; tuple
+  aliases rename successive results and single aliases rename only the first.
+  Tests execute Microsoft's null examples, empty/grouped inputs, explicit and
+  quoted aliases, legacy names, exact long/date/Boolean keys, dynamic/Boolean
+  payloads, function/cache composition, resource boundaries, SQL schema,
+  parameter order and both compiler parameter modes. Typed API JSON, dataset
+  filtering and FTS rechecks execute through Striem. Autocomplete exposes the
+  functions between summarize expressions and keeps them out of scalar
+  projections and argument positions; browser tests execute completed queries.
+  A timed function fuzz run completed 11,593 executions without a panic.
+  The SQLite and PostgreSQL renderers implement ranked value selection;
+  PostgreSQL uses filtered array aggregation for Boolean/JSON payloads and
+  remains unverified by execution. Known schemas/orderable key types and
+  materialized-binding dialect support are required, with a compiler cap of
+  128 arguments per call plus existing projection/cache/SQL work policies.
+  Correlated inputs, general nested aggregates, tuple expansion in other
+  operators, wildcard function declaration inference, complete conversion
+  identity/name rules, explicit-name replacement, exact case resolution,
+  non-finite/string ordering and Kusto differential conformance remain open.
+  This closes the initial unsupported row-selection gap for the tested forms.
+  [Microsoft arg_max](https://learn.microsoft.com/en-us/kusto/query/arg-max-aggregation-function?view=microsoft-fabric),
+  [arg_min](https://learn.microsoft.com/en-us/kusto/query/arg-min-aggregation-function?view=microsoft-fabric),
+  [aggregate column catalog](https://github.com/microsoft/Kusto-Query-Language/blob/master/src/Kusto.Language/Aggregates.cs),
+  [tuple projection binding](https://github.com/microsoft/Kusto-Query-Language/blob/master/src/Kusto.Language/Binder/Binder_Projection.cs).
+
+- Fixed acceptance of string/Boolean operands in binary arithmetic. SQLite
+  previously coerced such expressions silently (for example, string addition
+  returned a numeric zero), so an invalid selection key could produce a
+  plausible wrong result. Both parameter modes now return positioned binding
+  diagnostics and no SQL for those operand types across all five arithmetic
+  operators. API/application tests cover rejection; broader scalar overload,
+  dynamic and temporal semantics remain incomplete. [Microsoft operator signatures](https://github.com/microsoft/Kusto-Query-Language/blob/master/src/Kusto.Language/Operators.cs).

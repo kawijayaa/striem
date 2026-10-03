@@ -28,7 +28,7 @@ positioned diagnostic and no partial SQL.
 | `parse`, `parse-where`, `parse-kv` | Yes | Opaque | No | No | None | Unsupported; no unchecked UDF lowering |
 | `evaluate bag_unpack` | Yes | Opaque | No | No | None | Unsupported; schema declaration is not yet typed |
 | `dcount` | Yes | Call expression | Diagnostic | No default | None | Approximate KQL semantics require an explicit compatible mapping |
-| `arg_min`, `arg_max` | Yes | Call expression | Diagnostic | No | None | Schema-aware window lowering remains unsupported |
+| `arg_min`, `arg_max`, `argmin`, `argmax` | Yes | Call/tuple assignment | Bound schema | Materialized inputs, per-call rank, selected-value aggregation | SQLite; PostgreSQL rendering | Coherent row per selector, null keys last, independent sibling aggregates; see row-selection guide |
 
 ## SQLite details
 
@@ -68,7 +68,7 @@ return a diagnostic; they are never lowered to `LIKE`.
 
 - Column-selection patterns are supported by `project-away`, `project-keep`, and `project-reorder`. Zero-column outputs remain unsupported; exact-name binding remains case-insensitive. Numeric sorting is verified for ASCII digit runs; Unicode digit collation still needs conformance coverage.
 - Parse operators, schema-declared
-  `bag_unpack`, `arg_min`, `arg_max`, and aggregating `mv-apply` are unsupported.
+  `bag_unpack` and aggregating `mv-apply` are unsupported.
 - Multiple-array expansion is rejected.
 - Union wildcard sources, `withsource`, fuzzy resolution, and zero-column results remain unsupported. SQL backends cannot represent columns differing only in case. The existing type model still conflates decimal/real and guid/string; those distinctions remain pending.
 - SQLite `to typeof(...)` casts do not provide KQL null-on-failure semantics.
@@ -100,3 +100,6 @@ using the same binding mechanism as `materialize()` and `toscalar()`. Without
 the hint, or with `false`, references recalculate the input. Guaranteed caching
 requires SQLite 3.35+ or PostgreSQL 12+; PostgreSQL currently has rendering
 checks only. See [materialized tables](materialized-tables.md).
+
+See [row-selection aggregates](row-selection.md) for examples, tuple naming,
+execution requirements and remaining conformance work.

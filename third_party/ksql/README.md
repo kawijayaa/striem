@@ -76,6 +76,8 @@ The built-in relational compiler currently lowers:
   `distinct`; `extend` replaces existing columns in place
 - exact-name `project-away`, `project-keep`, `project-rename`, and
   `project-reorder`
+- schema-bound [`arg_max`/`arg_min`](docs/row-selection.md), wildcard/tuple output,
+  null-aware row selection, and sibling aggregates
 - `count`, `sort`/`order`, `take`/`limit`, and `top`
 - `sample`, `sample-distinct`, and reusable pipeline aliases with `as`
 - `inner`, `leftouter`, `rightouter`, `fullouter`, `leftsemi`, and `leftanti`
