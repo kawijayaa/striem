@@ -1173,3 +1173,21 @@ test('arbitrary row autocomplete inserts selectors only in aggregation context',
   await editor.press('Control+Space');
   await expect(page.locator('.cm-completionLabel').filter({ hasText: /^take_any(?:if)?$/ })).toHaveCount(0);
 });
+
+
+test('Boolean literal autocomplete executes typed conditional values', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'print result=iff(bo');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^boolean$/ })).toBeVisible();
+  await page.locator('.cm-completionLabel').filter({ hasText: /^bool$/ }).click();
+  await expect(editor).toHaveText('print result=iff(bool()');
+  await editor.pressSequentially('null');
+  await editor.press('End');
+  await editor.pressSequentially(', 1, 2)');
+  await expect(editor).toHaveText('print result=iff(bool(null), 1, 2)');
+  await run(page, 1);
+  await expect(page.locator('#result-body')).toContainText('2');
+});

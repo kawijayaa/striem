@@ -241,3 +241,26 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   not establish full-language conformance.
   [take_any reference](https://learn.microsoft.com/en-us/kusto/query/take-any-aggregation-function),
   [take_anyif reference](https://learn.microsoft.com/en-us/kusto/query/take-anyif-aggregation-function).
+
+
+- Added represented common-type inference and numeric casts across `iff`/`iif`,
+  `case` and `coalesce`; formerly an unselected real branch could lose type
+  promotion and cause integer division on the selected integer branch. Known
+  predicates/logical operands now require Boolean types. Boolean literal
+  constructors retain metadata. Coalesce skips empty strings, with signature
+  limits checked before argument expansion. Heterogeneous non-dynamic
+  conditional branches use typed JSON scalar encoding, preserving Boolean,
+  exact long and string/NUL values through SQL and the HTTP API. Nested unary
+  arithmetic retains parentheses without losing the signed-minimum integer
+  token. Tests cover schema, both parameter modes, boundaries, execution counts,
+  diagnostics, exact wire integers, and composition; PostgreSQL remains
+  render-only. All-empty string coalescing is characterization pending engine
+  verification. Mixed existing dynamic/scalar conditionals and temporal dynamic
+  encoding are explicit unsupported paths; legacy dynamic/string coalesce still
+  needs tagged conversion. Unary int columns promote to long while literal/cast constants retain int.
+  Full dynamic tags, constant purity, scalar overloads, constant folding and null semantics remain incomplete. The official
+  logical-operator page contradicts the null-value page on some truth-table
+  entries, so current SQL three-valued behavior is not certified as complete.
+  [Common-type binder](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Symbols/TypeFacts.cs),
+  [coalesce](https://learn.microsoft.com/en-us/kusto/query/coalesce-function),
+  [null semantics](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/null-values).

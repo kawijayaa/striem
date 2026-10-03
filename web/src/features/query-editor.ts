@@ -30,7 +30,7 @@ const logicalOperators = new Set([
   'hassuffix', 'hassuffix_cs', 'has_any', 'has_all',
 ]);
 const functions = new Set([
-  'now', 'ago', 'datetime', 'toscalar', 'materialize', 'arg_max', 'arg_min', 'argmax', 'argmin', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
+  'now', 'ago', 'datetime', 'bool', 'boolean', 'toscalar', 'materialize', 'arg_max', 'arg_min', 'argmax', 'argmin', 'tostring', 'toint', 'tolong', 'toreal', 'tobool', 'toboolean', 'todouble', 'tolower', 'toupper', 'isnull',
   'isnotnull', 'isempty', 'isnotempty', 'parse_json', 'parse_csv', 'parse_xml', 'parsejson', 'todynamic', 'toobject', 'array_length', 'array_concat', 'array_iff', 'array_iif', 'array_index_of', 'array_sum', 'series_sum', 'zip', 'array_reverse', 'array_slice', 'array_split', 'array_rotate_left', 'array_rotate_right', 'array_shift_left', 'array_shift_right', 'bag_keys', 'todatetime',
   'base64_decode_tostring', 'url_decode', 'parse_url', 'parseurl', 'parse_urlquery', 'parseurlquery', 'bag_has_key', 'set_has_element', 'set_union', 'set_intersect', 'set_difference', 'set_equals', 'jaccard_index',
   'ipv4_is_private', 'ipv4_is_in_range',
@@ -83,6 +83,7 @@ const rowSelectionCompletions = createCompletions('function', [
 
 const functionCompletions = createCompletions('function', [
   ['now', 'Current UTC time'], ['ago', 'Relative UTC time'], ['datetime', 'Datetime literal'],
+  ['bool', 'Boolean literal: true, false or null'], ['boolean', 'Alias for bool literals'],
   ['tostring', 'Convert to string'], ['toint', 'Convert to integer'], ['tolong', 'Convert to long'],
   ['toreal', 'Convert to real'], ['todouble', 'Convert to double'],
   ['tolower', 'Lowercase text'], ['toupper', 'Uppercase text'], ['isnull', 'Test for null'],

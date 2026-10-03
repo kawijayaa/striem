@@ -344,6 +344,8 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 		node.Else = normalizeDateTimeExpr(node.Else)
 	case *sqlast.Cast:
 		node.Expr = normalizeDateTimeExpr(node.Expr)
+	case *sqlast.DynamicValue:
+		node.Value = normalizeDateTimeExpr(node.Value)
 	case *sqlast.Index:
 		node.Value = normalizeDateTimeExpr(node.Value)
 		node.Index = normalizeDateTimeExpr(node.Index)
