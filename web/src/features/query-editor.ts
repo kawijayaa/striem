@@ -66,6 +66,14 @@ const operatorCompletions = createCompletions('keyword', [
   ['invoke', 'Apply a query function to this table'],
 ], label => `${label} `);
 
+const commandCompletions = createCompletions('keyword', [
+  ['.show tables', 'List available tables'], ['.show table', 'Show the schema of one table'],
+], label => label === '.show table' ? `${label} ` : label);
+const commandSchemaCompletions = createCompletions('keyword', [
+  ['cslschema', 'Show column names and KQL types'], ['kqlschema', 'Alias for cslschema'],
+  ['schema as json', 'Show ordered column metadata as JSON text'],
+], label => label);
+
 const tabularFunctionCompletions = createCompletions('function', [
   ['materialize', 'Cache a table once for reuse during this query'],
 ], label => `${label}()`);
@@ -188,7 +196,10 @@ export function createQueryEditor(options: QueryEditorOptions): QueryEditor {
   const completionSource = (context: CompletionContext) => {
     const target = queryCompletionContext(context.state.doc.toString(), context.pos);
     if (!target || (!context.explicit && !target.prefix && !/[\s(,|)\]"']$/.test(context.state.sliceDoc(0, context.pos)))) return null;
-    const completions = target.kind === 'source' ? [...options.getTableCompletions(), ...tabularFunctionCompletions,
+    const completions = target.kind === 'management' ? commandCompletions
+      : target.kind === 'management_table' ? options.getTableCompletions()
+      : target.kind === 'management_schema' ? commandSchemaCompletions
+      : target.kind === 'source' ? [...options.getTableCompletions(), ...tabularFunctionCompletions,
       ...operatorCompletions.filter(completion => completion.label === 'let'),
       { label: 'print', type: 'keyword', apply: 'print ' },
       { label: 'range', type: 'keyword', apply: 'range ' }]

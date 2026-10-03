@@ -54,6 +54,8 @@ internal/kql/        Independent KSQL compiler adapters and SQLite mappings
 web/src/             TypeScript application and Tailwind/CSS interface
 ```
 
+Read-only management commands use the logical database namespace `striem`: `.show tables`, `.show tables (Telemetry)`, and `.show table Telemetry cslschema` or `schema as json`. Their results support ordinary query pipelines, such as `.show tables | project TableName`. See [KQL implementation status](docs/KQL_IMPLEMENTATION.md) for remaining management and service work.
+
 The API parses and compiles every query into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
 
 Configuration:

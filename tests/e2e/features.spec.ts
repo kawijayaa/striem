@@ -1223,3 +1223,24 @@ test('conditional aggregate autocomplete executes and excludes row expressions',
     await expect(page.locator('.cm-completionLabel').filter({ hasText: /^variance(?:p|if|pif)?$/ })).toHaveCount(0);
   }
 });
+
+test('management autocomplete executes catalog and schema command pipelines', async ({ page }) => {
+  await open(page);
+  const editor=page.locator('.cm-content');
+  await edit(page,'.sh');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({hasText:/^\.show tables$/}).click();
+  await expect(editor).toHaveText('.show tables');
+  await editor.press('End');
+  await editor.pressSequentially(' | where TableName == "Telemetry" | project TableName');
+  await run(page,1);
+  await expect(page.locator('#result-body')).toContainText('Telemetry');
+  await edit(page,'.show table Telemetry sch');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({hasText:/^schema as json$/}).click();
+  await expect(editor).toHaveText('.show table Telemetry schema as json');
+  await run(page,1);
+  await expect(page.locator('#result-body')).toContainText('System.DateTime');
+});

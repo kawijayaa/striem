@@ -195,7 +195,16 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		fullTextTerms = leadingSearchTerms(source)
 	}
 	catalog := newCatalog(tables)
+	metadata := ksql.ManagementCatalog{}
+	managementCommand := false
+	if tokens, _ := ksqlkql.Lex(source); len(tokens) > 0 && tokens[0].Text == "." {
+		managementCommand = true
+		metadata = managementCatalog(tables)
+	}
 	options := append(compilerOptions(now.UTC()), compatibilityOptions()...)
+	if managementCommand {
+		options = append(options, ksql.WithManagementCatalog(metadata))
+	}
 	options = append(options,
 		ksql.WithCatalog(catalog),
 		ksql.WithSource("table", tableSource(tables, fullTextTerms)),

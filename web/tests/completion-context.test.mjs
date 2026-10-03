@@ -2,6 +2,31 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { queryCompletionContext } from '../src/features/completion-context.ts';
 
+test('management commands complete standalone headers, table names and schema formats', () => {
+  for (const [query, kind, prefix] of [
+    ['.sh', 'management', '.sh'], ['// note\n.show tabl', 'management', '.show tabl'],
+    ['.show table ', 'management_table', ''], ['.show table Eve', 'management_table', 'Eve'],
+    ['.show table Events schema as j', 'management_schema', 'schema as j'],
+    ['.show table ["space name"] cs', 'management_schema', 'cs'],
+    ['.show tables | pro', 'operator', 'pro'],
+  ]) {
+    const context=queryCompletionContext(query,query.length);
+    assert.equal(context.kind,kind,query);
+    assert.equal(context.prefix,prefix,query);
+  }
+  for (const [query, position, replacement] of [
+    ['.show tables | count', 3, '.show tables'],
+    ['.show table Events cslschema', 18, 'Events'],
+    ['.show table Events schema as json', 29, 'schema as json'],
+  ]) {
+    const context=queryCompletionContext(query,position);
+    assert.equal(query.slice(context.from,context.to),replacement,query);
+  }
+  for (const query of ['let x=(.sh', 'Events | join (.sh', 'print ".sh']) {
+    assert.ok(!queryCompletionContext(query,query.length)?.kind.startsWith('management'),query);
+  }
+});
+
 test('completion stays out of comments, escaped, verbatim and multiline strings', () => {
   for (const query of [
     'Events // ho', 'Events | where host == "ho', "Events | where host == 'ho",

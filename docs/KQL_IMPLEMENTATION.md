@@ -307,3 +307,28 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   conformance remain open. Management and external services remain unfinished.
   [Pinned aggregate scope](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language/Binder/Binder_Names.cs),
   [summarize cardinality](https://learn.microsoft.com/en-us/kusto/query/summarize-operator?view=azure-monitor).
+
+- Added initial management command support in the independent KSQL compiler:
+  dot-prefixed command ASTs, standalone command scope and catalog-backed
+  `.show tables` (including table selections) and `.show table <name>`
+  `cslschema`/`kqlschema`/`schema as json`. Results can use ordinary query
+  pipelines. Striem exposes its logical `striem` namespace, Events aggregate
+  view and deployment table views from the refreshed catalog; it does not
+  fabricate cluster state, extent statistics, principals or service results.
+  Schema remains a string, with represented KQL/.NET type names in JSON.
+  Missing catalogs, unknown tables/types, invalid headers, nested commands and
+  unavailable command runtimes return positioned diagnostics and no SQL.
+  Snapshots and generated metadata have explicit table/column/byte bounds,
+  including repeated database-name payloads. Both compiler parameter modes,
+  SQLite execution, HTTP validation/refresh, quoting, schema types, context
+  isolation and autocomplete are tested; a browser test runs completed commands.
+  PostgreSQL remains render/parameter-only. The pinned metadata schema includes
+  DocString, despite some current reference tables listing only four columns.
+  Exact serialization, service case/missing/duplicate behavior and differential
+  conformance remain open. Other command families are opaque/unavailable;
+  complete grammar/inventory, mutations/transactions, policies, authorization,
+  scripts, ingestion/export and external-service integration remain in scope
+  and incomplete. This increment does not establish full management support.
+  [Show tables](https://learn.microsoft.com/en-us/kusto/management/show-tables-command?view=microsoft-fabric),
+  [table schema](https://learn.microsoft.com/en-us/kusto/management/show-table-schema-command?view=microsoft-fabric),
+  [pinned result signatures](https://github.com/microsoft/Kusto-Query-Language/blob/c94c9e761b3d095e2b9c21e3ec3e92afa0af4856/src/Kusto.Language.Generators/EngineCommandInfos.cs).

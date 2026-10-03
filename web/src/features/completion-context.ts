@@ -3,7 +3,7 @@ import { expressionOperatorWords } from './expression-operators.ts';
 export interface QueryCompletionContext {
   from: number;
   to: number;
-  kind: 'source' | 'table' | 'binding' | 'aggregation' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
+  kind: 'management' | 'management_table' | 'management_schema' | 'source' | 'table' | 'binding' | 'aggregation' | 'operator' | 'expression' | 'column' | 'comparison' | 'sort';
   prefix: string;
 }
 
@@ -62,6 +62,18 @@ function queryCodeBeforeCursor(source: string): string | null {
 export function queryCompletionContext(query: string, position: number): QueryCompletionContext | null {
   const code = queryCodeBeforeCursor(query.slice(0, position));
   if (code === null) return null;
+  // Commands are standalone roots; never suggest them inside query subexpressions.
+  const commandTable = code.match(/^\s*\.show[ \t]+table[ \t]+([A-Za-z_][A-Za-z_0-9]*)?$/i);
+  const commandSchema = code.match(/^\s*\.show[ \t]+table[ \t]+(?:[A-Za-z_][A-Za-z_0-9]*|\[\s*0\s*\]|0)[ \t]+([A-Za-z \t]*)$/i);
+  const commandHeader = code.match(/^\s*(\.[A-Za-z]*(?:[ \t]+[A-Za-z]*)?)$/);
+  if (commandSchema || commandTable || commandHeader) {
+    const prefix = commandSchema?.[1] ?? commandTable?.[1] ?? (commandTable ? '' : commandHeader?.[1]) ?? '';
+    const suffix = commandHeader && !commandTable && !commandSchema
+      ? query.slice(position).match(/^[A-Za-z_0-9]*(?:[ \t]+tables?\b)?/i)?.[0] ?? ''
+      : query.slice(position).match(/^[A-Za-z_0-9]*/)?.[0] ?? '';
+    return { from: position - prefix.length, to: position + suffix.length,
+      prefix, kind: commandSchema ? 'management_schema' : commandTable ? 'management_table' : 'management' };
+  }
   // A completed subquery must not keep controlling the outer expression.
   const scopes = [{ pipe: -1, statement: -1 }];
   for (let index = 0; index < code.length; index++) {
