@@ -37,7 +37,7 @@ const functions = new Set([
   'count', 'countif', 'sumif', 'iff', 'case', 'coalesce', 'strlen', 'substring', 'indexof', 'replace',
   'strcat', 'sum', 'min', 'max', 'avg', 'split', 'extract', 'extract_all', 'extractall', 'trim', 'trim_start', 'trim_end', 'replace_string', 'replace_strings', 'replace_regex',
   'variance', 'variancep', 'varianceif', 'variancepif', 'stdev', 'stdevp', 'stdevif', 'stdevpif',
-  'pack_array', 'repeat', 'bag_pack', 'pack', 'pack_dictionary', 'bag_merge', 'bag_zip', 'bag_remove_keys', 'bag_set_key', 'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any',
+  'pack_array', 'repeat', 'bag_pack', 'pack', 'pack_dictionary', 'bag_merge', 'bag_zip', 'bag_remove_keys', 'bag_set_key', 'make_set', 'make_list', 'make_bag', 'make_bag_if', 'make_dictionary', 'take_any', 'any', 'take_anyif', 'anyif',
   'not', 'bin', 'dcount', 'dcountif', 'count_distinct', 'count_distinctif', 'avgif', 'minif', 'maxif',
   'startofday', 'endofday', 'startofweek', 'endofweek', 'startofmonth', 'endofmonth', 'startofyear', 'endofyear',
 ]);
@@ -75,6 +75,10 @@ const rowSelectionCompletions = createCompletions('function', [
   ['arg_min', 'Return values from the row with the minimum key in each group'],
   ['argmax', 'Legacy alias for arg_max with prefixed result names'],
   ['argmin', 'Legacy alias for arg_min with prefixed result names'],
+  ['take_any', 'Return expressions from one arbitrary record in each group'],
+  ['take_anyif', 'Select a nonempty group value where the predicate is true'],
+  ['any', 'Legacy alias for take_any with prefixed result names'],
+  ['anyif', 'Legacy alias for take_anyif with prefixed result names'],
 ], label => `${label}()`);
 
 const functionCompletions = createCompletions('function', [
@@ -114,7 +118,6 @@ const functionCompletions = createCompletions('function', [
   ['count', 'Count rows'], ['countif', 'Conditional count'], ['sumif', 'Conditional sum'],
   ['sum', 'Sum values'], ['min', 'Minimum value'], ['max', 'Maximum value'], ['avg', 'Average value'],
   ['make_set', 'Collect distinct values'], ['make_list', 'Collect values'],
-  ['take_any', 'Select a group value'],
   ['make_bag', 'Merge property bags in a group'], ['make_bag_if', 'Merge property bags matching a predicate'],
   ['make_dictionary', 'Legacy property bag aggregate'],
   ['not', 'Negate a Boolean expression'], ['bin', 'Round down to a numeric or time bucket'],

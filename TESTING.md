@@ -19,7 +19,7 @@ The browser suite starts two isolated servers on ports 18081 and 18082. Each ser
 For the Docker checks:
 
 ```sh
-docker build -t striem-feature-test .
+docker build --build-context ksql=../ksql -t striem-feature-test .
 python3 tests/e2e/docker-smoke.py
 ```
 

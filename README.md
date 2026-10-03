@@ -8,7 +8,7 @@ The interface includes live preflight query diagnostics, table and field complet
 
 ## Run
 
-Local development requires Node.js 22, Go 1.24, and a C toolchain for the SQLite dependency.
+Local development requires Node.js 22, Go 1.24, a C toolchain for SQLite, and the independent [KSQL repository](https://github.com/kawijayaa/ksql) checked out at `../ksql`. Striem uses that sibling Go module directly; compiler source is not bundled here.
 
 ```bash
 npm ci
@@ -219,7 +219,7 @@ Striem has no built-in authentication. Do not expose it directly to untrusted ne
 ### Build locally
 
 ```bash
-docker build -t striem .
+docker build --build-context ksql=../ksql -t striem .
 ```
 
 The Dockerfile uses separate Node.js and Go build stages. The Node.js stage installs the locked frontend dependencies, performs the strict TypeScript check, and builds the Tailwind/Vite assets. The Go stage embeds those generated assets into a single stripped binary. The runtime image contains only the binary and its writable `/data` volume; Node.js, the TypeScript sources, and build tools are not included.
@@ -268,7 +268,7 @@ Press `Shift+Enter` in the query editor to run the current query. Press `Ctrl+En
 
 The navigation bar shows the project and challenge names. The browser keeps recent hunts, named saved hunts, and answer drafts in local storage. Copy link creates a URL containing the current query. Results that include `TimeGenerated` display a selectable histogram of the visible rows.
 
-KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) with a bundled development snapshot in `third_party/ksql` (based on v0.4.0). Supported tabular operators are:
+KQL parsing, schema binding, and relational SQL lowering are provided by [`github.com/kawijayaa/ksql`](https://github.com/kawijayaa/ksql) from the independent sibling checkout at `../ksql`. Supported tabular operators are:
 
 ```text
 where, filter, search, project, project-away, project-keep, project-rename,
@@ -285,7 +285,7 @@ mv-expand, mv-apply, union, join, lookup, getschema
 
 Supported scalar operators include arithmetic and comparisons, Boolean `and`/`or`, membership with `in`, `!in`, `in~`, and `!in~`, ranges with `between`, and `contains`, `startswith`, and `endswith` string matching. Striem's bounded SQLite regular-expression adapter also supports literal alphanumeric terms with `has`, `has_cs`, `hasprefix`, `hassuffix`, their negated forms, `has_any`, and `has_all`.
 
-The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, `make_bag`, `make_bag_if`, and `take_any`.
+The compiler supports common casts, conditionals, string and mathematical functions, plus `count`, `countif`, `sumif`, `sum`, `min`, `max`, and `avg`. Striem also maps its bounded SQLite helpers and aggregates: `now`, `ago`, `todatetime`, `parse_json`, `array_length`, `bag_keys`, `bag_has_key`, `set_has_element`, `base64_decode_tostring`, `url_decode`, `ipv4_is_private`, `ipv4_is_in_range`, `split`, `extract`, `trim`, `replace_string`, `make_set`, `make_list`, `make_bag`, `make_bag_if`. KSQL implements `take_any`, `take_anyif`, and deprecated `any`/`anyif` as coherent row selectors rather than independent column minima.
 
 `toint`, `tolong`, `toreal`, and `todouble` return null for invalid numeric text or overflow. Integer conversions truncate toward zero; `toint` enforces signed 32-bit bounds and `tolong` enforces signed 64-bit bounds. `tobool` and `toboolean` accept Boolean text and numeric inputs.
 
@@ -376,4 +376,4 @@ go test -race ./...
 
 Browser tests use temporary databases and fixtures on ports 18081 and 18082. They do not modify the configured deployment. See [TESTING.md](TESTING.md) for feature coverage and remaining limits.
 
-The compiler snapshot is portable across local and Docker builds. Refresh it from the companion checkout with `python3 scripts/sync-ksql.py ../ksql`; the snapshot retains its license and records source hashes in `third_party/ksql/SNAPSHOT.json`. Run its tests separately with `cd third_party/ksql && go test ./...`. Full-language implementation progress is tracked in [docs/KQL_IMPLEMENTATION.md](docs/KQL_IMPLEMENTATION.md).
+KSQL remains a separate repository. Run its tests with `cd ../ksql && go test ./...`. Docker builds receive the sibling checkout as the named `ksql` build context, so no compiler copy is needed in this repository. CI checks out the compiler at the explicit commit recorded in each Docker workflow; that commit must be published to KSQL before remote builds can use it. Full-language implementation progress is tracked in [docs/KQL_IMPLEMENTATION.md](docs/KQL_IMPLEMENTATION.md).

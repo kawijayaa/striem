@@ -24,4 +24,4 @@ require (
 	www.velocidex.com/golang/go-pe v0.1.1-0.20211006062218-8f6d1ad6b2d5 // indirect
 )
 
-replace github.com/kawijayaa/ksql => ./third_party/ksql
+replace github.com/kawijayaa/ksql => ../ksql

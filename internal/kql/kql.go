@@ -579,7 +579,6 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("isempty", emptyFunction(false)),
 		ksql.WithFunction("isnotempty", emptyFunction(true)),
 		ksql.WithFunction("make_set", ksql.SQLFunction("kql_make_set_value")),
-		ksql.WithFunction("take_any", ksql.SQLFunction("min")),
 	}
 }
 

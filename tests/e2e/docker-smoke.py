@@ -64,6 +64,10 @@ datasets:
         docker('exec', name, 'wget', '-qO', '/tmp/font.woff2', 'http://127.0.0.1:8080/fonts/plex-mono-400.woff2')
         assert int(docker('exec', name, 'stat', '-c', '%s', '/tmp/font.woff2')) > 1000
         assert post('/api/query', {'query': 'Fixture | search "alpha" | count'})['rows'][0]['Count'] == 1
+        sample = post('/api/query', {'query': 'datatable(n:long,s:string)[9,"first",1,"last"] | summarize take_any(n,s)'})['rows'][0]
+        assert (sample['n'], sample['s']) in [(9, 'first'), (1, 'last')]
+        sample = post('/api/query', {'query': 'datatable(n:long,b:bool)[1,false,2,true] | summarize selected=take_anyif(b,n==2),missing=take_anyif(n,false)'})['rows'][0]
+        assert sample['selected'] is True and sample['missing'] is None
         for kind, expected in [('innerunique', 1), ('rightsemi', 1), ('rightanti', 0)]:
             query = f'Fixture | join kind={kind} (Fixture) on host | count'
             assert post('/api/query', {'query': query})['rows'][0]['Count'] == expected
@@ -72,6 +76,6 @@ datasets:
         ready()
         assert json.loads(get('/api/questions'))['flag'] == 'flag{docker_pass}'
         assert post('/api/query', {'query': 'Events | count'})['rows'][0]['Count'] == 1
-        print('PASS: non-root read-only container, readiness, assets/fonts, FTS query, challenge, restart persistence')
+        print('PASS: non-root read-only container, readiness, assets/fonts, FTS query, coherent row selection, challenge, restart persistence')
     finally:
         subprocess.run(['docker', 'stop', name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

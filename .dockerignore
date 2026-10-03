@@ -9,3 +9,7 @@ web/dist
 testdata
 deploy/
 .impeccable/
+.ksql/
+T3_SESSION_MEMORY.md
+test-results/
+playwright-report/

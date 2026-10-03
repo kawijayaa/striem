@@ -8,15 +8,15 @@ For each construct, evidence must cover syntax, binding/type inference, executio
 
 ## Authoritative inventory
 
-The companion KSQL checkout has a feature ledger covering more than 650 entries. Its pinned Microsoft source is recorded in `third_party/ksql/inventory/source.json`. The pinned catalog includes 397 scalar functions, 24 conversion entries, 61 aggregates, 8 window entries, and 47 plugins, plus operators, sources, statements, and scalar operators. Registry entries can overlap.
+The companion KSQL checkout has a feature ledger covering more than 650 entries. Its pinned Microsoft source is recorded in `../ksql/inventory/source.json`. The pinned catalog includes 397 scalar functions, 24 conversion entries, 61 aggregates, 8 window entries, and 47 plugins, plus operators, sources, statements, and scalar operators. Registry entries can overlap.
 
 `features.All()` and `features.JSON()` expose the baseline. The ledger distinguishes inventory, recognition, translation, and semantics. It is a starting inventory, **not evidence that everything marked equivalent has complete Kusto behavior**, and must be reconciled against the current Microsoft language/reference as implementation proceeds. Newer features remain in scope.
 
 ## Current integration
 
 - The source of compiler development is the companion `ksql` repository.
-- Striem builds against a portable snapshot in `third_party/ksql` using a module replacement. It does not depend on a developer's home-directory layout.
-- `scripts/sync-ksql.py` refreshes source/tests/license/docs and records hashes and the upstream base commit. Changes in the companion checkout are included, even before release.
+- Striem resolves its compiler module directly from the independent sibling checkout at `../ksql`. No compiler snapshot or synchronization script is kept in this repository.
+- Docker receives that checkout through `--build-context ksql=../ksql`; CI checks out an explicit KSQL commit separately. Compiler changes must be published there before remote CI can fetch them.
 - SQLite runtime adapters remain in `internal/database`; application mappings and compatibility tests remain in `internal/kql`.
 - The compiler's `not()` implementation now supplies Boolean metadata directly. The former application metadata-recovery workaround was removed.
 
@@ -103,7 +103,7 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 8. **Product integration:** completion/highlighting, API contracts, render directives/chart presentation, query diagnostics/cancellation/limits, browser execution, deployment and migration support.
 9. **Conformance:** official documented examples, operator composition, differential fixtures against Kusto where available, adversarial/resource cases, platform coverage, current-catalog reconciliation, and a requirement-by-requirement completion audit.
 
-Known existing semantic differences remain open: exact bounded `dcount` differs from Kusto approximation; `take_any` currently maps to a minimum; some SQLite conversions and string indexing differ from KQL; chronology/serialization and dynamic output metadata need broader review. Existing behavior must be corrected as part of full support, rather than declared sufficient.
+Known existing semantic differences remain open: exact bounded `dcount` differs from Kusto approximation; some SQLite conversions and string indexing differ from KQL; chronology/serialization and dynamic output metadata need broader review. Existing behavior must be corrected as part of full support, rather than declared sufficient.
 
 ### Property bag merge and removal
 
@@ -222,3 +222,22 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
   diagnostics and no SQL for those operand types across all five arithmetic
   operators. API/application tests cover rejection; broader scalar overload,
   dynamic and temporal semantics remain incomplete. [Microsoft operator signatures](https://github.com/microsoft/Kusto-Query-Language/blob/master/src/Kusto.Language/Operators.cs).
+
+
+- Replaced Striem's incorrect `take_any -> min` mapping with native KSQL row
+  selection. `take_any` and `any` return a coherent record across all payloads,
+  support wildcard/tuple output, and preserve Boolean/dynamic metadata.
+  `take_anyif` and `anyif` restrict selection to true predicates and return null
+  when no records qualify while retaining complete groups for sibling aggregates.
+  A single expression prefers non-null/non-empty values. Input and expressions
+  are cached before ranking; counting-function tests verify single evaluation
+  and freshness per execution. Tests cover both parameter modes, datasets,
+  aliases, null/empty groups, type/naming metadata, function/cache composition,
+  invalid predicates, resource limits, HTTP output and aggregate completion.
+  SQLite is execution-tested; PostgreSQL remains rendering-only. Unknown scalar
+  types, correlated caching, full dynamic tags/naming/case semantics, other
+  dialects and Kusto differential conformance remain open. Management commands
+  and external services remain in scope and unimplemented; this increment does
+  not establish full-language conformance.
+  [take_any reference](https://learn.microsoft.com/en-us/kusto/query/take-any-aggregation-function),
+  [take_anyif reference](https://learn.microsoft.com/en-us/kusto/query/take-anyif-aggregation-function).

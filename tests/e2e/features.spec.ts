@@ -1151,3 +1151,25 @@ test('row-selection autocomplete inserts aggregates and executes latest events p
   await editor.press('Control+Space');
   await expect(page.locator('.cm-completionLabel').filter({hasText:/^arg_max$/})).toHaveCount(0);
 });
+
+
+test('arbitrary row autocomplete inserts selectors only in aggregation context', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'Telemetry | summarize take_any');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^take_anyif$/ })).toBeVisible();
+  await page.locator('.cm-completionLabel').filter({ hasText: /^take_any$/ }).click();
+  await expect(editor).toHaveText('Telemetry | summarize take_any()');
+  await editor.pressSequentially('score, user');
+  await run(page, 1);
+  await edit(page, 'Telemetry | project take_any');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^take_any(?:if)?$/ })).toHaveCount(0);
+  await edit(page, 'Telemetry | summarize take_any(score, take_any');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^take_any(?:if)?$/ })).toHaveCount(0);
+});
