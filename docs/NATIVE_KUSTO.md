@@ -47,6 +47,13 @@ in `query`. Both require `Content-Type: application/json` and
 Unknown request fields, empty text, text above 32 KiB, bodies above 64 KiB and
 trailing JSON are rejected before contacting Kusto.
 
+Native queries also accept optional `"progressive": true`. This requests Kusto's
+progressive wire format. Striem reconstructs the final tables and sends a single
+JSON response after all completion records pass. Append and replacement fragments
+can interleave across tables. Management requests reject progressive mode.
+If supplied, the progressive flag must be a Boolean; parameter values must be
+strings. Explicit null flags and null parameter values are rejected.
+
 Query requests set the service's `request_readonly` property; callers cannot
 override it through request options. Management requests have no such restriction
 once explicitly enabled. Cross-database/cluster references and external services
@@ -65,6 +72,7 @@ Successful responses contain `tables`, `requestId` and `activityId`:
     "columns": [{"name": "Count", "type": "long"}],
     "rows": [[9223372036854775807]]
   }],
+  "progressive": false,
   "requestId": "KSQL;...",
   "activityId": "..."
 }
@@ -72,7 +80,10 @@ Successful responses contain `tables`, `requestId` and `activityId`:
 
 All tables and native column types are retained. JSON numbers remain exact on
 the wire; consumers that need exact longs/decimals must use a lossless JSON
-decoder rather than converting all numbers to JavaScript `Number`.
+decoder rather than converting all numbers to JavaScript `Number`. The response
+`progressive` flag records the service's wire format. If progress frames appeared,
+each table includes its last `progress` percentage. Successful completion does
+not require that estimate to reach 100; completion records determine success.
 
 Unconfigured execution returns 404; disabled management returns 403. Request
 validation errors return 400 or 415. Upstream semantic errors return 400 and
@@ -82,7 +93,8 @@ deadline expiry returns 504. Service errors include correlation IDs, with no
 partial tables or raw service error details exposed to the browser.
 
 The native deadline is 30 seconds. Response bytes and decoded table/row/cell
-counts are bounded by the KSQL client. Oversize results fail rather than
+counts and v2 frame counts are bounded by the KSQL client, including rows/cells
+evicted by replacement fragments. Oversize results fail rather than
 truncate. Requests are not retried by the application. A management transport
 failure can leave its execution outcome uncertain.
 
@@ -91,11 +103,13 @@ failure can leave its execution outcome uncertain.
 TLS mock-service tests cover forwarding, typed multi-table results, exact
 integers, parameter separation, read-only query properties, management opt-in,
 input/origin guards, failure redaction and coexistence with SQLite queries.
+Progressive tests cover replacement, exact values, progress metadata, read-only
+properties, malformed completion, partial failure and management rejection.
 Startup tests cover configuration, token rotation and file failures. Live
 cluster execution has not been verified.
 
 Native schema/editor integration, service validation, user/delegated identity
-flows, progressive streaming, queued/streaming ingestion and upload protocols,
+flows, public network streaming/progress delivery, queued/streaming ingestion and upload protocols,
 operation polling, command-specific result interpretation and live-service
 conformance remain unfinished. The complete KQL implementation goal remains
 open; service forwarding does not complete local compiler support.

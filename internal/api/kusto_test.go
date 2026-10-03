@@ -136,7 +136,7 @@ func TestNativeKustoAPIGuards(t *testing.T) {
 	if err := apiServer.SetNativeKusto(NativeKustoConfig{Client: client, Database: "Native"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, body := range []string{`{}`, `{"query":""}`, `{"query":"print x=1","database":"Other"}`, `{"query":"print x=1","options":{"request_readonly":false}}`, `{"query":"print x=1","parameters":{"p":123}}`, `{"query":"print x=1"}{}`, `{"query":"` + strings.Repeat("x", 32769) + `"}`, `{"query":"\xff"}`, strings.Repeat(" ", 65537)} {
+	for _, body := range []string{`{}`, `{"query":""}`, `{"query":"print x=1","database":"Other"}`, `{"query":"print x=1","options":{"request_readonly":false}}`, `{"query":"print x=1","parameters":{"p":123}}`, `{"query":"print x=1","parameters":{"p":null}}`, `{"query":"print x=1","progressive":null}`, `{"query":"print x=1"}{}`, `{"query":"` + strings.Repeat("x", 32769) + `"}`, `{"query":"\xff"}`, strings.Repeat(" ", 65537)} {
 		request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/kusto/query", strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Striem-Request", "1")

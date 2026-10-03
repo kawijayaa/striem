@@ -65,8 +65,9 @@ func (s *Server) executeNativeKusto(w http.ResponseWriter, r *http.Request, mana
 		return
 	}
 	var request struct {
-		Query      string            `json:"query"`
-		Parameters map[string]string `json:"parameters"`
+		Query       string                     `json:"query"`
+		Parameters  map[string]json.RawMessage `json:"parameters"`
+		Progressive json.RawMessage            `json:"progressive"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
@@ -79,9 +80,27 @@ func (s *Server) executeNativeKusto(w http.ResponseWriter, r *http.Request, mana
 		writeError(w, http.StatusBadRequest, "request must contain one JSON object", nil)
 		return
 	}
+	progressive := false
+	if len(request.Progressive) > 0 && (bytes.Equal(bytes.TrimSpace(request.Progressive), []byte("null")) || json.Unmarshal(request.Progressive, &progressive) != nil) {
+		writeError(w, http.StatusBadRequest, "progressive must be a boolean", nil)
+		return
+	}
+	parameters := make(map[string]string, len(request.Parameters))
+	for name, raw := range request.Parameters {
+		var value string
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil {
+			writeError(w, http.StatusBadRequest, "query parameter values must be strings", nil)
+			return
+		}
+		parameters[name] = value
+	}
+	if management && progressive {
+		writeError(w, http.StatusBadRequest, "progressive results require the native query endpoint", nil)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	serviceRequest := kusto.Request{Database: config.Database, Text: request.Query, Parameters: request.Parameters}
+	serviceRequest := kusto.Request{Database: config.Database, Text: request.Query, Parameters: parameters, Progressive: progressive}
 	var result *kusto.Result
 	if management {
 		result, err = config.Client.Management(ctx, serviceRequest)
@@ -124,9 +143,9 @@ func (s *Server) executeNativeKusto(w http.ResponseWriter, r *http.Request, mana
 		if rows == nil {
 			rows = [][]json.RawMessage{}
 		}
-		tables = append(tables, nativeTable{table.ID, table.Kind, table.Name, columns, rows})
+		tables = append(tables, nativeTable{ID: table.ID, Kind: table.Kind, Name: table.Name, Columns: columns, Rows: rows, Progress: table.Progress})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tables": tables, "requestId": result.RequestID, "activityId": result.ActivityID})
+	writeJSON(w, http.StatusOK, map[string]any{"tables": tables, "requestId": result.RequestID, "activityId": result.ActivityID, "progressive": result.Progressive})
 }
 
 type nativeColumn struct {
@@ -134,9 +153,10 @@ type nativeColumn struct {
 	Type string `json:"type"`
 }
 type nativeTable struct {
-	ID      int                 `json:"id"`
-	Kind    string              `json:"kind"`
-	Name    string              `json:"name"`
-	Columns []nativeColumn      `json:"columns"`
-	Rows    [][]json.RawMessage `json:"rows"`
+	ID       int                 `json:"id"`
+	Kind     string              `json:"kind"`
+	Name     string              `json:"name"`
+	Columns  []nativeColumn      `json:"columns"`
+	Rows     [][]json.RawMessage `json:"rows"`
+	Progress *float64            `json:"progress,omitempty"`
 }
