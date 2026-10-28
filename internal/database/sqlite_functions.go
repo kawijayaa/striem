@@ -162,6 +162,11 @@ func init() {
 				return err
 			}
 		}
+		for name, function := range sqlMathFunctions() {
+			if err := connection.RegisterFunc(name, function, true); err != nil {
+				return err
+			}
+		}
 		for _, operation := range []string{"and", "or", "xor"} {
 			operation := operation
 			if err := connection.RegisterAggregator("kql_binary_all_"+operation, func() *bitwiseAggregate { return &bitwiseAggregate{operation: operation} }, true); err != nil {

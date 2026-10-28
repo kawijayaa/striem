@@ -68,6 +68,16 @@ func mathOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
 		}))
 	}
+	options = append(options, ksql.WithTypedFunction("floor", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		// floor(value, roundTo) is documented as an alias of bin.
+		if len(args) == 2 {
+			return binFunction(args)
+		}
+		if len(args) != 1 || !numericType(args[0].Type) {
+			return ksql.TypedExpression{}, fmt.Errorf("floor requires one number, or a value and bin size")
+		}
+		return ksql.TypedExpression{Type: args[0].Type, SQL: &sqlast.Call{Name: "floor", Args: []sqlast.Expr{args[0].SQL}}}, nil
+	}))
 	options = append(options, ksql.WithTypedFunction("round", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) < 1 || len(args) > 2 || !numericType(args[0].Type) || (len(args) == 2 && args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown) {
 			return ksql.TypedExpression{}, fmt.Errorf("round requires a number and an optional integer precision")

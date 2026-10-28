@@ -227,3 +227,94 @@ func abs64(value int64) int64 {
 	}
 	return value
 }
+
+// sqlMathFunctions implements the SQL math functions KSQL emits. This SQLite
+// build has no math extension, so without them sqrt/pow/exp/... failed with
+// "no such function". Integer inputs to floor, ceiling and sign stay integral.
+func sqlMathFunctions() map[string]any {
+	unary := func(function func(float64) float64) func(any) any {
+		return func(value any) any {
+			x, ok := realArgument(value)
+			if !ok {
+				return nil
+			}
+			return finite(function(x))
+		}
+	}
+	integral := func(function func(float64) float64) func(any) any {
+		return func(value any) any {
+			if integer, ok := value.(int64); ok {
+				return integer
+			}
+			x, ok := realArgument(value)
+			if !ok {
+				return nil
+			}
+			return finite(function(x))
+		}
+	}
+	domain := func(function func(float64) float64, valid func(float64) bool) func(any) any {
+		return func(value any) any {
+			x, ok := realArgument(value)
+			if !ok || !valid(x) {
+				return nil
+			}
+			return finite(function(x))
+		}
+	}
+	power := func(base, exponent any) any {
+		x, ok := realArgument(base)
+		y, valid := realArgument(exponent)
+		if !ok || !valid {
+			return nil
+		}
+		return finite(math.Pow(x, y))
+	}
+	return map[string]any{
+		"sqrt":    domain(math.Sqrt, func(x float64) bool { return x >= 0 }),
+		"exp":     unary(math.Exp),
+		"ln":      domain(math.Log, func(x float64) bool { return x > 0 }),
+		"log10":   domain(math.Log10, func(x float64) bool { return x > 0 }),
+		"pow":     power,
+		"power":   power,
+		"floor":   integral(math.Floor),
+		"ceil":    integral(math.Ceil),
+		"ceiling": integral(math.Ceil),
+		"sin":     unary(math.Sin),
+		"cos":     unary(math.Cos),
+		"tan":     unary(math.Tan),
+		"asin":    domain(math.Asin, func(x float64) bool { return x >= -1 && x <= 1 }),
+		"acos":    domain(math.Acos, func(x float64) bool { return x >= -1 && x <= 1 }),
+		"atan":    unary(math.Atan),
+		"atan2": func(y, x any) any {
+			a, ok := realArgument(y)
+			b, valid := realArgument(x)
+			if !ok || !valid {
+				return nil
+			}
+			return finite(math.Atan2(a, b))
+		},
+		"sign": func(value any) any {
+			if integer, ok := value.(int64); ok {
+				switch {
+				case integer > 0:
+					return int64(1)
+				case integer < 0:
+					return int64(-1)
+				}
+				return int64(0)
+			}
+			x, ok := realArgument(value)
+			if !ok {
+				return nil
+			}
+			switch {
+			case x > 0:
+				return 1.0
+			case x < 0:
+				return -1.0
+			}
+			return 0.0
+		},
+	}
+}

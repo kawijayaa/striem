@@ -380,6 +380,9 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	case *sqlast.StringMatch:
 		node.Value = normalizeDateTimeExpr(node.Value)
 		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.ArrayContains:
+		node.Array = normalizeDateTimeExpr(node.Array)
+		node.Value = normalizeDateTimeExpr(node.Value)
 	case *sqlast.DatetimeAdd:
 		node.Datetime = normalizeDateTimeExpr(node.Datetime)
 		node.Ticks = normalizeDateTimeExpr(node.Ticks)

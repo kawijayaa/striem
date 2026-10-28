@@ -28,6 +28,8 @@ parameters as constants.
 
 ## Verified implementation increments
 
+- Fixed SQL math functions failing with "no such function": this SQLite build has no math extension, so Striem now implements `sqrt`, `pow`, `exp`, `ln`, `log10`, `floor`, `ceiling`, `sign` and the trigonometric functions, with nonfinite or out-of-domain results as null. `log` is the natural logarithm (KSQL had emitted base-10 SQL `log`). `floor(value, roundTo)` is the documented alias of `bin`. `tostring(bool)` returns `true`/`false`, `strcat` converts null arguments to empty strings, and `in`/`!in`/`in~`/`!in~` expand dynamic array members.
+
 - Fixed timespans and datetime arithmetic. Timespan literals (`1d`, `2h + 30m`, `datetime + 1d`) produced SQL INTERVAL text SQLite could not parse, and `datetime - datetime` silently subtracted text to 0. KSQL now types timespans as 100ns ticks with Kusto's operator overloads; Striem supplies datetime add/diff UDFs, typed `now()`/`now(offset)`/`ago()`/`bin()`, `totimespan`/`totime`, `dayofweek`, and API formatting as `[-][d.]hh:mm:ss[.fffffff]`. `typeof(T)` is now a type literal, so `extract(..., typeof(real))` converts captures as documented.
 - Fixed `contains_cs`, `startswith_cs` and `endswith_cs`, which were case-insensitive through SQLite `LIKE`, and LIKE wildcard leakage, where `contains "_"` matched every string. `round` now follows the documented half-away-from-zero results, including negative precision (`round(2.15, 1)` is 2.2, `round(-50.55, -2)` is -100). `between` rendered invalid SQL in KSQL; Striem's workaround, which could reorder bound parameters, is removed. Datetime-literal normalization now reaches parse, parse-kv, string-match and temporal nodes.
 
