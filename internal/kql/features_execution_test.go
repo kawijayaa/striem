@@ -32,9 +32,29 @@ func featureCatalog() TableCatalog {
 	return TableCatalog{"LeftEvents": {ID: 1, Fields: fields}, "RightEvents": {ID: 2, Fields: fields}}
 }
 
+// testValues runs value discovery (partition keys) against db.
+func testValues(db *sql.DB) func(string, []any) ([]any, error) {
+	return func(query string, args []any) ([]any, error) {
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var values []any
+		for rows.Next() {
+			var value any
+			if err := rows.Scan(&value); err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, rows.Err()
+	}
+}
+
 func featureRows(t *testing.T, db *sql.DB, query string) [][]any {
 	t.Helper()
-	compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), featureCatalog())
+	compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), CompileConfig{Tables: featureCatalog(), Values: testValues(db)})
 	if err != nil {
 		t.Fatalf("compile %s: %v", query, err)
 	}
@@ -77,6 +97,8 @@ func TestDocumentedTabularFeaturesExecute(t *testing.T) {
 		{"search table patterns", `search in (Right*) user:"carol" or n == 1 | project ['$table'], user`, `[[RightEvents carol]]`},
 		{"find smart", `find user == "carol" | project source_, user, host, n, pack_`, `[[RightEvents carol a 3 {}]]`},
 		{"find pack_all", `find withsource=T in (Left*) where n == 2 project user, pack_all() | project T, user, n=tolong(pack_.n), h=tostring(pack_.host), u=isnull(pack_.user)`, `[[LeftEvents bob 2 b 1]]`},
+		{"partition top", `Events | partition hint.strategy=native by host (top 1 by n | project host, n) | order by host asc`, `[[a 3] [b 2]]`},
+		{"partition summarize", `Events | partition by user (summarize c=count()) | count`, `[[3]]`},
 		{"search wildcards", `Events | search "power*" and not(host:"b") | count`, `[[2]]`},
 		{"project variants", `Events | project host, user, n | project-away user | project-rename Value=n | project-reorder Value, host | where Value == 1`, `[[1 a]]`},
 		{"project keep", `Events | project-keep host, n | where n == 2`, `[[b 2]]`},

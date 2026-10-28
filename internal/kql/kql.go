@@ -153,6 +153,7 @@ type compileSettings struct {
 	fullTextIndex bool
 	parameters    map[string]any
 	bagKeys       func(sql string, args []any) ([]ksql.BagKey, error)
+	values        func(sql string, args []any) ([]any, error)
 }
 
 type CompileOption interface {
@@ -170,6 +171,8 @@ type CompileConfig struct {
 	// BagKeys runs bag_unpack key discovery SQL, enabling bag_unpack without
 	// an output schema. It receives SQL rendered like compiled queries.
 	BagKeys func(sql string, args []any) ([]ksql.BagKey, error)
+	// Values runs value discovery SQL (one column), enabling partition.
+	Values func(sql string, args []any) ([]any, error)
 }
 
 func (config CompileConfig) apply(settings *compileSettings) {
@@ -177,6 +180,7 @@ func (config CompileConfig) apply(settings *compileSettings) {
 	settings.fullTextIndex = config.FullTextIndex
 	settings.parameters = config.Parameters
 	settings.bagKeys = config.BagKeys
+	settings.values = config.Values
 }
 
 type Error struct {
@@ -247,6 +251,17 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 			}
 			sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
 			return settings.bagKeys(sqlText, append(args, fullTextArgs...))
+		}))
+	}
+	if settings.values != nil {
+		options = append(options, ksql.WithValuesResolver(func(query sqlast.Query, args []any) ([]any, error) {
+			normalizeDateTimeLiterals(query)
+			sqlText, err := dialect.Render(target, query)
+			if err != nil {
+				return nil, err
+			}
+			sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
+			return settings.values(sqlText, append(args, fullTextArgs...))
 		}))
 	}
 	compiler := ksql.New(target, options...)

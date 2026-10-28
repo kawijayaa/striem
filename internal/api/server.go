@@ -460,6 +460,7 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 		Tables:        tableCatalog,
 		FullTextIndex: s.store.FullTextIndexEnabled(),
 		BagKeys:       s.bagKeys(r.Context()),
+		Values:        s.discoveredValues(r.Context()),
 	})
 	if err != nil {
 		writeQueryError(w, err)
@@ -597,6 +598,29 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		slog.Error("encode response", "error", err)
+	}
+}
+
+// discoveredValues runs partition key discovery with its own deadline; the
+// compiler bounds the discovery query's row count.
+func (s *Server) discoveredValues(ctx context.Context) func(string, []any) ([]any, error) {
+	return func(query string, args []any) ([]any, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		rows, err := s.store.DB().QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var values []any
+		for rows.Next() {
+			var value any
+			if err := rows.Scan(&value); err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, rows.Err()
 	}
 }
 

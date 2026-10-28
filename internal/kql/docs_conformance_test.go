@@ -117,7 +117,7 @@ func TestDocumentationExamples(t *testing.T) {
 			}
 			return keys, rows.Err()
 		}
-		compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), CompileConfig{Tables: featureCatalog(), BagKeys: bagKeys})
+		compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), CompileConfig{Tables: featureCatalog(), BagKeys: bagKeys, Values: testValues(db)})
 		if err != nil {
 			message := err.Error()
 			key := "compile"
