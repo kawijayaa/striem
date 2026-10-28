@@ -370,3 +370,35 @@ func TestPunycode(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's parse_user_agent examples and look-for validation.
+func TestParseUserAgent(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print useragent = "Mozilla/5.0 (Windows; U; en-US) AppleWebKit/531.9 (KHTML, like Gecko) AdobeAIR/2.5.1" | project x = parse_user_agent(useragent, "browser")`,
+			`[[{"Browser":{"Family":"AdobeAIR","MajorVersion":"2","MinorVersion":"5","Patch":"1"}}]]`},
+		{`print useragent = "Mozilla/5.0 (SymbianOS/9.2; U; Series60/3.1 NokiaN81-3/10.0.032 Profile/MIDP-2.0 Configuration/CLDC-1.1 ) AppleWebKit/413 (KHTML, like Gecko) Safari/4" | project x = parse_user_agent(useragent, dynamic(["browser","os","device"]))`,
+			`[[{"Browser":{"Family":"Nokia OSS Browser","MajorVersion":"3","MinorVersion":"1","Patch":""},"OperatingSystem":{"Family":"Symbian OS","MajorVersion":"9","MinorVersion":"2","Patch":"","PatchMinor":""},"Device":{"Family":"Nokia N81","Brand":"Nokia","Model":"N81-3"}}]]`},
+		{`print a = parse_user_agent("curl/8.4.0", "browser").Browser.Family, b = parse_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "OS").OperatingSystem.Family, c = isnull(parse_user_agent(string(null), "device")), d = isnull(parse_user_agent(strrep(strrep("A", 100), 100), "device"))`,
+			`[[curl Windows 1 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{`print parse_user_agent("x", "cpu")`, `print parse_user_agent("x", dynamic([1]))`} {
+		compiled, err := Compile(query, time.Now(), featureCatalog())
+		if err == nil {
+			var rows *sql.Rows
+			if rows, err = db.Query(compiled.SQL, compiled.Args...); err == nil {
+				for rows.Next() {
+				}
+				err = rows.Err()
+				rows.Close()
+			}
+		}
+		if err == nil {
+			t.Errorf("%s: want an error", query)
+		}
+	}
+}

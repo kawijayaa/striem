@@ -166,6 +166,7 @@ func init() {
 			"kql_gettype":                          kqlGetType,
 			"kql_gettype_at":                       kqlGetTypeAt,
 			"kql_parse_version":                    kqlParseVersion,
+			"kql_parse_user_agent":                 kqlParseUserAgent,
 			"kql_punycode_from_string":             kqlPunycodeFromString,
 			"kql_punycode_to_string":               kqlPunycodeToString,
 			"kql_punycode_domain_to_string":        kqlPunycodeDomainToString,

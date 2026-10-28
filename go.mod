@@ -4,10 +4,11 @@ go 1.24.0
 
 require (
 	github.com/Velocidex/ordereddict v0.0.0-20210502082334-cf5d9045c0d1
-	github.com/hashicorp/golang-lru v0.5.4
+	github.com/hashicorp/golang-lru v1.0.2
 	github.com/kawijayaa/ksql v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.48
 	github.com/tidwall/gjson v1.18.0
+	github.com/ua-parser/uap-go v0.0.0-20260529044130-17c35e68e58c
 	gopkg.in/yaml.v3 v3.0.1
 	www.velocidex.com/golang/evtx v0.2.0
 )

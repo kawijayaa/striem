@@ -80,6 +80,13 @@ func textToolOptions() []ksql.Option {
 			}
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_parse_version", Args: []sqlast.Expr{args[0].SQL}}}, nil
 		}),
+		ksql.WithTypedFunction("parse_user_agent", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 2 || (args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown) ||
+				(args[1].Type != ksql.TypeString && args[1].Type != ksql.TypeDynamic && args[1].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("parse_user_agent requires a user-agent string and a look-for string or array")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_parse_user_agent", Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}}, nil
+		}),
 		ksql.WithTypedFunction("hash_combine", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(args) < 2 || len(args) > 64 {
 				return ksql.TypedExpression{}, fmt.Errorf("hash_combine takes 2 to 64 long hash values")
