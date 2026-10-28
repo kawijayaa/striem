@@ -3,7 +3,7 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json vite.config.js ./
-COPY web/index.html ./web/index.html
+COPY web/index.html web/kusto.html ./web/
 COPY web/src ./web/src
 COPY web/public ./web/public
 RUN npm run build
