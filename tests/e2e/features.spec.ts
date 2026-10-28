@@ -1289,3 +1289,10 @@ test('window function autocomplete executes adjacent-row calculations', async ({
   await run(page, 1);
   await expect(page.locator('#results-panel')).toContainText('3');
 });
+
+test('render annotations keep tabular results and report the visualization', async ({ page }) => {
+  await open(page);
+  await edit(page, 'range n from 1 to 3 step 1 | extend s="a" | render columnchart with (title="Counts")');
+  await run(page, 3);
+  await expect(page.locator('#query-stats')).toContainText('render columnchart "Counts"');
+});

@@ -36,6 +36,8 @@ type CompiledQuery struct {
 	Columns        []string
 	DynamicColumns map[string]struct{}
 	BooleanColumns map[string]struct{}
+	// Visualization is the validated render annotation, when present.
+	Visualization *ksql.Visualization
 }
 
 type Field struct {
@@ -254,7 +256,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		return CompiledQuery{}, err
 	}
 	sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
-	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans}, nil
+	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans, Visualization: result.Visualization}, nil
 }
 
 // KSQL emits ANSI TIMESTAMP literals, which SQLite cannot evaluate. Convert

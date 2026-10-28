@@ -12,11 +12,17 @@ export interface QueryError {
   retryAfterMs?: number;
 }
 
+export interface QueryVisualization {
+  type: string;
+  properties?: Record<string, unknown>;
+}
+
 export interface QueryResult {
   columns: string[];
   rows: EventRow[];
   rowCount: number;
   durationMs: number;
+  visualization?: QueryVisualization;
 }
 
 export interface FieldMetadata {

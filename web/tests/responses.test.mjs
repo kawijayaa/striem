@@ -9,6 +9,11 @@ test('query responses validate result shape and counts before rendering', () => 
   for (const value of [null, {}, { ...valid, columns: [1] }, { ...valid, rows: [null] }, { ...valid, rows: [[]] }, { ...valid, rowCount: 2 }, { ...valid, rowCount: -1 }, { ...valid, durationMs: Infinity }, { ...valid, durationMs: '1' }]) {
     assert.throws(() => parseQueryResult(value), /Invalid server response/);
   }
+  const rendered = { ...valid, visualization: { type: 'timechart', properties: { title: 'Events', series: ['host'] } } };
+  assert.deepEqual(parseQueryResult(rendered), rendered);
+  for (const visualization of [null, 'timechart', {}, { type: 1 }, { type: 'table', properties: [] }]) {
+    assert.throws(() => parseQueryResult({ ...valid, visualization }), /Invalid server response/);
+  }
 });
 
 const emptyState = { questions: [], solvedQuestions: 0, totalQuestions: 0, completed: false };

@@ -280,7 +280,15 @@ async function runQuery() {
     if (window.matchMedia('(max-width: 900px)').matches) {
       mobileWorkspace.show('results');
     }
-    $('#query-stats').textContent = `${formatCount(result.rowCount, 'row')} · ${result.durationMs} ms`;
+    const stats = $('#query-stats');
+    stats.textContent = `${formatCount(result.rowCount, 'row')} · ${result.durationMs} ms`;
+    stats.title = '';
+    if (result.visualization) {
+      // Striem shows rendered results as a table; the annotation is reported.
+      const title = result.visualization.properties?.title;
+      stats.textContent += ` · render ${result.visualization.type}${typeof title === 'string' ? ` "${title}"` : ''}`;
+      stats.title = 'Charts are not drawn in Striem; results are shown as a table.';
+    }
   } catch (error) {
     if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       queryOutcome = 'canceled';

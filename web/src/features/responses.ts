@@ -12,7 +12,9 @@ export function parseQueryResult(value: unknown): QueryResult {
   if (!isRecord(value) || !Array.isArray(value.columns) || !value.columns.every(column => typeof column === 'string')
     || !Array.isArray(value.rows) || !value.rows.every(isRecord)
     || !isCount(value.rowCount) || value.rowCount !== value.rows.length
-    || typeof value.durationMs !== 'number' || !Number.isFinite(value.durationMs) || value.durationMs < 0) {
+    || typeof value.durationMs !== 'number' || !Number.isFinite(value.durationMs) || value.durationMs < 0
+    || (value.visualization !== undefined && (!isRecord(value.visualization) || typeof value.visualization.type !== 'string'
+      || (value.visualization.properties !== undefined && !isRecord(value.visualization.properties))))) {
     throw new Error('Invalid server response');
   }
   return value as unknown as QueryResult;
