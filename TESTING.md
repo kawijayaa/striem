@@ -60,3 +60,20 @@ The completed checks include nine Chromium scenarios and six frontend unit-test 
 - The Docker check targets the local architecture. ARM64 images, registry publishing, Cloudflare tunnels, and external authentication proxies were not exercised.
 - The fixtures are small. Production-scale ingestion, sustained load, disk exhaustion, power loss, and all combinations of KQL operators require separate testing.
 - The production build still reports its existing JavaScript chunk-size warning.
+
+## Documentation conformance
+
+`internal/kql/docs_conformance_test.go` compares Striem against the examples
+in Microsoft's KQL reference. It is opt-in and needs a local docs checkout:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/MicrosoftDocs/dataexplorer-docs.git docs-src
+git -C docs-src sparse-checkout set data-explorer/kusto/query
+python3 -I tools/docs-conformance/extract.py docs-src/data-explorer/kusto/query > /tmp/examples.json
+DOC_EXAMPLES=/tmp/examples.json DOC_REPORT=/tmp/report.json go test ./internal/kql -run TestDocumentationExamples -v
+```
+
+The report groups examples into `pass`, `mismatch`, `names`, `compile`,
+`runtime` and `unknown-input` (examples that need tables such as StormEvents).
+Run heavy suites under a memory cap, for example
+`systemd-run --user --scope -p MemoryMax=4G`.

@@ -28,6 +28,8 @@ parameters as constants.
 
 ## Verified implementation increments
 
+- Added `make-series` (KSQL `docs/make-series.md`): bin-aligned arrays with defaults, `from`/`to`/`step`, `by` groups, per-series bounds when `from`/`to` are omitted, `kind=nonempty` and the `in range()` form. Microsoft's examples pass, including the `mv-expand` fill example. Also accepts `string(null)`. `series_*` analysis functions remain open.
+
 - Added `union withsource=Column` (table names, or `union_argN` for expressions), multi-column `mv-expand` in lockstep with null padding and Microsoft's bag-into-single-property expansion, and raised the expansion limit from 1 to 16 columns. Datetime-literal normalization now also reaches `in` subqueries and expansion arrays.
 
 - Added `rand`, `bin_at` (numbers, timespans and datetimes aligned to a fixed point) and `array_sort_asc`/`array_sort_desc` with Kusto's mixed-type ordering, `nulls_last` and companion arrays; Microsoft's examples pass. With several arrays the result is one dynamic array of arrays (supporting `array_sort_asc(a, b)[1]`) rather than Kusto's per-array output columns.

@@ -81,3 +81,19 @@ func TestTimespansInDynamicAndText(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's make-series examples through Striem's datetime runtime.
+func TestMakeSeriesExecution(t *testing.T) {
+	db := featureDatabase(t)
+	data := `let data=datatable(timestamp:datetime, metric: real)[datetime(2016-12-31T06:00), 50, datetime(2017-01-01), 4, datetime(2017-01-02), 3, datetime(2017-01-03), 4, datetime(2017-01-03T03:00), 6, datetime(2017-01-05), 8, datetime(2017-01-05T13:40), 13, datetime(2017-01-06), 4, datetime(2017-01-07), 3, datetime(2017-01-08), 8, datetime(2017-01-08T21:00), 8, datetime(2017-01-09), 2, datetime(2017-01-09T12:00), 11, datetime(2017-01-10T05:00), 5]; let interval = 1d; let stime = datetime(2017-01-01); let etime = datetime(2017-01-10); `
+	for _, tc := range []struct{ query, want string }{
+		{data + `data | make-series avg(metric) on timestamp from stime to etime step interval | project avg_metric, n=array_length(timestamp), first=timestamp[0]`, `[[[4.0,3.0,5.0,0,10.5,4.0,3.0,8.0,6.5] 9 2017-01-01T00:00:00.000000000Z]]`},
+		{`let startDate = datetime(2025-01-06); let endDate = datetime(2025-02-09); datatable(Time: datetime, Value: int, other:int)[datetime(2025-01-07), 10, 11, datetime(2025-01-16), 20, 21, datetime(2025-02-01), 30, 5] | make-series Value=sum(Value) default=-2 on Time from startDate to endDate step 7d | mv-expand Value, Time | extend Time=todatetime(Time), Value=toint(Value) | project-reorder Time, Value`,
+			`[[2025-01-06T00:00:00.000000000Z 10] [2025-01-13T00:00:00.000000000Z 20] [2025-01-20T00:00:00.000000000Z -2] [2025-01-27T00:00:00.000000000Z 30] [2025-02-03T00:00:00.000000000Z -2]]`},
+		{`Events | make-series n=count() on TimeGenerated step 1d by host | order by host asc`, `[[a [1,0,1] ["2026-01-01T00:00:00.000000000Z","2026-01-02T00:00:00.000000000Z","2026-01-03T00:00:00.000000000Z"]] [b [1] ["2026-01-02T00:00:00.000000000Z"]]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

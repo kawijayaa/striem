@@ -398,6 +398,15 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 		node.Pattern = normalizeDateTimeExpr(node.Pattern)
 	case *sqlast.ExpansionArray:
 		node.Value = normalizeDateTimeExpr(node.Value)
+	case *sqlast.ScalarSubquery:
+		normalizeDateTimeLiterals(node.Query)
+	case *sqlast.OrderedAggregate:
+		for index := range node.Args {
+			node.Args[index] = normalizeDateTimeExpr(node.Args[index])
+		}
+		for index := range node.OrderBy {
+			node.OrderBy[index].Expr = normalizeDateTimeExpr(node.OrderBy[index].Expr)
+		}
 	case *sqlast.InSubquery:
 		node.Value = normalizeDateTimeExpr(node.Value)
 		normalizeDateTimeLiterals(node.Query)
