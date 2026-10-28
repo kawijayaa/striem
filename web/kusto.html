@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Kusto service · Striem</title>
+</head>
+<body>
+ <main>
+  <a href="/">← Investigation workspace</a>
+  <h1>Kusto service</h1>
+  <p>Run KQL on the configured Kusto service. Queries use read-only execution. Management commands use the service account’s permissions.</p>
+  <p id="connection" role="status">Checking connection settings…</p>
+  <form id="native-form">
+   <label for="mode">Execution</label>
+   <select id="mode" disabled><option value="query">Query</option><option value="management" disabled>Management command</option></select>
+   <label for="native-query">KQL</label>
+   <textarea id="native-query" rows="12" spellcheck="false" required>print Message="Connected"</textarea>
+   <details><summary>Query parameters</summary>
+    <p>Enter a JSON object whose values are strings encoded for Kusto. For a declared long parameter: <code>{"limit":"100"}</code>. Parameters are sent without text substitution.</p>
+    <label for="parameters">Parameters</label><textarea id="parameters" rows="4" spellcheck="false">{}</textarea>
+   </details>
+   <label class="checkbox"><input id="progressive" type="checkbox"> Request progressive query results</label>
+   <p>Progressive results appear after the complete response has been verified.</p>
+   <button id="native-run" disabled>Run query</button>
+   <button id="native-cancel" type="button" disabled>Cancel</button>
+  </form>
+  <h2>Response</h2>
+  <p id="native-status" role="status" aria-live="polite">No request sent.</p>
+  <button id="native-download" type="button" disabled>Download response JSON</button>
+  <pre id="native-output" tabindex="0" aria-label="Service response"></pre>
+ </main>
+ <script type="module" src="/src/native.ts"></script>
+</body>
+</html>

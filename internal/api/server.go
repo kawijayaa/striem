@@ -175,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/query", s.whenReady(requireSameOrigin(s.query)))
 	mux.HandleFunc("POST /api/query/validate", s.whenReady(requireSameOrigin(s.validateQuery)))
 	mux.HandleFunc("POST /api/kusto/query", s.whenReady(requireSameOrigin(s.nativeQuery)))
+	mux.HandleFunc("GET /api/kusto/capabilities", s.whenReady(s.nativeCapabilities))
 	mux.HandleFunc("POST /api/kusto/management", s.whenReady(requireSameOrigin(s.nativeManagement)))
 
 	static, err := fs.Sub(webassets.Files, "dist")

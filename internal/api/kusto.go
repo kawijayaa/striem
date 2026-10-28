@@ -42,6 +42,18 @@ func (s *Server) nativeManagement(w http.ResponseWriter, r *http.Request) {
 	s.executeNativeKusto(w, r, true)
 }
 
+func (s *Server) nativeCapabilities(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	config := s.nativeKusto
+	s.mu.RUnlock()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Enabled    bool `json:"enabled"`
+		Management bool `json:"management"`
+	}{config.Client != nil, config.Client != nil && config.AllowManagement})
+}
+
 func (s *Server) executeNativeKusto(w http.ResponseWriter, r *http.Request, management bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	s.mu.RLock()

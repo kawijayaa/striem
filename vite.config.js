@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
@@ -7,6 +8,10 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rolldownOptions: {
+      input: { main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
+        kusto: fileURLToPath(new URL('./web/kusto.html', import.meta.url)) },
+    },
   },
   server: {
     proxy: {

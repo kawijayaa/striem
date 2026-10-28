@@ -4,7 +4,9 @@ Striem can optionally forward native KQL to a Kusto service through the
 independent KSQL `kusto` package. This adds an API for features executed by that
 service, including external data and management scripts. The hunting editor,
 its preflight validation and `/api/query` continue to use the local SQLite
-compiler. There is no native editor mode or native validation endpoint yet.
+compiler. A separate [Kusto service console](/kusto.html) runs native queries
+and management commands without local compiler preflight. Native schema-aware
+completion and a native validation endpoint remain open.
 
 ## Configuration
 
@@ -116,3 +118,28 @@ open; service forwarding does not complete local compiler support.
 
 Service read-only behavior is described in Microsoft's
 [request properties](https://learn.microsoft.com/en-us/kusto/api/rest/request-properties?view=azure-data-explorer).
+
+## Browser console
+
+Open `/kusto.html` from the workspace’s **Kusto service** link. The console reads
+`GET /api/kusto/capabilities`, which returns only `enabled` and `management`
+Booleans with `Cache-Control: no-store`. It exposes no endpoint, database or
+credential fields. Execution stays disabled if the service is unavailable or
+configuration cannot be read. Management is a separate, explicit execution mode
+and remains unavailable unless the server enables it.
+
+The console accepts native parameter JSON with string values, optional progressive
+query results, cancellation and response download. It shows the complete raw JSON
+response, including every table and column type, without converting native numeric
+cells to browser numbers. Long/decimal digits therefore remain intact in display
+and download. It does not save query text, parameters or responses to browser
+storage. Canceling aborts the browser request; it does not prove remote execution
+has stopped, particularly for management commands.
+
+Typed request-unit tests verify exact numeric response text, parameter encoding,
+mode selection, request size limits, errors and cancellation. In-process Go tests
+verify capability filtering and the built static page. Browser scenarios cover
+query/management selection, exact result display and download, but have not been
+executed in the current socket-restricted environment. There is no live-service
+or visual-browser certification. Tabular browsing, native schema completion and
+service validation remain unfinished.
