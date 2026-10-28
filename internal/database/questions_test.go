@@ -2,7 +2,9 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -41,7 +43,9 @@ func TestChallengeProgressAndCompletion(t *testing.T) {
 		t.Fatalf("final solve = %#v, %v", final, err)
 	}
 	repeated, err := store.SubmitAnswer(t.Context(), "account", "anything", now.Add(5*time.Second))
-	if err != nil || !repeated.Correct || !repeated.AlreadySolved || repeated.State.Flag != "flag{complete}" {
+	// A solved question stays solved, but a non-matching answer is not
+	// reported as correct.
+	if err != nil || repeated.Correct || !repeated.AlreadySolved || repeated.State.Flag != "flag{complete}" {
 		t.Fatalf("repeated solve = %#v, %v", repeated, err)
 	}
 	if _, err := store.SubmitAnswer(t.Context(), "missing", "answer", now); !errors.Is(err, ErrQuestionNotFound) {
@@ -98,5 +102,41 @@ func TestSolvedQuestionCanRecoverLegacyAnswer(t *testing.T) {
 	correct, err := store.SubmitAnswer(t.Context(), "answer", " yes ", time.Now())
 	if err != nil || !correct.Correct || correct.State.Questions[0].Answer != "yes" {
 		t.Fatalf("legacy recovered answer = %#v, %v", correct, err)
+	}
+}
+
+// Once a question is solved, wrong answers are still reported as wrong, and
+// concurrent wrong guesses cannot bypass the cooldown.
+func TestSolvedQuestionsAndConcurrentGuesses(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.ConfigureChallenge(t.Context(), ChallengeDefinition{Flag: "f", Cooldown: time.Minute,
+		Questions: []QuestionDefinition{{ID: "q", Revision: 1, Title: "T", Prompt: "P", AcceptedAnswers: []string{"right"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 22, 1, 2, 3, 0, time.UTC)
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = store.SubmitAnswer(t.Context(), "q", fmt.Sprint("guess", i), now)
+		}(i)
+	}
+	wg.Wait()
+	state, err := store.ChallengeState(t.Context())
+	if err != nil || state.Questions[0].Attempts != 1 {
+		t.Fatalf("concurrent guesses recorded %d attempts, want 1 (%v)", state.Questions[0].Attempts, err)
+	}
+	solved, err := store.SubmitAnswer(t.Context(), "q", "right", now.Add(time.Minute))
+	if err != nil || !solved.Correct {
+		t.Fatalf("solve = %#v, %v", solved, err)
+	}
+	wrong, err := store.SubmitAnswer(t.Context(), "q", "nope", now.Add(2*time.Minute))
+	if err != nil || wrong.Correct || !wrong.AlreadySolved || !wrong.State.Questions[0].Solved {
+		t.Fatalf("wrong answer after solve = %#v, %v", wrong, err)
 	}
 }

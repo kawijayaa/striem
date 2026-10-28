@@ -1538,3 +1538,21 @@ func TestScanRowsRejectsOversizedResults(t *testing.T) {
 		t.Fatalf("results %d err %v", len(results), err)
 	}
 }
+
+// Every response carries the browser protections, and API responses are
+// never cached.
+func TestSecurityHeaders(t *testing.T) {
+	handler := New(testStore(t), slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	for _, path := range []string{"/", "/api/health", "/api/questions"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		header := recorder.Header()
+		if !strings.Contains(header.Get("Content-Security-Policy"), "frame-ancestors 'none'") || header.Get("X-Content-Type-Options") != "nosniff" ||
+			header.Get("X-Frame-Options") != "DENY" || header.Get("Referrer-Policy") != "no-referrer" {
+			t.Errorf("%s headers = %v", path, header)
+		}
+		if strings.HasPrefix(path, "/api/") && header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s Cache-Control = %q", path, header.Get("Cache-Control"))
+		}
+	}
+}

@@ -185,7 +185,29 @@ func (s *Server) Handler() http.Handler {
 		panic(err)
 	}
 	mux.Handle("/", http.FileServerFS(static))
-	return s.logRequests(mux)
+	return s.logRequests(securityHeaders(mux))
+}
+
+// contentSecurityPolicy allows only the bundled scripts, fonts and API.
+// CodeMirror injects its editor styles at run time, so styles may be inline.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+// securityHeaders sets browser protections on every response: the content
+// security policy, no framing, no MIME sniffing and no referrer. API
+// responses are never cached, so answers and flags stay out of caches.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := w.Header()
+		header.Set("Content-Security-Policy", contentSecurityPolicy)
+		header.Set("X-Content-Type-Options", "nosniff")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("Referrer-Policy", "no-referrer")
+		header.Set("Cross-Origin-Opener-Policy", "same-origin")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			header.Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) fields(w http.ResponseWriter, r *http.Request) {

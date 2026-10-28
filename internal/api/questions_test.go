@@ -58,8 +58,10 @@ func TestInvestigationQuestionWorkflow(t *testing.T) {
 	if final.StatusCode != http.StatusOK || !final.Body.Correct || !final.Body.State.Completed || final.Body.State.Flag != "flag{complete}" {
 		t.Fatalf("final solve = %#v", final)
 	}
+	// A solved task stays solved, but a non-matching answer is reported as
+	// wrong.
 	repeated := submitQuestion(t, server.URL, "user", "anything")
-	if !repeated.Body.Correct || !repeated.Body.AlreadySolved {
+	if repeated.Body.Correct || !repeated.Body.AlreadySolved || !repeated.Body.State.Completed {
 		t.Fatalf("repeated submission = %#v", repeated)
 	}
 }

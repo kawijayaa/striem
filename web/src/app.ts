@@ -419,7 +419,13 @@ function createRowAction(
   button.className = `${ui.rowIconAction}${active ? ' active' : ''}`;
   button.setAttribute('aria-label', label);
   button.title = label;
-  button.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPath}"/></svg>`;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', iconPath);
+  svg.append(path);
+  button.append(svg);
   button.addEventListener('click', event => {
     event.stopPropagation();
     handler(button);
@@ -1138,7 +1144,13 @@ async function submitActiveQuestion(): Promise<void> {
     questionRequestGeneration++;
     challengeState = result.state;
     correct = result.correct;
-    if (correct) {
+    if (!correct && result.alreadySolved) {
+      // A teammate solved this task; the submitted answer did not match.
+      questionFeedback.delete(question.id);
+      questionDrafts.delete(question.id);
+      persistQuestionDrafts();
+      showToast('This task is already solved');
+    } else if (correct) {
       questionFeedback.delete(question.id);
       questionDrafts.delete(question.id);
       persistQuestionDrafts();

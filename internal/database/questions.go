@@ -207,8 +207,10 @@ WHERE question_id = ? AND revision = ?`, answer, question.ID, question.Revision)
 		if err := tx.Commit(); err != nil {
 			return AnswerResult{}, fmt.Errorf("commit answer submission: %w", err)
 		}
+		// The question is solved either way; report whether this answer
+		// matched rather than calling every answer correct.
 		state, err := s.ChallengeState(ctx)
-		return AnswerResult{Correct: true, AlreadySolved: true, State: state}, err
+		return AnswerResult{Correct: correct, AlreadySolved: true, State: state}, err
 	}
 	if lastAttempt.Valid && challenge.Cooldown > 0 {
 		last, err := time.Parse(time.RFC3339Nano, lastAttempt.String)
