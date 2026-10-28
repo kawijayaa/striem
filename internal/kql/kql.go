@@ -225,7 +225,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 			MaxSourceBytes:     maxSourceBytes,
 			MaxOutputRows:      resultLimit,
 			MaxProjectionItems: 256,
-			MaxExpansionItems:  1,
+			MaxExpansionItems:  16,
 			MaxRegexBytes:      512,
 			MaxJoinKeys:        16,
 		}),
@@ -396,6 +396,11 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	case *sqlast.StringMatch:
 		node.Value = normalizeDateTimeExpr(node.Value)
 		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.ExpansionArray:
+		node.Value = normalizeDateTimeExpr(node.Value)
+	case *sqlast.InSubquery:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		normalizeDateTimeLiterals(node.Query)
 	case *sqlast.ArrayContains:
 		node.Array = normalizeDateTimeExpr(node.Array)
 		node.Value = normalizeDateTimeExpr(node.Value)

@@ -31,6 +31,9 @@ func TestDocumentedCoreBehavior(t *testing.T) {
 		{`LeftEvents | where host in (RightEvents | project host) | project user`, `[[alice]]`},
 		{`LeftEvents | where user !in (RightEvents | project user) | summarize hint.strategy=shuffle make_set(user)`, `[[["alice","bob"]]]`},
 		{`union isfuzzy=true LeftEvents, NoSuchTable | count`, `[[2]]`},
+		{`LeftEvents | where TimeGenerated in (RightEvents | where TimeGenerated > datetime(2026-01-02) | project TimeGenerated) | count`, `[[0]]`},
+		{`print x=dynamic([1,2]), y=dynamic(["a"]) | mv-expand x, y`, `[[1 a] [2 <nil>]]`},
+		{`union withsource=T LeftEvents, RightEvents | summarize n=count() by T | order by T asc`, `[[LeftEvents 2] [RightEvents 1]]`},
 		{`Events | where user in (dynamic(["alice", "carol"])) | summarize make_set(user)`, `[[["alice","carol"]]]`},
 	} {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
