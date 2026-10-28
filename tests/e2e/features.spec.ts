@@ -1276,3 +1276,16 @@ test('parse operator autocompletes and extracts typed columns', async ({ page })
   await run(page, 1);
   await expect(page.locator('#results-panel')).toContainText('10.0.0.5');
 });
+
+test('window function autocomplete executes adjacent-row calculations', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'range n from 1 to 3 step 1 | sort by n asc | extend r=row_n');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^row_number$/ })).toBeVisible();
+  await editor.press('Escape');
+  await edit(page, 'range n from 1 to 3 step 1 | sort by n desc | extend r=row_number(), p=prev(n) | where r == 2 | project n, p');
+  await run(page, 1);
+  await expect(page.locator('#results-panel')).toContainText('3');
+});

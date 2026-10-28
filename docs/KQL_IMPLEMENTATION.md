@@ -14,7 +14,7 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 ## Current integration
 
-CI pins KSQL commit `30774cd`, which includes query parameters, `parse` and `parse-kv`.
+CI pins the KSQL commit that includes query parameters, the parse operators and window functions.
 That commit is local to the companion checkout until it is published; remote CI
 cannot fetch it before then. Constant-only adapter arguments, such as
 `extract_all` patterns, still require compiler metadata to recognize bound
@@ -27,6 +27,8 @@ parameters as constants.
 - The compiler's `not()` implementation now supplies Boolean metadata directly. The former application metadata-recovery workaround was removed.
 
 ## Verified implementation increments
+
+- Added serialized row-set tracking and window functions in KSQL. `sort`, `top` and `serialize` record order; `where`, `take`, `extend`, the project family and parse operators preserve it unless an ordering column changes. `prev`, `next`, `row_number`, `row_cumsum`, `row_rank_dense` and `row_rank_min`, with restart predicates, lower to SQL windows over a hidden ordinal in `extend`, `project`, `serialize` and `where`. Microsoft's examples for all four row functions execute with documented values. Striem tests cover sign-in gaps and sessionization with datetime differences; the editor, discovery and a Playwright scenario include the functions. A missing string `prev`/`next` value is empty, as KQL strings have no null. `row_window_session`, serialization across `mv-expand` and reassigned ordering columns, and live-engine certification remain open. See KSQL `docs/window-functions.md`.
 
 - Added `parse-kv` through KSQL's `ParseKVSpec` lowering and the pure-Go `runtime.KeyValuesJSON` extractor, registered in Striem as `kql_key_values`. Delimited, free-form and regex modes are covered, along with repeated one- or two-character quotes, escapes, greedy values, first-appearance key selection, typed conversions and in-place replacement. Every Microsoft example executes with its documented values, including datetime and `guid` columns. The new `toguid` mapping accepts 32-digit, hyphenated, braced and parenthesized GUIDs. Option validation, resource limits (1 MiB per value, linear scanning) and fuzzing are tested. Free-mode pairing ambiguities, `_` handling and missing-string empty/null policy remain characterizations; live-engine certification remains open. See KSQL `docs/parse-kv-operator.md`.
 
