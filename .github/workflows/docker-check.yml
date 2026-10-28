@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: kawijayaa/ksql
-          ref: da28e5cea2ebf2bc28835e5a0cb0aab7898aaa0f
+          ref: f81a30d6112a8920ade38dff23d1eee39e1b8ae2
           path: .ksql
           persist-credentials: false
 

@@ -164,3 +164,30 @@ func TestBuildSchema(t *testing.T) {
 		}
 	}
 }
+
+// evaluate narrow, pivot and ipv4_lookup, following Microsoft's examples.
+func TestEvaluatePlugins(t *testing.T) {
+	db := featureDatabase(t)
+	storm := `datatable(State:string, EventType:string, Deaths:long)["ARKANSAS", "Heat", 3, "ARIZONA", "Flash Flood", 6, "ARKANSAS", "Heat", 1, "ARIZONA", "Lightning", 1]`
+	ips := `let IP_Data = datatable(network:string, continent_code:string, country_name:string)["111.68.128.0/17", "AS", "Japan", "5.8.0.0/19", "EU", "Russia", "2.20.183.0/24", "EU", "United Kingdom"]; let IPs = datatable(ip:string)['2.20.183.12', '5.8.1.2', '192.165.12.17']; IPs`
+	for _, tc := range []struct{ query, want string }{
+		{`print a=1, b="x" | evaluate narrow()`, `[[0 a 1] [0 b x]]`},
+		{storm + ` | project State, EventType | evaluate pivot(State) | order by EventType asc`, `[[Flash Flood 1 0] [Heat 0 2] [Lightning 1 0]]`},
+		{storm + ` | evaluate pivot(State, sum(Deaths)) | order by EventType asc`, `[[Flash Flood 6 0] [Heat 0 4] [Lightning 1 0]]`},
+		{storm + ` | evaluate pivot(State, sum(Deaths), EventType) | getschema | project ColumnName`, `[[EventType] [ARIZONA] [ARKANSAS]]`},
+		{storm + ` | project State, EventType | evaluate pivot(State): (EventType:string, ARKANSAS:long) | order by EventType asc`, `[[Flash Flood 0] [Heat 2] [Lightning 0]]`},
+		{ips + ` | evaluate ipv4_lookup(IP_Data, ip, network) | order by ip asc`, `[[2.20.183.12 2.20.183.0/24 EU United Kingdom] [5.8.1.2 5.8.0.0/19 EU Russia]]`},
+		{ips + ` | evaluate ipv4_lookup(IP_Data, ip, network, return_unmatched = true) | order by ip asc`, `[[192.165.12.17 <nil> <nil> <nil>] [2.20.183.12 2.20.183.0/24 EU United Kingdom] [5.8.1.2 5.8.0.0/19 EU Russia]]`},
+		{`let L = datatable(net:string, name:string)["fe80::/10", "link-local", "2001:db8::/32", "doc"]; datatable(ip:string)["2001:db8::1", "::1"] | evaluate ipv6_lookup(L, ip, net, true) | order by ip asc`, `[[2001:db8::1 2001:db8::/32 doc] [::1 <nil> <nil>]]`},
+		{`let L = datatable(net:string, site:string, tag:string)["10.0.0.0/8", "a", "x", "10.0.0.0/8", "b", "y"]; datatable(ip:string, site:string)["10.1.2.3", "b"] | evaluate ipv4_lookup(L, ip, net, site)`, `[[10.1.2.3 b 10.0.0.0/8 y]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{`print a=1 | evaluate narrow(1)`, `print a=1 | evaluate pivot(nope)`, `print a=1 | evaluate pivot(a, percentile(a, 50))`, `print ip="1.1.1.1" | evaluate ipv4_lookup(nope, ip, net)`} {
+		if _, err := Compile(query, time.Now(), CompileConfig{Tables: featureCatalog(), Values: testValues(db)}); err == nil {
+			t.Fatalf("invalid plugin call accepted: %s", query)
+		}
+	}
+}
