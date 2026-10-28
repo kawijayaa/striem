@@ -82,12 +82,6 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
-	for name, population := range map[string]bool{"kql_covariance": false, "kql_covariancep": true} {
-		population := population
-		if err := c.RegisterAggregator(name, func() *covariance { return &covariance{population: population} }, true); err != nil {
-			return err
-		}
-	}
 	for name, mode := range map[string]string{"kql_tdigest": "digest", "kql_percentile": "single", "kql_percentiles_array": "array"} {
 		mode := mode
 		if err := c.RegisterAggregator(name, func() *percentileAggregate { return &percentileAggregate{mode: mode} }, true); err != nil {
