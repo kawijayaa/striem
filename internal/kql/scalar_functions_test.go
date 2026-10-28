@@ -179,13 +179,16 @@ func TestEvaluatePlugins(t *testing.T) {
 		{ips + ` | evaluate ipv4_lookup(IP_Data, ip, network) | order by ip asc`, `[[2.20.183.12 2.20.183.0/24 EU United Kingdom] [5.8.1.2 5.8.0.0/19 EU Russia]]`},
 		{ips + ` | evaluate ipv4_lookup(IP_Data, ip, network, return_unmatched = true) | order by ip asc`, `[[192.165.12.17 <nil> <nil> <nil>] [2.20.183.12 2.20.183.0/24 EU United Kingdom] [5.8.1.2 5.8.0.0/19 EU Russia]]`},
 		{`let L = datatable(net:string, name:string)["fe80::/10", "link-local", "2001:db8::/32", "doc"]; datatable(ip:string)["2001:db8::1", "::1"] | evaluate ipv6_lookup(L, ip, net, true) | order by ip asc`, `[[2001:db8::1 2001:db8::/32 doc] [::1 <nil> <nil>]]`},
+		{`let polygons = datatable(polygon_name:string, polygon:dynamic)["NY", dynamic({"type":"Polygon","coordinates":[[[-74.1,40.6],[-73.8,40.6],[-73.8,40.9],[-74.1,40.9],[-74.1,40.6]]]})]; datatable(name:string, longitude:real, latitude:real)["Empire", -73.9857, 40.7484, "Paris", 2.29, 48.85] | evaluate geo_polygon_lookup(polygons, polygon, longitude, latitude)`, `[[Empire -73.9857 40.7484 NY]]`},
+		{`let polygons = datatable(polygon_name:string, polygon:dynamic)["NY", dynamic({"type":"Polygon","coordinates":[[[-74.1,40.6],[-73.8,40.6],[-73.8,40.9],[-74.1,40.9],[-74.1,40.6]]]})]; datatable(name:string, longitude:real, latitude:real)["Edge", -74.12, 40.7, "Paris", 2.29, 48.85] | evaluate geo_polygon_lookup(polygons, polygon, longitude, latitude, radius = 7000, return_unmatched = true) | order by name asc`, `[[Edge -74.12 40.7 NY] [Paris 2.29 48.85 <nil>]]`},
+		{`let roads = datatable(road_name:string, road:dynamic)["5th Avenue NY", dynamic({"type":"LineString","coordinates":[[-73.97291864770574,40.76428551254824],[-73.99708638113894,40.73145135821781]]})]; datatable(name:string, longitude:real, latitude:real)["Empire State Building", -73.98567337898565, 40.74842629977377, "London", -0.13, 51.49] | evaluate geo_line_lookup(roads, road, longitude, latitude, 100, return_lookup_key = true) | project name, road_name, isnotnull(road)`, `[[Empire State Building 5th Avenue NY 1]]`},
 		{`let L = datatable(net:string, site:string, tag:string)["10.0.0.0/8", "a", "x", "10.0.0.0/8", "b", "y"]; datatable(ip:string, site:string)["10.1.2.3", "b"] | evaluate ipv4_lookup(L, ip, net, site)`, `[[10.1.2.3 b 10.0.0.0/8 y]]`},
 	} {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
 			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
 		}
 	}
-	for _, query := range []string{`print a=1 | evaluate narrow(1)`, `print a=1 | evaluate pivot(nope)`, `print a=1 | evaluate pivot(a, percentile(a, 50))`, `print ip="1.1.1.1" | evaluate ipv4_lookup(nope, ip, net)`} {
+	for _, query := range []string{`print a=1 | evaluate narrow(1)`, `print a=1 | evaluate pivot(nope)`, `print a=1 | evaluate pivot(a, percentile(a, 50))`, `print ip="1.1.1.1" | evaluate ipv4_lookup(nope, ip, net)`, `print lon=1.0, lat=1.0 | evaluate geo_line_lookup(datatable(l:dynamic)[dynamic(null)], l, lon, lat)`, `print lon=1.0, lat=1.0 | evaluate geo_polygon_lookup(datatable(p:dynamic)[dynamic(null)], p, lon, lat, color = 1)`} {
 		if _, err := Compile(query, time.Now(), CompileConfig{Tables: featureCatalog(), Values: testValues(db)}); err == nil {
 			t.Fatalf("invalid plugin call accepted: %s", query)
 		}
