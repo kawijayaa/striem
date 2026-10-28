@@ -24,7 +24,7 @@ func datetimePartOptions() []ksql.Option {
 		}))
 	}
 	for _, config := range []struct{ name, part string }{
-		{"getyear", "year"}, {"getmonth", "month"}, {"monthofyear", "month"}, {"dayofmonth", "day"}, {"dayofyear", "dayofyear"}, {"hourofday", "hour"}, {"week_of_year", "week_of_year"},
+		{"getyear", "year"}, {"getmonth", "month"}, {"monthofyear", "month"}, {"dayofmonth", "day"}, {"dayofyear", "dayofyear"}, {"hourofday", "hour"}, {"week_of_year", "week_of_year"}, {"weekofyear", "week_of_year"},
 	} {
 		config := config
 		options = append(options, ksql.WithTypedFunction(config.name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
