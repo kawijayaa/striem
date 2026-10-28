@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -397,6 +398,10 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	columns, results, err := scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns, compiled.TimespanColumns)
 	if err != nil {
 		s.logger.Error("Could not read query result", "error", err)
+		if errors.Is(err, errResultTooLarge) {
+			writeQueryError(w, err)
+			return
+		}
 		var executionError sqlite3.Error
 		if errors.As(err, &executionError) && executionError.Code == sqlite3.ErrError {
 			writeQueryError(w, err)
@@ -499,6 +504,15 @@ func requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// Kusto truncates query results at 500,000 records or 64 MB; Striem rejects
+// larger results instead of buffering them without bound.
+const (
+	maxResultRows  = 500000
+	maxResultBytes = 64 << 20
+)
+
+var errResultTooLarge = &kql.Error{Message: fmt.Sprintf("query result exceeds %d records or %d MB; add take, summarize or a filter", maxResultRows, maxResultBytes>>20), Line: 1, Column: 1}
+
 func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}, timespanColumns ...map[string]struct{}) ([]string, []map[string]any, error) {
 	timespans := map[string]struct{}{}
 	if len(timespanColumns) > 0 && timespanColumns[0] != nil {
@@ -509,7 +523,11 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 		return nil, nil, err
 	}
 	results := make([]map[string]any, 0)
+	size := 0
 	for rows.Next() {
+		if len(results) >= maxResultRows || size > maxResultBytes {
+			return nil, nil, errResultTooLarge
+		}
 		values := make([]any, len(columns))
 		pointers := make([]any, len(columns))
 		for index := range values {
@@ -541,6 +559,10 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 			}
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
+			}
+			size += 16
+			if text, ok := value.(string); ok {
+				size += len(text)
 			}
 			if text, ok := value.(string); ok {
 				if _, dynamic := dynamicColumns[column]; !dynamic {

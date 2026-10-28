@@ -1516,3 +1516,25 @@ func TestParenthesizedPipelineSourcesThroughAPI(t *testing.T) {
 		}
 	}
 }
+
+// Results beyond Kusto's 500,000-record truncation limit are rejected
+// rather than buffered without bound.
+func TestScanRowsRejectsOversizedResults(t *testing.T) {
+	store := testStore(t)
+	rows, err := store.DB().QueryContext(t.Context(), `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 500001) SELECT x FROM n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if _, _, err := scanRows(rows, nil, nil); err != errResultTooLarge {
+		t.Fatalf("err = %v, want errResultTooLarge", err)
+	}
+	rows, err = store.DB().QueryContext(t.Context(), `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 10) SELECT x FROM n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if _, results, err := scanRows(rows, nil, nil); err != nil || len(results) != 10 {
+		t.Fatalf("results %d err %v", len(results), err)
+	}
+}
