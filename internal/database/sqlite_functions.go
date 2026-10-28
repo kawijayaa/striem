@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/kawijayaa/ksql/runtime"
 	"github.com/kawijayaa/striem/internal/eventtime"
 	"github.com/mattn/go-sqlite3"
 )
@@ -89,6 +90,8 @@ func init() {
 		}
 		for name, function := range map[string]any{
 			"kql_regex_captures":                   kqlRegexCaptures,
+			"kql_key_values":                       runtime.KeyValuesJSON,
+			"kql_toguid":                           kqlToGUID,
 			"kql_parse_ipv4":                       kqlParseIPv4,
 			"kql_parse_ipv4_mask":                  kqlParseIPv4Mask,
 			"kql_format_ipv4":                      kqlFormatIPv4,

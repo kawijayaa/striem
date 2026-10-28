@@ -343,7 +343,7 @@ func TestSchemaAdvertisesEnabledKSQLFeatures(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"where", "search", "project", "project-away", "project-rename", "summarize", "sample", "mv-expand", "mv-apply", "join", "invoke", "parse", "parse-where"} {
+	for _, value := range []string{"where", "search", "project", "project-away", "project-rename", "summarize", "sample", "mv-expand", "mv-apply", "join", "invoke", "parse", "parse-where", "parse-kv"} {
 		if !contains(schema.Operators, value) {
 			t.Fatalf("operators do not include %q: %v", value, schema.Operators)
 		}

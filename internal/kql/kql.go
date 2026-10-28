@@ -225,6 +225,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		dialect.WithRegexFunction("kql_regex"),
 		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
 		dialect.WithRegexCapturesFunction("kql_regex_captures"),
+		dialect.WithKeyValuesFunction("kql_key_values"),
 	)
 	compiler := ksql.New(target, options...)
 	result := compiler.Compile(source)
@@ -588,6 +589,7 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("tobool", conversionFunction("kql_tobool")),
 		ksql.WithFunction("toboolean", conversionFunction("kql_tobool")),
 		ksql.WithFunction("todatetime", ksql.SQLFunction("kql_todatetime")),
+		ksql.WithFunction("toguid", conversionFunction("kql_toguid")),
 		ksql.WithFunction("array_length", ksql.SQLFunction("kql_array_length")),
 		ksql.WithFunction("bag_keys", ksql.SQLFunction("kql_bag_keys")),
 		ksql.WithFunction("bag_has_key", ksql.SQLFunction("kql_bag_has_key")),

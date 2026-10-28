@@ -1272,4 +1272,7 @@ test('parse operator autocompletes and extracts typed columns', async ({ page })
   await run(page, 1);
   await expect(page.locator('#results-panel')).toContainText('root');
   await expect(page.locator('#results-panel')).toContainText('22');
+  await edit(page, 'print Line="action=deny src=10.0.0.5" | parse-kv Line as (action, src) with (pair_delimiter=" ", kv_delimiter="=") | project action, src');
+  await run(page, 1);
+  await expect(page.locator('#results-panel')).toContainText('10.0.0.5');
 });
