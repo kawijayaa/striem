@@ -78,6 +78,56 @@ func mathOptions() []ksql.Option {
 		}
 		return ksql.TypedExpression{Type: args[0].Type, SQL: &sqlast.Call{Name: "floor", Args: []sqlast.Expr{args[0].SQL}}}, nil
 	}))
+	options = append(options, ksql.WithTypedFunction("rand", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		switch {
+		case len(args) == 0:
+			return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_rand"}}, nil
+		case len(args) == 1 && (args[0].Type == ksql.TypeInt || args[0].Type == ksql.TypeLong || args[0].Type == ksql.TypeUnknown):
+			return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "kql_rand", Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}
+		return ksql.TypedExpression{}, fmt.Errorf("rand takes no arguments or one integer range")
+	}))
+	options = append(options, ksql.WithTypedFunction("bin_at", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 3 {
+			return ksql.TypedExpression{}, fmt.Errorf("bin_at requires a value, bin size and fixed point")
+		}
+		value, size, fixed := args[0], args[1], args[2]
+		values := []sqlast.Expr{value.SQL, size.SQL, fixed.SQL}
+		switch {
+		case value.Type == ksql.TypeDateTime && size.Type == ksql.TypeTimespan && fixed.Type == ksql.TypeDateTime:
+			return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_bin_at_datetime", Args: values}}, nil
+		case value.Type == ksql.TypeTimespan && size.Type == ksql.TypeTimespan && fixed.Type == ksql.TypeTimespan:
+			return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_bin_at", Args: values}}, nil
+		case numericType(value.Type) && numericType(size.Type) && numericType(fixed.Type):
+			kind := ksql.TypeLong
+			if value.Type == ksql.TypeReal || size.Type == ksql.TypeReal || fixed.Type == ksql.TypeReal {
+				kind = ksql.TypeReal
+			}
+			return ksql.TypedExpression{Type: kind, SQL: &sqlast.Call{Name: "kql_bin_at", Args: values}}, nil
+		}
+		return ksql.TypedExpression{}, fmt.Errorf("bin_at requires matching numeric, timespan or datetime values with a timespan size for temporal values")
+	}))
+	for _, name := range []string{"array_sort_asc", "array_sort_desc"} {
+		name := name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) == 0 || len(args) > 64 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires 1 to 64 arrays and an optional nulls_last", name)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				last := i == len(args)-1 && i > 0
+				if arg.Type == ksql.TypeBool && last {
+					values[i] = arg.SQL
+					continue
+				}
+				if arg.Type != ksql.TypeDynamic && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be dynamic arrays", name)
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
+		}))
+	}
 	options = append(options, ksql.WithTypedFunction("round", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) < 1 || len(args) > 2 || !numericType(args[0].Type) || (len(args) == 2 && args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown) {
 			return ksql.TypedExpression{}, fmt.Errorf("round requires a number and an optional integer precision")

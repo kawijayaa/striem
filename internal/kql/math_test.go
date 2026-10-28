@@ -36,3 +36,26 @@ func TestMathAndPredicateFunctions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's array_sort_asc, bin_at and rand examples.
+func TestSortingBinningAndRandom(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`let array1 = dynamic([1,3,4,5,2]); let array2 = dynamic(["a","b","c","d","e"]); print array_sort_asc(array1,array2)`, `[[[[1,2,3,4,5],["a","e","b","c","d"]]]]`},
+		{`let Names = "John,Paul,Jane,Kao"; let SortedNames = strcat_array(array_sort_asc(split(Names, ",")), ","); print result = SortedNames`, `[[Jane,John,Kao,Paul]]`},
+		{`datatable(command:string, command_time:datetime, user_id:string)['chmod', datetime(2019-07-15), "user1", 'ls', datetime(2019-07-02), "user1", 'dir', datetime(2019-07-22), "user1", 'rm', datetime(2019-07-23), "user2", 'pwd', datetime(2019-07-25), "user2"] | summarize timestamps = make_list(command_time), commands = make_list(command) by user_id | project user_id, commands_in_chronological_order = array_sort_asc(timestamps, commands)[1] | order by user_id asc`,
+			`[[user1 ["ls","chmod","dir"]] [user2 ["rm","pwd"]]]`},
+		{`print a=array_sort_asc(dynamic([null,"blue","yellow","green",null])), b=array_sort_asc(dynamic([null,"blue","yellow","green",null]), false), c=array_sort_desc(dynamic([1, "a", 3, 2.5]))`,
+			`[[["blue","green","yellow",null,null] [null,null,"blue","green","yellow"] ["a",3,2.5,1]]]`},
+		{`print a=array_sort_asc(dynamic([3,1]), dynamic([1])), b=array_sort_asc(dynamic([9007199254740993, 9007199254740992]))`, `[[[[1,3],null] [9007199254740992,9007199254740993]]]`},
+		{`print a=bin_at(6.5, 2.5, 7), b=tostring(bin_at(time(1h), 1d, 12h)), c=bin_at(datetime(2017-05-15 10:20:00.0), 1d, datetime(1970-01-01 12:00:00.0)), d=bin_at(datetime(2017-05-17 10:20:00.0), 7d, datetime(2017-06-04 00:00:00.0)), e=bin_at(7, 3, 1)`,
+			`[[4.5 -12:00:00 2017-05-14T12:00:00.000000000Z 2017-05-14T00:00:00.000000000Z 7]]`},
+		{`datatable(Date:datetime, NumOfEvents:int)[datetime(2018-02-24T15:14),3, datetime(2018-02-24T15:24),4, datetime(2018-02-23T16:14),4, datetime(2018-02-23T17:29),4, datetime(2018-02-26T15:14),5] | summarize TotalEvents=sum(NumOfEvents) by bin_at(Date, 1d, datetime(2018-02-24 15:14:00.0000000)) | order by Date asc`,
+			`[[2018-02-23T15:14:00.000000000Z 8] [2018-02-24T15:14:00.000000000Z 7] [2018-02-26T15:14:00.000000000Z 5]]`},
+		{`range i from 1 to 200 step 1 | extend r=rand(), n=rand(10) | summarize lo=min(r) >= 0, hi=max(r) < 1, nlo=min(n), nhi=max(n), distinct_r=dcount(r) > 150`, `[[1 1 0 9 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

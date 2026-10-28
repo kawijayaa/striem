@@ -94,6 +94,10 @@ func init() {
 			"kql_toguid":                           kqlToGUID,
 			"kql_math":                             kqlMath,
 			"kql_round":                            kqlRound,
+			"kql_array_sort_asc":                   kqlArraySort(false),
+			"kql_array_sort_desc":                  kqlArraySort(true),
+			"kql_bin_at":                           kqlBinAt,
+			"kql_bin_at_datetime":                  kqlBinAtDatetime,
 			"kql_datetime_add_ticks":               kqlDatetimeAddTicks,
 			"kql_datetime_diff_ticks":              kqlDatetimeDiffTicks,
 			"kql_totimespan":                       kqlToTimespan,
@@ -164,6 +168,10 @@ func init() {
 			if err := connection.RegisterFunc(name, function, true); err != nil {
 				return err
 			}
+		}
+		// rand is volatile: SQLite must evaluate it for every row.
+		if err := connection.RegisterFunc("kql_rand", kqlRand, false); err != nil {
+			return err
 		}
 		for name, function := range sqlMathFunctions() {
 			if err := connection.RegisterFunc(name, function, true); err != nil {

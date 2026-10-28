@@ -28,6 +28,8 @@ parameters as constants.
 
 ## Verified implementation increments
 
+- Added `rand`, `bin_at` (numbers, timespans and datetimes aligned to a fixed point) and `array_sort_asc`/`array_sort_desc` with Kusto's mixed-type ordering, `nulls_last` and companion arrays; Microsoft's examples pass. With several arrays the result is one dynamic array of arrays (supporting `array_sort_asc(a, b)[1]`) rather than Kusto's per-array output columns.
+
 - Added `evaluate bag_unpack` (KSQL `docs/bag-unpack.md`) with output schemas, prefixes, `columnsConflict`, `ignoredProperties`, and data-driven slots: without a schema, Striem runs a bounded key-discovery query (2-second deadline) before compiling. Microsoft's examples pass. Raised the per-operator projection limit from 32 to 256 columns, since unpacked bags and wide event schemas exceeded it. Query hints, `in (subquery)`, `let ... = view () {...}` and `union isfuzzy=true` are supported.
 
 - Security: `table("...")`, `external_table("...")` and `materialized_view("...")` had compiled to raw SQL table references, bypassing the table catalog and dataset filters, so `table("sqlite_master")`, `table("investigation_progress")` or `table("workspace_metadata")` could read storage and challenge state. They now resolve exactly like bare table names. Database/cluster qualifiers, union wildcards, management commands and SQL-like string payloads were also probed and stay rejected or parameterized.
