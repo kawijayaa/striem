@@ -451,3 +451,22 @@ VALUES (1, '2026-08-07T00:00:00Z', 'source', 'login', 'pc-1', 'alice', 'signed i
 		t.Fatalf("migrated raw data = %s", raw)
 	}
 }
+
+// The user query pool rejects writes.
+func TestQueryDatabaseIsReadOnly(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.QueryDB().ExecContext(t.Context(), "DELETE FROM investigation_progress"); err == nil {
+		t.Fatal("query pool accepted a write")
+	}
+	var count int
+	if err := store.QueryDB().QueryRowContext(t.Context(), "SELECT count(*) FROM events").Scan(&count); err != nil {
+		t.Fatalf("query pool read: %v", err)
+	}
+	if _, err := store.DB().ExecContext(t.Context(), "DELETE FROM investigation_progress"); err != nil {
+		t.Fatalf("store pool write: %v", err)
+	}
+}

@@ -55,7 +55,7 @@ func New(store *database.Store, logger *slog.Logger) *Server {
 		tableCatalog:  tableCatalog,
 		ready:         true,
 		challengeName: challengeName,
-		prepareQuery:  store.DB().PrepareContext,
+		prepareQuery:  store.QueryDB().PrepareContext,
 	}
 }
 
@@ -409,7 +409,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
-	rows, err := s.store.DB().QueryContext(ctx, compiled.SQL, compiled.Args...)
+	rows, err := s.store.QueryDB().QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
 		s.logger.Error("Query execution failed", "error", err)
 		writeQueryError(w, invalidSQLExpressionError())
@@ -651,7 +651,7 @@ func (s *Server) discoveredValues(ctx context.Context) func(string, []any) ([]an
 	return func(query string, args []any) ([]any, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		rows, err := s.store.DB().QueryContext(ctx, query, args...)
+		rows, err := s.store.QueryDB().QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -674,7 +674,7 @@ func (s *Server) bagKeys(ctx context.Context) func(string, []any) ([]ksql.BagKey
 	return func(query string, args []any) ([]ksql.BagKey, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		rows, err := s.store.DB().QueryContext(ctx, query, args...)
+		rows, err := s.store.QueryDB().QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}

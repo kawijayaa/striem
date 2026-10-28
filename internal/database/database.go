@@ -17,6 +17,7 @@ import (
 
 type Store struct {
 	db             *sql.DB
+	queryDB        *sql.DB
 	challengeMu    sync.RWMutex
 	challenge      ChallengeDefinition
 	eventStorageMu sync.RWMutex
@@ -60,10 +61,23 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(readerConnections)
 	db.SetMaxIdleConns(readerConnections)
 
-	store := &Store{db: db}
+	store := &Store{db: db, queryDB: db}
 	if err := store.initialize(context.Background()); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// User queries run on connections where SQLite rejects every write, so
+	// a compiler defect cannot change progress or events. An in-memory
+	// database is private to its connection and keeps the shared pool.
+	if path != ":memory:" && !strings.Contains(path, "?") {
+		queryDB, err := sql.Open(sqliteDriverName, path+"?_query_only=true")
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("open query database: %w", err)
+		}
+		queryDB.SetMaxOpenConns(readerConnections)
+		queryDB.SetMaxIdleConns(readerConnections)
+		store.queryDB = queryDB
 	}
 	return store, nil
 }
@@ -509,7 +523,15 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+// QueryDB is the pool for user queries; its connections cannot write.
+func (s *Store) QueryDB() *sql.DB {
+	return s.queryDB
+}
+
 func (s *Store) Close() error {
+	if s.queryDB != s.db {
+		s.queryDB.Close()
+	}
 	return s.db.Close()
 }
 
