@@ -172,6 +172,10 @@ func TestDocumentationExamples(t *testing.T) {
 			for i, cell := range row {
 				if i < len(cells) {
 					cells[i] = docNormalize(cell)
+					// The docs show some Boolean results as 1 and 0.
+					if i < len(columns) && types[columns[i]] == ksql.TypeBool && (cells[i] == "N1" || cells[i] == "N0") {
+						cells[i] = map[string]string{"N1": "Btrue", "N0": "Bfalse"}[cells[i]]
+					}
 				}
 			}
 			want = append(want, strings.Join(cells, " | "))
