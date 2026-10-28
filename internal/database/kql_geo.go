@@ -446,7 +446,7 @@ func kqlGeoLineCentroid(value any) (any, error) {
 }
 
 func kqlGeoPolygonArea(value any) any {
-	polygon, _, ok := geoPolygon(value)
+	polygon, ok := geoUnionPolygon(value)
 	if !ok {
 		return nil
 	}
@@ -454,7 +454,7 @@ func kqlGeoPolygonArea(value any) any {
 }
 
 func kqlGeoPolygonPerimeter(value any) any {
-	polygon, _, ok := geoPolygon(value)
+	polygon, ok := geoUnionPolygon(value)
 	if !ok {
 		return nil
 	}
@@ -469,7 +469,7 @@ func kqlGeoPolygonPerimeter(value any) any {
 }
 
 func kqlGeoPolygonCentroid(value any) (any, error) {
-	polygon, _, ok := geoPolygon(value)
+	polygon, ok := geoUnionPolygon(value)
 	if !ok {
 		return nil, nil
 	}

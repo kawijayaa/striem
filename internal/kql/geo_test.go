@@ -65,3 +65,27 @@ func TestGeoH3Functions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's intersection, union and buffer examples, plus measurements of
+// overlapping MultiPolygons (Kusto measures their union).
+func TestGeoOverlay(t *testing.T) {
+	db := featureDatabase(t)
+	two := `dynamic({"type":"MultiPolygon","coordinates":[[[[-73.9495,40.7969],[-73.95807266235352,40.80068603561921],[-73.98201942443848,40.76825672305777],[-73.97317886352539,40.76455136505513],[-73.9495,40.7969]]],[[[-73.94262313842773,40.775991804565585],[-73.98107528686523,40.791849155467695],[-73.99600982666016,40.77092185281977],[-73.96150588989258,40.75609977566361],[-73.94262313842773,40.775991804565585]]]]})`
+	for _, tc := range []struct{ query, want string }{
+		{`print a=round(geo_polygon_area(` + two + `)), p=round(geo_polygon_perimeter(` + two + `), 1), c=round(todouble(geo_polygon_centroid(` + two + `).coordinates[0]), 6)`, `[[1.0889972e+07 15943.5 -73.96857]]`},
+		{`print i=geo_intersection_2lines(dynamic({"type":"LineString","coordinates":[[1, 1],[2, 2]]}), dynamic({"type":"LineString","coordinates":[[3, 3],[4, 4]]})), j=geo_intersection_2lines(dynamic({"type":"LineString","coordinates":[[0,0],[2,2]]}), dynamic({"type":"LineString","coordinates":[[0,2],[2,0]]})).type, k=geo_intersection_2lines(dynamic({"type":"LineString","coordinates":[[-73.978929,40.785155],[-73.980903,40.782621]]}), dynamic({"type":"LineString","coordinates":[[-73.978929,40.785155],[-73.980903,40.782621]]})), bad=isnull(geo_intersection_2lines(dynamic({"type":"LineString","coordinates":[[1, 1],[2, 2]]}), dynamic({"type":"LineString","coordinates":[[3, 3]]})))`,
+			`[[{"type":"GeometryCollection","geometries":[]} Point {"type":"LineString","coordinates":[[-73.978929,40.785155],[-73.980903,40.782621]]} 1]]`},
+		{`print touch=geo_intersection_2polygons(dynamic({"type":"Polygon","coordinates":[[[2,45],[0,45],[1,44],[2,45]]]}), dynamic({"type":"Polygon","coordinates":[[[3,44],[2,45],[2,43],[3,44]]]})), none=geo_intersection_2polygons(dynamic({"type":"Polygon","coordinates":[[[2,45],[0,45],[1,44],[2,45]]]}), dynamic({"type":"Polygon","coordinates":[[[3,44],[3,45],[2,43],[3,44]]]})), bad=isnull(geo_intersection_2polygons(dynamic({"type":"Polygon"}), dynamic({"type":"Polygon","coordinates":[[[3,44],[3,45],[2,43],[3,44]]]})))`,
+			`[[{"type":"Point","coordinates":[2,45]} {"type":"GeometryCollection","geometries":[]} 1]]`},
+		{`print s=geo_intersection_2polygons(dynamic({"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]}), dynamic({"type":"Polygon","coordinates":[[[1,1],[3,1],[3,3],[1,3],[1,1]]]})) | project t=s.type, a=round(geo_polygon_area(s) / 1e9, 2)`, `[[Polygon 12.36]]`},
+		{`print u=geo_union_polygons_array(pack_array(geo_geohash_to_polygon("sunny"), geo_geohash_to_polygon("sunpn"))) | project t=u.type, n=array_length(u.coordinates[0])`, `[[Polygon 7]]`},
+		{`print u=geo_union_polygons_array(pack_array(dynamic({"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}), dynamic({"type":"Polygon","coordinates":[[[10,10],[11,10],[11,11],[10,10]]]}))) | project t=u.type`, `[[MultiPolygon]]`},
+		{`let lineString = dynamic({"type":"LineString","coordinates":[[-110.522, 39.198],[-91.428, 40.880]]}); let polygon = dynamic({"type":"Polygon","coordinates":[[[-90.263,36.738],[-102.041,45.274],[-109.335,36.527],[-90.263,36.738]],[[-100.393,41.705],[-103.139,38.925],[-97.558,39.113],[-100.393,41.705]]]}); print i=geo_intersection_line_with_polygon(lineString, polygon) | project t=i.type, n=array_length(i.coordinates)`, `[[MultiLineString 2]]`},
+		{`print u=geo_union_lines_array(pack_array(dynamic({"type":"LineString","coordinates":[[0,0],[1,1]]}), dynamic({"type":"LineString","coordinates":[[1,1],[2,2]]}), dynamic({"type":"LineString","coordinates":[[0,0],[1,1]]})))`, `[[{"type":"LineString","coordinates":[[0,0],[1,1],[2,2]]}]]`},
+		{`print b=geo_point_buffer(0, 0, 1000) | project t=b.type, inside=geo_point_in_polygon(0.005, 0, b), outside=geo_point_in_polygon(0.01, 0, b), bad=isnull(geo_point_buffer(0, 0, -1))`, `[[Polygon 1 0 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}
