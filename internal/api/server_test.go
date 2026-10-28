@@ -1380,7 +1380,9 @@ func TestParseJSONThroughAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := result.Rows[0]
-	if row["invalid"] != "{bad}" || row["number"] != json.Number("9223372036854775807") || row["b"] != false || row["s"] != "hello" || row["last"] != json.Number("9007199254740993") {
+	// Bare dynamic integers beyond JavaScript's safe range arrive as exact
+	// strings.
+	if row["invalid"] != "{bad}" || row["number"] != "9223372036854775807" || row["b"] != false || row["s"] != "hello" || row["last"] != "9007199254740993" {
 		t.Fatalf("dynamic scalar values=%#v", row)
 	}
 	values, ok := row["a"].([]any)

@@ -22,10 +22,11 @@ func TestScalarCommonTypesThroughAPI(t *testing.T) {
 		t.Fatalf("string output=%#v", rows)
 	}
 
+	// Integers beyond JavaScript's safe range are sent as exact strings.
 	response := queryAPI(t, server.URL, `print large=iff(true,9223372036854775807,"x"),small=iff(true,-9223372036854775808,"x")`)
 	body, _ := io.ReadAll(response.Body)
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"large":9223372036854775807`) || !strings.Contains(string(body), `"small":-9223372036854775808`) {
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"large":"9223372036854775807"`) || !strings.Contains(string(body), `"small":"-9223372036854775808"`) {
 		t.Fatalf("lost integer precision: %s", body)
 	}
 	for _, q := range []string{`print iff(1,2,3)`, `print -"abc"`, `print true and 1`, `print coalesce(1,"x")`} {

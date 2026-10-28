@@ -22,7 +22,7 @@ func TestParseOperatorThroughAPI(t *testing.T) {
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Rows) != 1 {
 		t.Fatalf("response: %s %v", body, err)
 	}
-	for key, want := range map[string]string{"User": `"root'); --"`, "Port": "9007199254740993", "At": `"2014-11-08T15:05:02.000000000Z"`} {
+	for key, want := range map[string]string{"User": `"root'); --"`, "Port": "\"9007199254740993\"", "At": `"2014-11-08T15:05:02.000000000Z"`} {
 		if got := string(result.Rows[0][key]); got != want {
 			t.Fatalf("%s got %s want %s; body=%s", key, got, want, body)
 		}

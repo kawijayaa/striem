@@ -22,7 +22,7 @@ func TestBitwiseAggregatesThroughAPI(t *testing.T) {
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Rows) != 1 {
 		t.Fatalf("response: %s %v", body, err)
 	}
-	for key, want := range map[string]string{"a": "9223372036854775807", "o": "9223372036854775807", "x": "9223372036854775807", "hex": `"7fffffffffffffff"`} {
+	for key, want := range map[string]string{"a": "\"9223372036854775807\"", "o": "\"9223372036854775807\"", "x": "\"9223372036854775807\"", "hex": `"7fffffffffffffff"`} {
 		if got := string(result.Rows[0][key]); got != want {
 			t.Fatalf("%s got %s want %s", key, got, want)
 		}

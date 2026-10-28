@@ -26,7 +26,8 @@ func TestLocalQueryParametersThroughAPI(t *testing.T) {
 		t.Fatalf("invalid result: %s %v", body, err)
 	}
 	row := result.Rows[0]
-	if string(row["n"]) != "9223372036854775807" || string(row["flag"]) != "true" || string(row["when"]) != `"2026-01-02T00:00:00.000000000Z"` || !strings.Contains(string(row["bag"]), "9007199254740993") {
+	// Integers beyond JavaScript's safe range are sent as exact strings.
+	if string(row["n"]) != `"9223372036854775807"` || string(row["flag"]) != "true" || string(row["when"]) != `"2026-01-02T00:00:00.000000000Z"` || !strings.Contains(string(row["bag"]), "9007199254740993") {
 		t.Fatalf("typed values lost: %s", body)
 	}
 	var text string

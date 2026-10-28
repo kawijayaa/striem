@@ -22,7 +22,7 @@ func TestDatetimeDiffThroughAPI(t *testing.T) {
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Rows) != 1 {
 		t.Fatalf("response: %s %v", body, err)
 	}
-	for key, want := range map[string]string{"months": "1", "days": "1", "wide": "315537897599999999", "invalid": "null"} {
+	for key, want := range map[string]string{"months": "1", "days": "1", "wide": "\"315537897599999999\"", "invalid": "null"} {
 		if got := string(result.Rows[0][key]); got != want {
 			t.Fatalf("%s got %s want %s", key, got, want)
 		}

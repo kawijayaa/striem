@@ -22,7 +22,7 @@ func TestBitwiseThroughAPI(t *testing.T) {
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Rows) != 1 {
 		t.Fatalf("response: %s %v", body, err)
 	}
-	for key, want := range map[string]string{"a": "9223372036854775807", "o": "9223372036854775807", "x": "0", "n": "-9223372036854775808", "l": "-9223372036854775808", "r": "0", "c": "63", "invalid": "null"} {
+	for key, want := range map[string]string{"a": "\"9223372036854775807\"", "o": "\"9223372036854775807\"", "x": "0", "n": "\"-9223372036854775808\"", "l": "\"-9223372036854775808\"", "r": "0", "c": "63", "invalid": "null"} {
 		if got := string(result.Rows[0][key]); got != want {
 			t.Fatalf("%s got %s want %s", key, got, want)
 		}
