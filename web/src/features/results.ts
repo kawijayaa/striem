@@ -58,10 +58,20 @@ function compareValues(left: unknown, right: unknown): number {
   if (left === null || left === undefined) return 1;
   if (right === null || right === undefined) return -1;
   if (typeof left === 'number' && typeof right === 'number') return left - right;
+  // Integers beyond 2^53 arrive as decimal strings; compare them exactly.
+  const leftInteger = exactInteger(left);
+  const rightInteger = exactInteger(right);
+  if (leftInteger !== null && rightInteger !== null) return leftInteger < rightInteger ? -1 : leftInteger > rightInteger ? 1 : 0;
   return comparableValue(left).localeCompare(comparableValue(right), undefined, {
     numeric: true,
     sensitivity: 'base',
   });
+}
+
+function exactInteger(value: unknown): bigint | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? BigInt(value) : null;
+  if (typeof value === 'string' && /^-?\d{1,20}$/.test(value)) return BigInt(value);
+  return null;
 }
 
 function comparableValue(value: unknown): string {

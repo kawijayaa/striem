@@ -44,3 +44,9 @@ test('mobile result summaries retain false/zero values and skip raw objects', ()
   assert.equal(resultValue(false), 'false');
   assert.equal(resultValue(1000), (1000).toLocaleString());
 });
+
+test('integers beyond 2^53 arrive as strings and sort exactly with numbers', () => {
+  const rows = [{ h: '9223372036854775807' }, { h: -5 }, { h: '-9007199254740993' }, { h: 3 }, { h: '9007199254740993' }, { h: 9007199254740991 }];
+  const sorted = sortResultRows({ columns: ['h'], rows, rowCount: rows.length, durationMs: 0 }, { column: 'h', direction: 'asc' });
+  assert.deepEqual(sorted.map(row => row.h), ['-9007199254740993', -5, 3, 9007199254740991, '9007199254740993', '9223372036854775807']);
+});

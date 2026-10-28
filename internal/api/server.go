@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -533,6 +534,9 @@ const (
 	maxResultBytes = 64 << 20
 )
 
+// maxSafeInteger is JavaScript's Number.MAX_SAFE_INTEGER.
+const maxSafeInteger = 1<<53 - 1
+
 var errResultTooLarge = &kql.Error{Message: fmt.Sprintf("query result exceeds %d records or %d MB; add take, summarize or a filter", maxResultRows, maxResultBytes>>20), Line: 1, Column: 1}
 
 func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}, timespanColumns ...map[string]struct{}) ([]string, []map[string]any, error) {
@@ -578,6 +582,11 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 				case float64:
 					value = current != 0
 				}
+			}
+			// Browsers parse JSON numbers as doubles; integers beyond ±2^53,
+			// such as hashes and 64-bit IDs, go out as exact decimal strings.
+			if integer, ok := value.(int64); ok && (integer > maxSafeInteger || integer < -maxSafeInteger) {
+				value = strconv.FormatInt(integer, 10)
 			}
 			if bytes, ok := value.([]byte); ok {
 				value = string(bytes)
