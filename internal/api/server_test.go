@@ -1427,7 +1427,7 @@ func TestUnnamedExtendThroughAPI(t *testing.T) {
 
 func TestProjectionWidthLimitThroughAPI(t *testing.T) {
 	server := serveStore(t, testStore(t))
-	columns := make([]string, 33)
+	columns := make([]string, 257)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d=%d", i, i)
 	}
@@ -1437,8 +1437,8 @@ func TestProjectionWidthLimitThroughAPI(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "MaxProjectionItems") {
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
-	rows := queryRows(t, server.URL, "print "+strings.Join(columns[:32], ","))
-	if len(rows) != 1 || len(rows[0]) != 32 || rows[0]["c31"] != float64(31) {
+	rows := queryRows(t, server.URL, "print "+strings.Join(columns[:256], ","))
+	if len(rows) != 1 || len(rows[0]) != 256 || rows[0]["c255"] != float64(255) {
 		t.Fatalf("boundary rows=%#v", rows)
 	}
 }

@@ -299,6 +299,8 @@ mv-expand, mv-apply, union, join, lookup, getschema
 
 `parse` and `parse-where` extract typed columns from text in `simple`, `regex` (with `flags=imsU`) and `relaxed` modes, for example `| parse-where Message with "Failed password for " User " from " SourceIp " port " Port:int`. Unmatched rows get null columns with `parse` and are dropped by `parse-where`; strict modes null every column when one typed conversion fails. Timespans (`1d`, `90m`, `datetime(...) + 1h`, `End - Start > 5m`) are typed and displayed as `d.hh:mm:ss`; `ago`, `now(offset)`, `bin`, `totimespan` and `dayofweek` accept them.
 
+`evaluate bag_unpack(AuditData)` turns each property of a dynamic column into its own column (an output schema such as `: (*, UserId:string)` skips data discovery).
+
 A final `render` (for example `| render timechart`) is validated and reported with the results, which stay tabular; Striem does not draw charts.
 
 After `sort`, `top` or `serialize`, the window functions `prev`, `next`, `row_number`, `row_cumsum`, `row_rank_dense` and `row_rank_min` work in `extend`, `project`, `serialize` and `where`, for example `| sort by Time asc | extend Gap=datetime_diff('second', Time, prev(Time))`.

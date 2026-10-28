@@ -21,7 +21,7 @@ const keywords = new Set([
   'let', 'declare', 'query_parameters', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
   'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
   'getschema', 'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
-  'lookup', 'invoke', 'parse', 'parse-where', 'parse-kv', 'render', 'timechart', 'columnchart', 'barchart', 'piechart', 'linechart', 'areachart', 'scatterchart', 'with', 'flags', 'simple', 'regex', 'relaxed', 'pair_delimiter', 'kv_delimiter', 'quote', 'escape', 'greedy', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
+  'lookup', 'invoke', 'parse', 'parse-where', 'parse-kv', 'render', 'evaluate', 'bag_unpack', 'columnsConflict', 'ignoredProperties', 'timechart', 'columnchart', 'barchart', 'piechart', 'linechart', 'areachart', 'scatterchart', 'with', 'flags', 'simple', 'regex', 'relaxed', 'pair_delimiter', 'kv_delimiter', 'quote', 'escape', 'greedy', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
   'on', 'by', 'of', 'asc', 'desc', 'granny-asc', 'granny-desc',
 ]);
 const logicalOperators = new Set([
@@ -69,6 +69,7 @@ const operatorCompletions = createCompletions('keyword', [
   ['parse-where', 'Extract columns and keep only rows that match'],
   ['parse-kv', 'Extract typed columns from key/value text'],
   ['render', 'Annotate results with a visualization (shown as a table)'],
+  ['evaluate bag_unpack', 'Turn each property of a dynamic column into a column'],
 ], label => `${label} `);
 
 const commandCompletions = createCompletions('keyword', [

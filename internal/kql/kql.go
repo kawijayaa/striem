@@ -152,6 +152,7 @@ type compileSettings struct {
 	tables        TableCatalog
 	fullTextIndex bool
 	parameters    map[string]any
+	bagKeys       func(sql string, args []any) ([]ksql.BagKey, error)
 }
 
 type CompileOption interface {
@@ -166,12 +167,16 @@ type CompileConfig struct {
 	Tables        TableCatalog
 	FullTextIndex bool
 	Parameters    map[string]any
+	// BagKeys runs bag_unpack key discovery SQL, enabling bag_unpack without
+	// an output schema. It receives SQL rendered like compiled queries.
+	BagKeys func(sql string, args []any) ([]ksql.BagKey, error)
 }
 
 func (config CompileConfig) apply(settings *compileSettings) {
 	settings.tables = config.Tables
 	settings.fullTextIndex = config.FullTextIndex
 	settings.parameters = config.Parameters
+	settings.bagKeys = config.BagKeys
 }
 
 type Error struct {
@@ -219,7 +224,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		ksql.WithLimits(ksql.Limits{
 			MaxSourceBytes:     maxSourceBytes,
 			MaxOutputRows:      resultLimit,
-			MaxProjectionItems: 32,
+			MaxProjectionItems: 256,
 			MaxExpansionItems:  1,
 			MaxRegexBytes:      512,
 			MaxJoinKeys:        16,
@@ -232,6 +237,17 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		dialect.WithKeyValuesFunction("kql_key_values"),
 		dialect.WithDatetimeArithmeticFunctions("kql_datetime_add_ticks", "kql_datetime_diff_ticks"),
 	)
+	if settings.bagKeys != nil {
+		options = append(options, ksql.WithBagKeysResolver(func(query sqlast.Query, args []any) ([]ksql.BagKey, error) {
+			normalizeDateTimeLiterals(query)
+			sqlText, err := dialect.Render(target, query)
+			if err != nil {
+				return nil, err
+			}
+			sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
+			return settings.bagKeys(sqlText, append(args, fullTextArgs...))
+		}))
+	}
 	compiler := ksql.New(target, options...)
 	result := compiler.Compile(source)
 	if diagnostic, ok := firstError(result.Diagnostics); ok {
