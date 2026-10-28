@@ -411,24 +411,39 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
-	rows, err := s.store.QueryDB().QueryContext(ctx, compiled.SQL, compiled.Args...)
-	if err != nil {
+	var columns []string
+	var results []map[string]any
+	opened := false
+	err := s.store.RunQuery(ctx, compiled.SQL, compiled.Args, func(rows *sql.Rows) error {
+		opened = true
+		var err error
+		columns, results, err = scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns, compiled.TimespanColumns)
+		return err
+	})
+	if err != nil && !opened {
 		s.logger.Error("Query execution failed", "error", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeQueryError(w, errQueryTimeout)
+			return
+		}
 		writeQueryError(w, invalidSQLExpressionError())
 		return
 	}
-	defer rows.Close()
-
-	columns, results, err := scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns, compiled.TimespanColumns)
 	if err != nil {
 		s.logger.Error("Could not read query result", "error", err)
 		if errors.Is(err, errResultTooLarge) {
 			writeQueryError(w, err)
 			return
 		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeQueryError(w, errQueryTimeout)
+			return
+		}
+		// SQL errors during execution carry Striem's own runtime messages,
+		// such as a function's size limit or a failed assert().
 		var executionError sqlite3.Error
 		if errors.As(err, &executionError) && executionError.Code == sqlite3.ErrError {
-			writeQueryError(w, err)
+			writeQueryError(w, &kql.Error{Message: executionError.Error(), Line: 1, Column: 1})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not read query result", nil)
@@ -534,6 +549,8 @@ const (
 	maxResultRows  = 500000
 	maxResultBytes = 64 << 20
 )
+
+var errQueryTimeout = &kql.Error{Message: "query exceeded the 5-second time limit; filter earlier, or add take or summarize", Line: 1, Column: 1}
 
 // maxSafeInteger is JavaScript's Number.MAX_SAFE_INTEGER.
 const maxSafeInteger = 1<<53 - 1
@@ -665,20 +682,18 @@ func (s *Server) discoveredValues(ctx context.Context) func(string, []any) ([]an
 	return func(query string, args []any) ([]any, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		rows, err := s.store.QueryDB().QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
 		var values []any
-		for rows.Next() {
-			var value any
-			if err := rows.Scan(&value); err != nil {
-				return nil, err
+		err := s.store.RunQuery(ctx, query, args, func(rows *sql.Rows) error {
+			for rows.Next() {
+				var value any
+				if err := rows.Scan(&value); err != nil {
+					return err
+				}
+				values = append(values, value)
 			}
-			values = append(values, value)
-		}
-		return values, rows.Err()
+			return rows.Err()
+		})
+		return values, err
 	}
 }
 
@@ -688,19 +703,17 @@ func (s *Server) bagKeys(ctx context.Context) func(string, []any) ([]ksql.BagKey
 	return func(query string, args []any) ([]ksql.BagKey, error) {
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		rows, err := s.store.QueryDB().QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
 		var keys []ksql.BagKey
-		for rows.Next() {
-			var key ksql.BagKey
-			if err := rows.Scan(&key.Name, &key.JSONType); err != nil {
-				return nil, err
+		err := s.store.RunQuery(ctx, query, args, func(rows *sql.Rows) error {
+			for rows.Next() {
+				var key ksql.BagKey
+				if err := rows.Scan(&key.Name, &key.JSONType); err != nil {
+					return err
+				}
+				keys = append(keys, key)
 			}
-			keys = append(keys, key)
-		}
-		return keys, rows.Err()
+			return rows.Err()
+		})
+		return keys, err
 	}
 }

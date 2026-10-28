@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/ingest"
@@ -1567,6 +1569,68 @@ func TestUnsafeIntegersAreExact(t *testing.T) {
 	for key, value := range want {
 		if rows[0][key] != value {
 			t.Errorf("%s = %#v, want %#v", key, rows[0][key], value)
+		}
+	}
+}
+
+// Queries that hit a time or size limit say so instead of failing
+// generically.
+func TestQueryLimitErrorsAreExplained(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	for query, want := range map[string]string{
+		`print s = strrep(strrep(strrep("A", 1024), 1024), 1024)`: "string replication output exceeds byte limit",
+		`range x from 1 to 100000000000 step 1 | count`:           "5-second time limit",
+		`print assert(1 > 2, "evidence missing")`:                 "evidence missing",
+	} {
+		response := queryAPI(t, server.URL, query)
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), want) {
+			t.Errorf("%s: status %d body %s", query, response.StatusCode, body)
+		}
+	}
+}
+
+// Concurrent runaway queries all stop at their deadline, so none holds a
+// connection forever, and the rest of the API stays responsive meanwhile.
+// go-sqlite3 interrupts only once and SQLite can drop that interrupt.
+func TestRunawayQueriesStopAtTheirDeadline(t *testing.T) {
+	server := serveStore(t, testStore(t))
+	var wg sync.WaitGroup
+	statuses := make(chan int, 12)
+	started := time.Now()
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response := queryAPI(t, server.URL, `range x from 1 to 100000000000 step 1 | count`)
+			response.Body.Close()
+			statuses <- response.StatusCode
+		}()
+	}
+	time.Sleep(200 * time.Millisecond)
+	for _, path := range []string{"/api/questions", "/api/health"} {
+		requestStarted := time.Now()
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || time.Since(requestStarted) > time.Second {
+			t.Errorf("%s during runaway queries: %d after %v", path, response.StatusCode, time.Since(requestStarted))
+		}
+	}
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("runaway queries still running after %v", time.Since(started))
+	}
+	close(statuses)
+	for status := range statuses {
+		if status != http.StatusBadRequest {
+			t.Errorf("runaway query status = %d, want 400", status)
 		}
 	}
 }
