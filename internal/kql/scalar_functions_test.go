@@ -135,3 +135,16 @@ func TestCollectAggregates(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's bin_auto example and set query_now.
+func TestSetRequestOptions(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{"set query_bin_auto_size=1h;\nset query_bin_auto_at=datetime(2017-01-01 00:05);\nrange Timestamp from datetime(2017-01-01 00:05) to datetime(2017-01-01 02:00) step 1m\n| summarize count() by bin_auto(Timestamp) | order by Timestamp asc", `[[2017-01-01T00:05:00.000000000Z 60] [2017-01-01T01:05:00.000000000Z 56]]`},
+		{`set query_now = datetime(2020-01-01); print n=now(), a=now(-1d), b=ago(1d)`, `[[2020-01-01T00:00:00.000000000Z 2019-12-31T00:00:00.000000000Z 2019-12-31T00:00:00.000000000Z]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}
