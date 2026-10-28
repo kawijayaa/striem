@@ -109,6 +109,7 @@ func textToolOptions() []ksql.Option {
 
 func init() {
 	scalarFunctions["parse_command_line"] = runtimeFunction{"kql_parse_command_line", "ss", 2, ksql.TypeDynamic, nil}
+	scalarFunctions["assert"] = runtimeFunction{"kql_assert", "bs", 2, ksql.TypeBool, nil}
 	scalarFunctions["parse_path"] = runtimeFunction{"kql_parse_path", "s", 1, ksql.TypeDynamic, nil}
 	scalarFunctions["regex_quote"] = runtimeFunction{"kql_regex_quote", "s", 1, ksql.TypeString, nil}
 	scalarFunctions["has_any_index"] = runtimeFunction{"kql_has_any_index", "sd", 2, ksql.TypeLong, nil}

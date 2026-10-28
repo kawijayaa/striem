@@ -2,6 +2,7 @@ package kql
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -108,5 +109,27 @@ func TestTopNestedAndHitters(t *testing.T) {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
 			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
 		}
+	}
+}
+
+// assert passes true conditions through and fails the query otherwise.
+func TestAssert(t *testing.T) {
+	db := featureDatabase(t)
+	if got := fmt.Sprint(featureRows(t, db, `print x = assert(1 < 2, "ok")`)); got != `[[1]]` {
+		t.Fatalf("assert(true) = %s", got)
+	}
+	compiled, err := Compile(`print x = assert(1 > 2, "numbers broke")`, time.Now(), featureCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(compiled.SQL, compiled.Args...)
+	if err == nil {
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "assertion failed: numbers broke") {
+		t.Fatalf("assert(false) error = %v", err)
 	}
 }

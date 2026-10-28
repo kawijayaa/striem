@@ -579,3 +579,21 @@ func writeSortedJSON(buffer *bytes.Buffer, value any) {
 	}
 }
 
+
+// kqlAssert returns true, or fails the query with message when the
+// condition is false.
+func kqlAssert(condition, messageValue any) (any, error) {
+	value, ok := condition.(int64)
+	if ok && value != 0 {
+		return int64(1), nil
+	}
+	message, _ := textArgument(messageValue)
+	if len(message) > 1024 {
+		message = message[:1024]
+	}
+	return nil, &assertionError{message}
+}
+
+type assertionError struct{ message string }
+
+func (e *assertionError) Error() string { return "assertion failed: " + e.message }

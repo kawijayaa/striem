@@ -169,6 +169,7 @@ func init() {
 			"kql_has_any_index":                    kqlHasAnyIndex,
 			"kql_extract_json":                     kqlExtractJSON,
 			"kql_dynamic_to_json":                  kqlDynamicToJSON,
+			"kql_assert":                           kqlAssert,
 			"kql_temporal_range":                   kqlTemporalRange,
 			"kql_has_ipv4":                         func(source any, values ...any) any { return kqlHasIPv4(false, source, values...) },
 			"kql_has_ipv4_prefix":                  func(source any, values ...any) any { return kqlHasIPv4(true, source, values...) },
