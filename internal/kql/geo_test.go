@@ -45,3 +45,23 @@ func TestGeoFunctions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's H3 examples: tokens, hierarchy, rings and polygon cells.
+func TestGeoH3Functions(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print a=geo_point_to_h3cell(-74.04450446039874, 40.689250859314974, 6), d=geo_point_to_h3cell(-73.989148, 40.743273, 5), bad=geo_point_to_h3cell(300,1,8), res=geo_point_to_h3cell(1,1,16), n=geo_point_to_h3cell(1,1,int(null)), def=geo_h3cell_level(geo_point_to_h3cell(1,1))`, `[[862a1072fffffff 852a1073fffffff <nil> <nil> <nil> 6]]`},
+		{`print l=geo_h3cell_level('862a1072fffffff'), bad=isnull(geo_h3cell_level('abc')), p=geo_h3cell_parent('862a1072fffffff'), p1=geo_h3cell_parent('862a1072fffffff', 1), fine=isempty(geo_h3cell_parent('862a1072fffffff', 15)), far=isempty(geo_h3cell_parent('862a1072fffffff', 100))`, `[[6 1 852a1073fffffff 812a3ffffffffff 1 1]]`},
+		{`print c=geo_h3cell_children('862a1072fffffff'), n=array_length(geo_h3cell_children('862a1072fffffff', 9)), deep=isnull(geo_h3cell_children('862a1072fffffff', 12)), up=isnull(geo_h3cell_children(geo_point_to_h3cell(1, 1, 9), 8))`,
+			`[[["872a10728ffffff","872a10729ffffff","872a1072affffff","872a1072bffffff","872a1072cffffff","872a1072dffffff","872a1072effffff"] 343 1 1]]`},
+		{`print n=geo_h3cell_neighbors('862a1072fffffff'), r=geo_h3cell_rings('861f8894fffffff', 1), far=isnull(geo_h3cell_rings('861f8894fffffff', 150)), zero=geo_h3cell_rings('861f8894fffffff', 0)`,
+			`[[["862a10727ffffff","862a10707ffffff","862a1070fffffff","862a10777ffffff","862a100dfffffff","862a100d7ffffff"] [["861f8894fffffff"],["861f88947ffffff","861f8895fffffff","861f88867ffffff","861f8d497ffffff","861f8d4b7ffffff","861f8896fffffff"]] 1 [["861f8894fffffff"]]]]`},
+		{`print c=geo_h3cell_to_central_point("862a1072fffffff").coordinates[0], p=array_length(geo_h3cell_to_polygon("862a1072fffffff").coordinates[0]), bad=isnull(geo_h3cell_to_polygon("@")), pentagon=array_length(geo_h3cell_to_polygon("8009fffffffffff").coordinates[0])`, `[[-74.01600847979245 7 1 6]]`},
+		{`let polygon = dynamic({"type":"Polygon","coordinates":[[[-3.659,40.553],[-3.913,40.409],[-3.729,40.273],[-3.524,40.440],[-3.659,40.553]]]}); print cells = array_sort_asc(geo_polygon_to_h3cells(polygon)), wider=array_length(geo_polygon_to_h3cells(polygon, 6, 2000)) > 13, bad=isnull(geo_polygon_to_h3cells(dynamic({"type":"Polygon","coordinates":[[[0,0],[1,1]]]}))), huge=isnull(geo_polygon_to_h3cells(dynamic({"type":"Polygon","coordinates":[[[0,0],[40,0],[40,40],[0,0]]]}), 12))`,
+			`[[["86390ca07ffffff","86390ca27ffffff","86390ca2fffffff","86390ca37ffffff","86390cb07ffffff","86390cb0fffffff","86390cb17ffffff","86390cb1fffffff","86390cb57ffffff","86390cb87ffffff","86390cb8fffffff","86390cba7ffffff","86390cbafffffff"] 1 1 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

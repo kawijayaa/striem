@@ -59,6 +59,15 @@ var geoFunctions = map[string]geoFunction{
 	"geo_s2cell_to_polygon":            {"kql_geo_s2cell_to_polygon", "s", 1, ksql.TypeDynamic, nil},
 	"geo_polygon_to_s2cells":           {"kql_geo_polygon_to_s2cells", "dnn", 1, ksql.TypeDynamic, map[int]sqlast.Expr{1: geoInt("11"), 2: geoInt("0")}},
 	"geo_from_wkt":                     {"kql_geo_from_wkt", "s", 1, ksql.TypeDynamic, nil},
+	"geo_point_to_h3cell":              {"kql_geo_point_to_h3cell", "nnn", 2, ksql.TypeString, map[int]sqlast.Expr{2: geoInt("6")}},
+	"geo_h3cell_level":                 {"kql_geo_h3cell_level", "s", 1, ksql.TypeInt, nil},
+	"geo_h3cell_parent":                {"kql_geo_h3cell_parent", "sn", 1, ksql.TypeString, nil},
+	"geo_h3cell_children":              {"kql_geo_h3cell_children", "sn", 1, ksql.TypeDynamic, nil},
+	"geo_h3cell_neighbors":             {"kql_geo_h3cell_neighbors", "s", 1, ksql.TypeDynamic, nil},
+	"geo_h3cell_rings":                 {"kql_geo_h3cell_rings", "sn", 2, ksql.TypeDynamic, nil},
+	"geo_h3cell_to_central_point":      {"kql_geo_h3cell_to_central_point", "s", 1, ksql.TypeDynamic, nil},
+	"geo_h3cell_to_polygon":            {"kql_geo_h3cell_to_polygon", "s", 1, ksql.TypeDynamic, nil},
+	"geo_polygon_to_h3cells":           {"kql_geo_polygon_to_h3cells", "dnn", 1, ksql.TypeDynamic, map[int]sqlast.Expr{1: geoInt("6"), 2: geoInt("0")}},
 	"geo_s2cell_neighbors":             {"kql_geo_s2cell_neighbors", "s", 1, ksql.TypeDynamic, nil},
 }
 

@@ -9,6 +9,7 @@ require (
 	github.com/kawijayaa/ksql v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.48
 	github.com/tidwall/gjson v1.18.0
+	github.com/uber/h3-go/v4 v4.5.0
 	gopkg.in/yaml.v3 v3.0.1
 	www.velocidex.com/golang/evtx v0.2.0
 )
