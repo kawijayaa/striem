@@ -402,3 +402,23 @@ func TestParseUserAgent(t *testing.T) {
 		}
 	}
 }
+
+// Kusto's string operators: term matching, case rules, per-row terms that
+// cannot inject regex syntax, null strings read as "", and datetime between
+// spans.
+func TestStringOperatorSemantics(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print s="North Carolina" | project a=s has "carolina", b=s has "carol", c=s has_cs "carolina", d=s hasprefix "car", e=s hassuffix "lina", f=s contains_cs "th ca", g=s startswith_cs "north", h=s =~ "north carolina"`, `[[1 0 0 1 1 0 0 1]]`},
+		{`print s="abc-def.ghi@x.com" | project a=s has "ghi@x", b=s has_any ("zz", "ghi"), c=s has_all ("abc", "nope"), d=s !contains "DEF"`, `[[1 1 0 0]]`},
+		{`datatable(s:string, t:string)["hello world", "world", "hello", "wor", "a.b+c", "b+c", "x", "", "Hello", "HELLO", "a b", ".*"] | project h = s has t, cs = s has_cs t, p = s hasprefix t, n = s !has t`,
+			`[[1 1 1 0] [0 0 0 1] [1 1 1 0] [0 0 0 1] [1 0 1 0] [0 0 0 1]]`},
+		{`let ioc = "world"; datatable(s:string)["hello world", "worldly"] | where s has ioc`, `[[hello world]]`},
+		{`datatable(s:string)["a", "", "b"] | extend n = iff(s == "a", string(null), s) | summarize ne = countif(n != "b"), empty = countif(n == ""), notin = countif(n !in ("b")), ci = countif(n =~ "")`, `[[2 2 2 2]]`},
+		{`print a = datetime(2020-01-02) between (datetime(2020-01-01) .. 1d), b = datetime(2020-01-03) between (datetime(2020-01-01) .. 1d), c = datetime(2020-01-03) !between (datetime(2020-01-01) .. 1d)`, `[[1 0 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}
