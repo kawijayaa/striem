@@ -34,6 +34,17 @@ parameters as constants.
 
 - Added `rand`, `bin_at` (numbers, timespans and datetimes aligned to a fixed point) and `array_sort_asc`/`array_sort_desc` with Kusto's mixed-type ordering, `nulls_last` and companion arrays; Microsoft's examples pass. With several arrays the result is one dynamic array of arrays (supporting `array_sort_asc(a, b)[1]`) rather than Kusto's per-array output columns.
 - Scope for CTF log forensics: the geospatial functions (S2, H3, geohash, geo lookups and overlays), the `series_*` analytics family, unit conversions (`convert_*`), `format_bytes`, the beta distribution and the covariance aggregates were removed; they report unsupported-function errors. This also drops the `golang/geo` and cgo `h3-go` dependencies. `make-series`, percentiles and sketches remain.
+- Audit (2026-10-29): every operator, function, aggregate and plugin in KSQL's feature ledger was compiled through Striem. The remaining unsupported names fall into these groups, all out of scope:
+  - Removed for CTF scope: geo_*, series_*, convert_*, beta_*, covariance and format_bytes.
+  - Cluster and service metadata: cluster/database/cursor_*/current_principal*/extent_*/ingestion_time/row_id/estimate_data_size/stored_query_result, and external_table/materialized_view sources.
+  - Graph semantics: make-graph, graph-*, node_*, labels, map, inner_nodes.
+  - External or code plugins, excluded for security: http_request*, sql_request, mysql/postgresql/cosmosdb/dax/azure_digital_twins requests, python, r, csharp, ai_*, execute_*.
+  - Activity metrics: active_users_count, activity_*, new_activity_metrics, session_count, funnel_sequence*.
+  - Multiple result sets: fork, facet.
+  - Pattern mining with undocumented heuristics: autocluster, basket, diffpatterns.
+  - Statistics: welch_test, rolling_percentile, dcount_intersect.
+  - Internal names: double-underscore functions and passthrough.
+  - Rarely used: parse_user_agent (needs the uap-core regex corpus), assert-schema, macro-expand, hll_isvalid/tdigest_isvalid, datetime_list_timezones, treepath.
 - `tostring` and `strcat` print reals with Kusto's shortest round-trip digits and E notation (`1E+15`) through KSQL's `ScalarText` capability, instead of SQLite's 17-digit cast.
 - Added `string_size`, `base64_encode_fromguid`/`base64_decode_toguid` (.NET Guid byte order, which round-trips; Microsoft's decode example swaps one group), `new_guid`, and `datetime_utc_to_local`/`datetime_local_to_utc` with the embedded IANA zone database. `parse_version` remains open because Striem has no decimal type.
 - Added `percentile`, `percentiles` (one column per percentile, Kusto's names or tuple names), `percentiles_array` and the weighted `percentilew`/`percentilesw`/`percentilesw_array` over numbers, datetimes and timespans, using a merging t-digest that keeps up to 4096 values exactly (so small groups give exact nearest-rank results) and compresses beyond that; `tdigest`, `tdigest_merge`/`merge_tdigest`, `percentile_tdigest`, `percentiles_array_tdigest`, `rank_tdigest` and `percentrank_tdigest`; and HyperLogLog `hll`, `hll_if`, `hll_merge` and `dcount_hll` with Kusto's accuracy levels 0-4 (exact up to 4096 distinct values). Sketches are Striem-specific JSON, not Kusto's binary layout; `percentile_tdigest` without `typeof(T)` returns dynamic.
