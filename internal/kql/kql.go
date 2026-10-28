@@ -435,14 +435,30 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	return expr
 }
 
-func newCatalog(tables TableCatalog) ksql.Catalog {
-	return ksql.CatalogFunc(func(name string) (ksql.Table, bool) {
-		schema, ok := tables.schema(name)
-		if ok {
-			return ksql.Table{Name: "events", Schema: schema}, true
+// striemCatalog resolves tables and lists them for search. The listing
+// omits Events, the combined view over every table, so a search does not
+// return each row twice.
+type striemCatalog struct{ tables TableCatalog }
+
+func newCatalog(tables TableCatalog) ksql.Catalog { return striemCatalog{tables: tables} }
+
+func (catalog striemCatalog) ResolveTable(name string) (ksql.Table, bool) {
+	schema, ok := catalog.tables.schema(name)
+	if ok {
+		return ksql.Table{Name: "events", Schema: schema}, true
+	}
+	return ksql.Table{}, false
+}
+
+func (catalog striemCatalog) TableNames() []string {
+	names := make([]string, 0, len(catalog.tables))
+	for name := range catalog.tables {
+		if !strings.EqualFold(name, "Events") {
+			names = append(names, name)
 		}
-		return ksql.Table{}, false
-	})
+	}
+	sort.Strings(names)
+	return names
 }
 
 func tableSource(tables TableCatalog, fullTextTerms map[int]string) ksql.SourceRule {

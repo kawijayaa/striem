@@ -73,6 +73,9 @@ func TestDocumentedTabularFeaturesExecute(t *testing.T) {
 	cases := []struct{ name, query, want string }{
 		{"filter", `Events | filter n > 1 | project n | sort by n asc`, `[[2] [3]]`},
 		{"search", `Events | search "powershell" | project n | order by n asc`, `[[1] [3]]`},
+		{"search all tables", `search "powershell" | project ['$table'], n | order by n asc`, `[[LeftEvents 1] [RightEvents 3]]`},
+		{"search table patterns", `search in (Right*) user:"carol" or n == 1 | project ['$table'], user`, `[[RightEvents carol]]`},
+		{"search wildcards", `Events | search "power*" and not(host:"b") | count`, `[[2]]`},
 		{"project variants", `Events | project host, user, n | project-away user | project-rename Value=n | project-reorder Value, host | where Value == 1`, `[[1 a]]`},
 		{"project keep", `Events | project-keep host, n | where n == 2`, `[[b 2]]`},
 		{"extend serialize", `Events | extend doubled=n * 2 | serialize | where n == 2 | project doubled`, `[[4]]`},
