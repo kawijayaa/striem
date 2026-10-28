@@ -28,6 +28,9 @@ func TestDocumentedCoreBehavior(t *testing.T) {
 		{`print a=abs(-3), b=sign(-2.5), c=sqrt(16), d=pow(2, 10), e=exp(0), f=log(1), g=log10(1000), h=ceiling(1.2), i=floor(-1.2), j=round(log(exp(2)), 9), k=sqrt(-1)`, `[[3 -1 4 1024 1 0 3 2 -2 2 <nil>]]`},
 		{`print a=floor(7, 3), b=bin(7, 3), c=sin(0), d=cos(0), e=round(atan2(1, 1) * 4, 9), f=sign(-4), g=floor(5)`, `[[6 6 0 1 3.141592654 -1 5]]`},
 		{`print a=tostring(true), b=strcat("a", int(null), "b"), c=strcat("x", false)`, `[[true ab xfalse]]`},
+		{`LeftEvents | where host in (RightEvents | project host) | project user`, `[[alice]]`},
+		{`LeftEvents | where user !in (RightEvents | project user) | summarize hint.strategy=shuffle make_set(user)`, `[[["alice","bob"]]]`},
+		{`union isfuzzy=true LeftEvents, NoSuchTable | count`, `[[2]]`},
 		{`Events | where user in (dynamic(["alice", "carol"])) | summarize make_set(user)`, `[[["alice","carol"]]]`},
 	} {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
