@@ -48,3 +48,26 @@ func TestCompileTerminatesSafely(t *testing.T) {
 		t.Fatal("compiling a Unicode digit did not terminate")
 	}
 }
+
+// Microsoft's examples for hashing, command lines, paths, regex helpers,
+// has_any_index, extract_json, dynamic_to_json and around.
+func TestForensicTextFunctions(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print a=hash("World"), b=hash("World", 100), c=hash(datetime("2015-01-01")), d=hash_many("Hello", "World") == hash_many("Hello", "World"), e=hash_many("Hello", "World") != hash_many("World", "Hello"), n=hash(string(null))`, `[[1846988464401551951 51 1380966698541616202 1 1 <nil>]]`},
+		{`print a=parse_command_line("echo \"hello world!\"", "windows"), b=parse_command_line(strcat(@"C:\Program Files\x.exe", ' "a b" c\\"d "e""f" g\\\\"h"'), "windows"), c=parse_command_line(@"""C:\Program Files\x.exe"" -n", "windows"), bad=parse_command_line("x", "linux")`,
+			`[[["echo","hello world!"] ["C:\\Program","Files\\x.exe","a b","c\"d","e\"f","g\\h"] ["C:\\Program Files\\x.exe","-n"] <nil>]]`},
+		{`datatable(p:string)[@"C:\temp\file.txt", @"temp\file.txt", "file://C:/temp/file.txt:some.exe", @"\\shared\users\temp\file.txt.gz", "/usr/lib/temp/file.txt"] | project parse_path(p)`,
+			`[[{"Scheme":"","RootPath":"C:","DirectoryPath":"C:\\temp","DirectoryName":"temp","Filename":"file.txt","Extension":"txt","AlternateDataStreamName":""}] [{"Scheme":"","RootPath":"","DirectoryPath":"temp","DirectoryName":"temp","Filename":"file.txt","Extension":"txt","AlternateDataStreamName":""}] [{"Scheme":"file","RootPath":"C:","DirectoryPath":"C:/temp","DirectoryName":"temp","Filename":"file.txt","Extension":"txt","AlternateDataStreamName":"some.exe"}] [{"Scheme":"","RootPath":"","DirectoryPath":"\\\\shared\\users\\temp","DirectoryName":"temp","Filename":"file.txt.gz","Extension":"gz","AlternateDataStreamName":""}] [{"Scheme":"","RootPath":"","DirectoryPath":"/usr/lib/temp","DirectoryName":"temp","Filename":"file.txt","Extension":"txt","AlternateDataStreamName":""}]]`},
+		{`print q=regex_quote('(so$me.Te^xt)'), i1=indexof_regex("abcabc", @"a.c"), i2=indexof_regex("abcabcdefg", @"a.c", 0, 9, 2), i3=indexof_regex("abcabc", @"a.c", 1, -1, 2), i4=indexof_regex("ababaa", @"a.a", 0, -1, 2), i5=indexof_regex("abcabc", @"a|ab", -1), u=indexof_regex("ééabc", "abc")`, `[[\(so\$me\.Te\^xt\) 0 3 -1 -1 <nil> 2]]`},
+		{`print idx1 = has_any_index("this is an example", dynamic(['this', 'example'])), idx2 = has_any_index("this is an example", dynamic(['not', 'example'])), idx3 = has_any_index("this is an example", dynamic(['not', 'found'])), idx4 = has_any_index("Example number 2", range(1, 3, 1)), idx5 = has_any_index("this is an example", dynamic([])), part = has_any_index("examples", dynamic(['example']))`, `[[0 1 -1 1 -1 -1]]`},
+		{`let json = '{"name": "John", "age": 30, "city": "New York", "tags": ["a", "b"], "o": {"k": true}}'; print n=extract_json("$.name", json, typeof(string)), a=extract_json("$.age", json, typeof(long)) + 1, t=extractjson("$.tags[1]", json), o=extract_json("$['o'].k", json, typeof(bool)), all=extract_json("$.o", json), miss=extract_json("$.nope", json)`, `[[John 31 b 1 {"k":true} <nil>]]`},
+		{`print j=dynamic_to_json(dynamic({'Y10':dynamic({}), 'X8': dynamic({'c3':1, 'd8':5, 'a4':6}), 'D1':114, 'A1':12, 'A14':[15, 13, 18]})) == dynamic_to_json(dynamic({'A14':[15, 13, 18], 'A1':12, 'D1':114, 'X8': dynamic({'a4':6, 'c3':1, 'd8':5}), 'Y10': dynamic({})})), s=dynamic_to_json(dynamic({'b':1, 'a':[2]}))`, `[[1 {"a":[2],"b":1}]]`},
+		{`range dt from datetime(2021-01-01 01:00) to datetime(2021-01-01 02:00) step 1min | where around(dt, datetime(2021-01-01 01:30), 1min) | count`, `[[3]]`},
+		{`print a=around(1.5, 2, 0.5), b=around(3, 2, 0.5), c=around(1h, 2h, 1h)`, `[[1 0 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

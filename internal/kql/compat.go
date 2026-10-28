@@ -26,6 +26,7 @@ func compatibilityOptions() []ksql.Option {
 	options = append(options, mathOptions()...)
 	options = append(options, sketchOptions()...)
 	options = append(options, collectOptions()...)
+	options = append(options, textToolOptions()...)
 	options = append(options, scalarFunctionOptions(scalarFunctions, scalarParameterAccepts)...)
 	for _, name := range []string{"extract_all", "extractall"} {
 		name := name
