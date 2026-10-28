@@ -101,7 +101,23 @@ func TestDocumentationExamples(t *testing.T) {
 	report := map[string][]string{}
 	for _, example := range examples {
 		query := example.Query
-		compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), featureCatalog())
+		bagKeys := func(sql string, args []any) ([]ksql.BagKey, error) {
+			rows, err := db.Query(sql, args...)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var keys []ksql.BagKey
+			for rows.Next() {
+				var key ksql.BagKey
+				if err := rows.Scan(&key.Name, &key.JSONType); err != nil {
+					return nil, err
+				}
+				keys = append(keys, key)
+			}
+			return keys, rows.Err()
+		}
+		compiled, err := Compile(query, time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC), CompileConfig{Tables: featureCatalog(), BagKeys: bagKeys})
 		if err != nil {
 			message := err.Error()
 			key := "compile"
