@@ -20,7 +20,9 @@ type schemaNode struct {
 
 const maxSchemaNodes = 1 << 16
 
-func newSchemaNode() *schemaNode { return &schemaNode{types: map[string]bool{}, fields: map[string]*schemaNode{}} }
+func newSchemaNode() *schemaNode {
+	return &schemaNode{types: map[string]bool{}, fields: map[string]*schemaNode{}}
+}
 
 func (n *schemaNode) note(kind string) {
 	if !n.types[kind] {

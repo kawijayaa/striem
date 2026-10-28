@@ -40,52 +40,52 @@ func init() {
 		if err := registerKQLCompatibility(connection); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_has", kqlHas, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_has", kqlHas, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_regex", kqlRegex, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_regex", kqlRegex, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_split", kqlSplit, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_split", kqlSplit, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_extract", kqlExtract, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_extract", kqlExtract, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_trim", kqlTrim, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_trim", kqlTrim, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_parse", kqlParse, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_parse", kqlParse, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_array_length", kqlArrayLength, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_array_length", kqlArrayLength, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_bag_keys", kqlBagKeys, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_bag_keys", kqlBagKeys, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_todatetime", kqlToDatetime, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_todatetime", kqlToDatetime, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_parse_kv", kqlParseKV, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_parse_kv", kqlParseKV, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_base64_decode_tostring", kqlBase64DecodeToString, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_base64_decode_tostring", kqlBase64DecodeToString, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_url_decode", kqlURLDecode, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_url_decode", kqlURLDecode, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_bag_has_key", kqlBagHasKey, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_bag_has_key", kqlBagHasKey, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_set_has_element", kqlSetHasElement, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_set_has_element", kqlSetHasElement, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_ipv4_is_private", kqlIPv4IsPrivate, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_ipv4_is_private", kqlIPv4IsPrivate, true); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_ipv4_is_in_range", kqlIPv4IsInRange, true); err != nil {
+		if err := registerSafeFunc(connection, "kql_ipv4_is_in_range", kqlIPv4IsInRange, true); err != nil {
 			return err
 		}
 		for name, function := range map[string]any{
@@ -251,19 +251,19 @@ func init() {
 			"kql_ipv6_is_in_any_range":               kqlIPv6IsInAnyRange,
 			"kql_ipv6_is_in_range":                   kqlIPv6IsInRange,
 		} {
-			if err := connection.RegisterFunc(name, function, true); err != nil {
+			if err := registerSafeFunc(connection, name, function, true); err != nil {
 				return err
 			}
 		}
 		// rand is volatile: SQLite must evaluate it for every row.
-		if err := connection.RegisterFunc("kql_rand", kqlRand, false); err != nil {
+		if err := registerSafeFunc(connection, "kql_rand", kqlRand, false); err != nil {
 			return err
 		}
-		if err := connection.RegisterFunc("kql_new_guid", kqlNewGUID, false); err != nil {
+		if err := registerSafeFunc(connection, "kql_new_guid", kqlNewGUID, false); err != nil {
 			return err
 		}
 		for name, function := range sqlMathFunctions() {
-			if err := connection.RegisterFunc(name, function, true); err != nil {
+			if err := registerSafeFunc(connection, name, function, true); err != nil {
 				return err
 			}
 		}

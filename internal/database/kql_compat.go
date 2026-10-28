@@ -67,7 +67,7 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 		"kql_toreal":          kqlToReal,
 		"kql_tobool":          kqlToBool,
 	} {
-		if err := c.RegisterFunc(name, function, true); err != nil {
+		if err := registerSafeFunc(c, name, function, true); err != nil {
 			return err
 		}
 	}
