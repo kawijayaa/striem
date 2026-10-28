@@ -12,10 +12,12 @@ func TestStatisticalAggregates(t *testing.T) {
 	for _, tc := range []struct{ query, want string }{
 		{`Events | summarize V=variance(n),P=variancep(n),S=stdev(n)`, `[[1 0.6666666666666666 1]]`},
 		{`Events | summarize V=varianceif(n,n>1),P=variancepif(n,n>1),S=stdevpif(n,n==2)`, `[[0.5 0.25 0]]`},
-		{`Events | summarize V=varianceif(n,false),P=variancepif(n,RawData.missing==1)`, `[[<nil> <nil>]]`},
-		{`Events | where n<0 | summarize V=variance(n),P=variancep(n),S=stdev(n),SP=stdevp(n)`, `[[<nil> <nil> <nil> <nil>]]`},
-		{`Events | where n==1 | summarize V=variance(n),P=variancep(n)`, `[[<nil> 0]]`},
-		{`Events | summarize V=variance(n) by host | sort by host asc`, `[[a 2] [b <nil>]]`},
+		// Microsoft's summarize example over an empty input reports stdev and
+		// variance as 0, not null.
+		{`Events | summarize V=varianceif(n,false),P=variancepif(n,RawData.missing==1)`, `[[0 0]]`},
+		{`Events | where n<0 | summarize V=variance(n),P=variancep(n),S=stdev(n),SP=stdevp(n)`, `[[0 0 0 0]]`},
+		{`Events | where n==1 | summarize V=variance(n),P=variancep(n)`, `[[0 0]]`},
+		{`Events | summarize V=variance(n) by host | sort by host asc`, `[[a 2] [b 0]]`},
 		{`datatable(x:long)[9007199254740992,9007199254740993,9007199254740994] | summarize V=variance(x),P=variancep(x)`, `[[1 0.6666666666666666]]`},
 		{`datatable(x:long)[9223372036854775805,9223372036854775806,9223372036854775807] | summarize V=variance(x)`, `[[1]]`},
 		{`datatable(x:real)[1.0,null,2.0,3.0] | summarize V=variance(x)`, `[[1]]`},

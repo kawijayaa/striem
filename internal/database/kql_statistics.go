@@ -57,8 +57,10 @@ func (s *statistic) Done() any {
 	if !s.population {
 		denominator--
 	}
+	// Kusto returns 0, not null, without enough values: summarize over an
+	// empty input reports stdev(x) and variance(x) as 0.
 	if denominator <= 0 {
-		return nil
+		return 0.0
 	}
 	value := s.m2 / float64(denominator)
 	if s.root {
