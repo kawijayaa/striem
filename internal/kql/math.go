@@ -68,6 +68,20 @@ func mathOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: "kql_" + name, Args: values}}, nil
 		}))
 	}
+	options = append(options, ksql.WithTypedFunction("round", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) < 1 || len(args) > 2 || !numericType(args[0].Type) || (len(args) == 2 && args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown) {
+			return ksql.TypedExpression{}, fmt.Errorf("round requires a number and an optional integer precision")
+		}
+		precision := sqlast.Expr(&sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"})
+		if len(args) == 2 {
+			precision = args[1].SQL
+		}
+		result := args[0].Type
+		if result == ksql.TypeInt {
+			result = ksql.TypeLong
+		}
+		return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: "kql_round", Args: []sqlast.Expr{args[0].SQL, precision}}}, nil
+	}))
 	options = append(options, ksql.WithTypedFunction("strcmp", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 		if len(args) != 2 || (args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown) || (args[1].Type != ksql.TypeString && args[1].Type != ksql.TypeUnknown) {
 			return ksql.TypedExpression{}, fmt.Errorf("strcmp requires two string arguments")

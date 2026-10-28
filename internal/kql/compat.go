@@ -11,7 +11,7 @@ import (
 )
 
 func compatibilityOptions() []ksql.Option {
-	options := []ksql.Option{ksql.WithFunction("bin", binFunction), scalarRangeOption(), countOfOption()}
+	options := []ksql.Option{ksql.WithTypedFunction("bin", binFunction), scalarRangeOption(), countOfOption()}
 	options = append(options, ipv4Options()...)
 	options = append(options, ipv6Options()...)
 	options = append(options, ipRangeOptions()...)
@@ -631,21 +631,30 @@ func conditionalValue(value, predicate sqlast.Expr) sqlast.Expr {
 	return &sqlast.Case{Branches: []sqlast.When{{Condition: predicate, Result: value}}, Else: &sqlast.Literal{Kind: sqlast.NullLiteral}}
 }
 
-func binFunction(args []sqlast.Expr) (sqlast.Expr, error) {
+func binFunction(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 	if len(args) != 2 {
-		return nil, fmt.Errorf("bin requires a value and bin size")
+		return ksql.TypedExpression{}, fmt.Errorf("bin requires a value and bin size")
 	}
-	if literal, ok := args[1].(*sqlast.Literal); ok && literal.Kind == sqlast.IntervalLiteral {
-		duration, err := parseDuration(literal.Value)
-		if err != nil {
-			return nil, err
+	value, size := args[0], args[1]
+	if size.Type == ksql.TypeTimespan {
+		switch value.Type {
+		case ksql.TypeDateTime, ksql.TypeUnknown:
+			// kql_bin_datetime takes nanoseconds; a tick is 100ns.
+			nanos := &sqlast.Binary{Left: size.SQL, Operator: "*", Right: &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "100"}}
+			return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_bin_datetime", Args: []sqlast.Expr{value.SQL, nanos}}}, nil
+		case ksql.TypeTimespan:
+			return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_bin", Args: []sqlast.Expr{value.SQL, size.SQL}}}, nil
 		}
-		if value, ok := args[0].(*sqlast.Literal); ok && value.Kind == sqlast.IntervalLiteral {
-			return nil, fmt.Errorf("bin currently supports numeric and datetime values, not timespans")
-		}
-		return &sqlast.Call{Name: "kql_bin_datetime", Args: []sqlast.Expr{args[0], &sqlast.Literal{Kind: sqlast.NumberLiteral, Value: strconv.FormatInt(int64(duration), 10)}}}, nil
+		return ksql.TypedExpression{}, fmt.Errorf("bin with a timespan size requires a datetime or timespan value")
 	}
-	return &sqlast.Call{Name: "kql_bin", Args: args}, nil
+	if value.Type == ksql.TypeDateTime || value.Type == ksql.TypeTimespan {
+		return ksql.TypedExpression{}, fmt.Errorf("bin of a %s value requires a timespan bin size", value.Type)
+	}
+	result := value.Type
+	if result == ksql.TypeInt {
+		result = ksql.TypeLong
+	}
+	return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: "kql_bin", Args: []sqlast.Expr{value.SQL, size.SQL}}}, nil
 }
 
 func scalarTextSQL(value ksql.TypedExpression) sqlast.Expr {

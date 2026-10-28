@@ -2,6 +2,8 @@ package database
 
 import (
 	"math"
+	"math/big"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -157,4 +159,71 @@ func kqlIsUTF8(value any) any {
 		return utf8.Valid(text)
 	}
 	return nil
+}
+
+// kqlRound rounds the shortest decimal representation of a number half away
+// from zero, so round(2.15, 1) is 2.2 as documented rather than the binary
+// neighbour 2.1. Negative precision rounds to tens, hundreds and so on.
+func kqlRound(value, precisionValue any) any {
+	precision := int64(0)
+	if precisionValue != nil && !sqliteNull(precisionValue) {
+		var ok bool
+		if precision, ok = precisionValue.(int64); !ok {
+			return nil
+		}
+	}
+	// Doubles carry at most 17 significant digits and 308 exponent digits.
+	if precision > 400 || precision < -400 {
+		return nil
+	}
+	var text string
+	switch number := value.(type) {
+	case int64:
+		text = strconv.FormatInt(number, 10)
+	case float64:
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return nil
+		}
+		text = strconv.FormatFloat(number, 'f', -1, 64)
+	default:
+		return nil
+	}
+	exact, ok := new(big.Rat).SetString(text)
+	if !ok {
+		return nil
+	}
+	scale := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(abs64(precision)), nil))
+	if precision >= 0 {
+		exact.Mul(exact, scale)
+	} else {
+		exact.Quo(exact, scale)
+	}
+	half := big.NewRat(1, 2)
+	if exact.Sign() < 0 {
+		exact.Sub(exact, half)
+	} else {
+		exact.Add(exact, half)
+	}
+	rounded := new(big.Int).Quo(exact.Num(), exact.Denom())
+	result := new(big.Rat).SetInt(rounded)
+	if precision >= 0 {
+		result.Quo(result, scale)
+	} else {
+		result.Mul(result, scale)
+	}
+	if _, isInteger := value.(int64); isInteger {
+		if !result.IsInt() || !result.Num().IsInt64() {
+			return nil
+		}
+		return result.Num().Int64()
+	}
+	number, _ := result.Float64()
+	return finite(number)
+}
+
+func abs64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

@@ -136,9 +136,10 @@ func parsedDatetime(value any) (time.Time, bool) {
 	return parsed, err == nil && parsed.Year() >= 1 && parsed.Year() <= 9999
 }
 
-func kqlBinDatetime(value any, size int64) any {
+func kqlBinDatetime(value, sizeValue any) any {
 	valueTime, ok := parsedDatetime(value)
-	if !ok || size <= 0 {
+	size, valid := sizeValue.(int64)
+	if !ok || !valid || size <= 0 {
 		return nil
 	}
 	// UnixNano overflows outside 1678–2262. Big integers keep all KQL years

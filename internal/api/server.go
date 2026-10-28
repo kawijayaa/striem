@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/kawijayaa/ksql"
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/kql"
 	webassets "github.com/kawijayaa/striem/web"
@@ -301,7 +302,7 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 		"statements":    []string{"let", "declare query_parameters"},
 		"operators":     []string{"where", "filter", "search", "project", "project-away", "project-keep", "project-rename", "project-reorder", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "sample", "sample-distinct", "count", "serialize", "as", "mv-expand", "mv-apply", "union", "join", "lookup", "invoke", "parse", "parse-where", "parse-kv", "render"},
 		"commands":      []string{".show tables", ".show table <name> cslschema", ".show table <name> kqlschema", ".show table <name> schema as json"},
-		"functions":     []string{"prev", "next", "row_number", "row_cumsum", "row_rank_dense", "row_rank_min", "now", "ago", "datetime", "bool", "boolean", "toscalar", "materialize", "arg_max", "arg_min", "argmax", "argmin", "tostring", "toguid", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "repeat", "array_concat", "array_iff", "array_iif", "array_index_of", "array_sum", "series_sum", "zip", "array_reverse", "array_slice", "array_split", "array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right", "bag_keys", "bag_has_key", "bag_merge", "bag_zip", "bag_remove_keys", "bag_set_key", "set_has_element", "set_union", "set_intersect", "set_difference", "set_equals", "jaccard_index", "gzip_compress_to_base64_string", "gzip_decompress_from_base64_string", "zlib_compress_to_base64_string", "zlib_decompress_from_base64_string", "base64_decode_tostring", "base64_decodestring", "base64_encode_tostring", "base64_encodestring", "base64_decode_toarray", "base64_encode_fromarray", "range", "binary_all_and", "binary_all_or", "binary_all_xor", "tohex", "make_datetime", "datetime_add", "datetime_diff", "unixtime_seconds_todatetime", "unixtime_milliseconds_todatetime", "unixtime_microseconds_todatetime", "unixtime_nanoseconds_todatetime", "datetime_part", "datepart", "getyear", "getmonth", "monthofyear", "dayofmonth", "dayofyear", "hourofday", "week_of_year", "pi", "degrees", "radians", "cot", "exp2", "exp10", "log2", "gamma", "loggamma", "erf", "erfc", "isfinite", "isinf", "isnan", "max_of", "min_of", "strcmp", "isascii", "isutf8", "notempty", "notnull", "weekofyear", "countof", "strcat_array", "strcat_delim", "strrep", "translate", "reverse", "binary_and", "binary_or", "binary_xor", "binary_not", "binary_shift_left", "binary_shift_right", "bitset_count_ones", "unicode_codepoints_from_string", "unicode_codepoints_to_string", "to_utf8", "make_string", "hash_md5", "hash_sha1", "hash_sha256", "url_decode", "url_encode", "url_encode_component", "parse_url", "parseurl", "parse_urlquery", "parseurlquery", "ipv4_is_private", "ipv4_is_in_range", "parse_ipv4", "parse_ipv4_mask", "format_ipv4", "format_ipv4_mask", "ipv4_netmask_suffix", "ipv4_compare", "ipv4_is_match", "ipv4_range_to_cidr_list", "parse_ipv6", "parse_ipv6_mask", "ipv6_compare", "ipv6_is_match", "ipv6_is_in_range", "ipv4_is_in_any_range", "ipv6_is_in_any_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "minif", "max", "maxif", "avg", "avgif", "make_set", "make_list", "take_any", "take_anyif", "any", "anyif"},
+		"functions":     []string{"prev", "next", "row_number", "row_cumsum", "row_rank_dense", "row_rank_min", "now", "ago", "datetime", "bool", "boolean", "toscalar", "materialize", "arg_max", "arg_min", "argmax", "argmin", "tostring", "toguid", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "repeat", "array_concat", "array_iff", "array_iif", "array_index_of", "array_sum", "series_sum", "zip", "array_reverse", "array_slice", "array_split", "array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right", "bag_keys", "bag_has_key", "bag_merge", "bag_zip", "bag_remove_keys", "bag_set_key", "set_has_element", "set_union", "set_intersect", "set_difference", "set_equals", "jaccard_index", "gzip_compress_to_base64_string", "gzip_decompress_from_base64_string", "zlib_compress_to_base64_string", "zlib_decompress_from_base64_string", "base64_decode_tostring", "base64_decodestring", "base64_encode_tostring", "base64_encodestring", "base64_decode_toarray", "base64_encode_fromarray", "range", "binary_all_and", "binary_all_or", "binary_all_xor", "tohex", "make_datetime", "datetime_add", "datetime_diff", "unixtime_seconds_todatetime", "unixtime_milliseconds_todatetime", "unixtime_microseconds_todatetime", "unixtime_nanoseconds_todatetime", "datetime_part", "datepart", "getyear", "getmonth", "monthofyear", "dayofmonth", "dayofyear", "hourofday", "week_of_year", "totimespan", "totime", "dayofweek", "typeof", "pi", "degrees", "radians", "cot", "exp2", "exp10", "log2", "gamma", "loggamma", "erf", "erfc", "isfinite", "isinf", "isnan", "max_of", "min_of", "strcmp", "isascii", "isutf8", "notempty", "notnull", "weekofyear", "countof", "strcat_array", "strcat_delim", "strrep", "translate", "reverse", "binary_and", "binary_or", "binary_xor", "binary_not", "binary_shift_left", "binary_shift_right", "bitset_count_ones", "unicode_codepoints_from_string", "unicode_codepoints_to_string", "to_utf8", "make_string", "hash_md5", "hash_sha1", "hash_sha256", "url_decode", "url_encode", "url_encode_component", "parse_url", "parseurl", "parse_urlquery", "parseurlquery", "ipv4_is_private", "ipv4_is_in_range", "parse_ipv4", "parse_ipv4_mask", "format_ipv4", "format_ipv4_mask", "ipv4_netmask_suffix", "ipv4_compare", "ipv4_is_match", "ipv4_range_to_cidr_list", "parse_ipv6", "parse_ipv6_mask", "ipv6_compare", "ipv6_is_match", "ipv6_is_in_range", "ipv4_is_in_any_range", "ipv6_is_in_any_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "minif", "max", "maxif", "avg", "avgif", "make_set", "make_list", "take_any", "take_anyif", "any", "anyif"},
 	})
 }
 
@@ -393,7 +394,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	columns, results, err := scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns)
+	columns, results, err := scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns, compiled.TimespanColumns)
 	if err != nil {
 		s.logger.Error("Could not read query result", "error", err)
 		var executionError sqlite3.Error
@@ -496,7 +497,11 @@ func requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}) ([]string, []map[string]any, error) {
+func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}, timespanColumns ...map[string]struct{}) ([]string, []map[string]any, error) {
+	timespans := map[string]struct{}{}
+	if len(timespanColumns) > 0 && timespanColumns[0] != nil {
+		timespans = timespanColumns[0]
+	}
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, nil, err
@@ -518,6 +523,11 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 			// numbers, so preserve the row with a null value instead.
 			if number, ok := value.(float64); ok && (math.IsInf(number, 0) || math.IsNaN(number)) {
 				value = nil
+			}
+			if _, timespan := timespans[column]; timespan {
+				if ticks, ok := value.(int64); ok {
+					value = ksql.FormatTimespan(ticks)
+				}
 			}
 			if _, boolean := booleanColumns[column]; boolean {
 				switch current := value.(type) {

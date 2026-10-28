@@ -22,6 +22,9 @@ func TestMathAndPredicateFunctions(t *testing.T) {
 		{`print a=strcmp("abc","abd"), b=strcmp("abc","abc"), c=strcmp("b","a"), d=strcmp("","")`, `[[-1 0 1 0]]`},
 		{`print a=isascii("abc"), b=isascii("é"), c=isutf8("é"), d=notempty(""), e=notempty("x"), f=notnull(int(null)), g=weekofyear(datetime(2015-12-14))`, `[[1 0 1 0 1 0 51]]`},
 		{`print n=max_of(1, 2) | getschema | project ColumnType`, `[[long]]`},
+		// Microsoft's round examples, half away from zero on the decimal value.
+		{`print a=round(2.98765, 3), b=round(2.15, 1), c=round(2.15), d=round(-50.55, -2), e=round(21.5, -1)`, `[[2.988 2.2 2 -100 20]]`},
+		{`print a=round(-2.5), b=round(2.5), c=round(1.005, 2), d=round(1234, -2), e=round(1250, -2), f=round(real(null)), g=round(5, 3), h=round(1e300, -299), i=round(2.5, 999)`, `[[-3 3 1.01 1200 1300 <nil> 5 1e+300 <nil>]]`},
 	} {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
 			t.Fatalf("%s\n got %s\nwant %s", tc.query, got, tc.want)

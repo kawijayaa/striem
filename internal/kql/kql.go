@@ -36,6 +36,8 @@ type CompiledQuery struct {
 	Columns        []string
 	DynamicColumns map[string]struct{}
 	BooleanColumns map[string]struct{}
+	// TimespanColumns hold int64 ticks that the API formats as Kusto text.
+	TimespanColumns map[string]struct{}
 	// Visualization is the validated render annotation, when present.
 	Visualization *ksql.Visualization
 }
@@ -228,6 +230,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
 		dialect.WithRegexCapturesFunction("kql_regex_captures"),
 		dialect.WithKeyValuesFunction("kql_key_values"),
+		dialect.WithDatetimeArithmeticFunctions("kql_datetime_add_ticks", "kql_datetime_diff_ticks"),
 	)
 	compiler := ksql.New(target, options...)
 	result := compiler.Compile(source)
@@ -238,12 +241,16 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 	columns := make([]string, 0, len(result.Columns))
 	dynamic := make(map[string]struct{})
 	booleans := make(map[string]struct{})
+	timespans := make(map[string]struct{})
 	for _, column := range result.Columns {
 		columns = append(columns, column.Name)
-		if column.Type == ksql.TypeDynamic {
+		switch column.Type {
+		case ksql.TypeDynamic:
 			dynamic[column.Name] = struct{}{}
-		} else if column.Type == ksql.TypeBool {
+		case ksql.TypeBool:
 			booleans[column.Name] = struct{}{}
+		case ksql.TypeTimespan:
+			timespans[column.Name] = struct{}{}
 		}
 	}
 	query := &sqlast.Select{
@@ -256,7 +263,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		return CompiledQuery{}, err
 	}
 	sqlText, fullTextArgs := parameterizeFullText(sqlText, fullTextTerms)
-	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans, Visualization: result.Visualization}, nil
+	return CompiledQuery{SQL: sqlText, Args: append(result.Args, fullTextArgs...), Columns: columns, DynamicColumns: dynamic, BooleanColumns: booleans, TimespanColumns: timespans, Visualization: result.Visualization}, nil
 }
 
 // KSQL emits ANSI TIMESTAMP literals, which SQLite cannot evaluate. Convert
@@ -332,17 +339,6 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	case *sqlast.Binary:
 		node.Left = normalizeDateTimeExpr(node.Left)
 		node.Right = normalizeDateTimeExpr(node.Right)
-		// KSQL represents BETWEEN bounds as an AND expression. SQLite cannot
-		// execute the renderer's parenthesized "BETWEEN (lower AND upper)".
-		if node.Operator == "BETWEEN" {
-			if bounds, ok := node.Right.(*sqlast.Binary); ok && bounds.Operator == "AND" {
-				return &sqlast.Binary{
-					Left:     &sqlast.Binary{Left: node.Left, Operator: ">=", Right: bounds.Left},
-					Operator: "AND",
-					Right:    &sqlast.Binary{Left: node.Left, Operator: "<=", Right: bounds.Right},
-				}
-			}
-		}
 	case *sqlast.Window:
 		node.Expr = normalizeDateTimeExpr(node.Expr)
 		for index := range node.PartitionBy {
@@ -375,6 +371,23 @@ func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	case *sqlast.Regex:
 		node.Value = normalizeDateTimeExpr(node.Value)
 		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.RegexCaptures:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.KeyValues:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		node.Options = normalizeDateTimeExpr(node.Options)
+	case *sqlast.StringMatch:
+		node.Value = normalizeDateTimeExpr(node.Value)
+		node.Pattern = normalizeDateTimeExpr(node.Pattern)
+	case *sqlast.DatetimeAdd:
+		node.Datetime = normalizeDateTimeExpr(node.Datetime)
+		node.Ticks = normalizeDateTimeExpr(node.Ticks)
+	case *sqlast.DatetimeDiff:
+		node.Left = normalizeDateTimeExpr(node.Left)
+		node.Right = normalizeDateTimeExpr(node.Right)
+	case *sqlast.TimespanText:
+		node.Value = normalizeDateTimeExpr(node.Value)
 	case *sqlast.Exists:
 		normalizeDateTimeLiterals(node.Query)
 	case *sqlast.RankedValue:
@@ -563,25 +576,29 @@ func datasetIDs(tables TableCatalog, name string) ([]int64, bool) {
 
 func compilerOptions(now time.Time) []ksql.Option {
 	return []ksql.Option{
-		ksql.WithFunction("now", func(arguments []sqlast.Expr) (sqlast.Expr, error) {
-			if len(arguments) != 0 {
-				return nil, fmt.Errorf("now requires no arguments")
+		ksql.WithTypedFunction("now", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			switch {
+			case len(arguments) == 0:
+				return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: stringLiteral(eventtime.Format(now))}, nil
+			case len(arguments) == 1 && arguments[0].Type == ksql.TypeTimespan:
+				// now(offset) is the current time shifted by a timespan.
+				if ticks, ok := constantTicks(arguments[0].SQL); ok {
+					return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: stringLiteral(eventtime.Format(now.Add(time.Duration(ticks) * 100)))}, nil
+				}
+				return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_datetime_add_ticks", Args: []sqlast.Expr{stringLiteral(eventtime.Format(now)), arguments[0].SQL}}}, nil
 			}
-			return stringLiteral(eventtime.Format(now)), nil
+			return ksql.TypedExpression{}, fmt.Errorf("now takes no arguments or one timespan offset")
 		}),
-		ksql.WithFunction("ago", func(arguments []sqlast.Expr) (sqlast.Expr, error) {
-			if len(arguments) != 1 {
-				return nil, fmt.Errorf("ago requires one argument")
+		ksql.WithTypedFunction("ago", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(arguments) != 1 || (arguments[0].Type != ksql.TypeTimespan && arguments[0].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("ago requires one timespan argument")
 			}
-			literal, ok := arguments[0].(*sqlast.Literal)
-			if !ok || literal.Kind != sqlast.IntervalLiteral {
-				return nil, fmt.Errorf("ago requires a constant duration")
+			// Constant spans fold to a literal so indexed time filters stay simple.
+			if ticks, ok := constantTicks(arguments[0].SQL); ok {
+				return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: stringLiteral(eventtime.Format(now.Add(-time.Duration(ticks) * 100)))}, nil
 			}
-			duration, err := parseDuration(literal.Value)
-			if err != nil {
-				return nil, err
-			}
-			return stringLiteral(eventtime.Format(now.Add(-duration))), nil
+			negative := &sqlast.Unary{Operator: "-", Operand: arguments[0].SQL}
+			return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_datetime_add_ticks", Args: []sqlast.Expr{stringLiteral(eventtime.Format(now)), negative}}}, nil
 		}),
 		ksql.WithFunction("datetime", datetimeFunction),
 		ksql.WithFunction("toint", conversionFunction("kql_toint")),
@@ -592,6 +609,14 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("toboolean", conversionFunction("kql_tobool")),
 		ksql.WithFunction("todatetime", ksql.SQLFunction("kql_todatetime")),
 		ksql.WithFunction("toguid", conversionFunction("kql_toguid")),
+		ksql.WithTypedFunction("totimespan", toTimespanFunction),
+		ksql.WithTypedFunction("totime", toTimespanFunction),
+		ksql.WithTypedFunction("dayofweek", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(arguments) != 1 || (arguments[0].Type != ksql.TypeDateTime && arguments[0].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("dayofweek requires one datetime argument")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_dayofweek", Args: []sqlast.Expr{arguments[0].SQL}}}, nil
+		}),
 		ksql.WithFunction("array_length", ksql.SQLFunction("kql_array_length")),
 		ksql.WithFunction("bag_keys", ksql.SQLFunction("kql_bag_keys")),
 		ksql.WithFunction("bag_has_key", ksql.SQLFunction("kql_bag_has_key")),
@@ -599,7 +624,7 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("url_decode", ksql.SQLFunction("kql_url_decode")),
 		ksql.WithFunction("ipv4_is_private", ksql.SQLFunction("kql_ipv4_is_private")),
 		ksql.WithFunction("ipv4_is_in_range", ksql.SQLFunction("kql_ipv4_is_in_range")),
-		ksql.WithFunction("extract", ksql.SQLFunction("kql_extract")),
+		ksql.WithTypedFunction("extract", extractFunction),
 		ksql.WithFunction("isnull", nullFunction(false)),
 		ksql.WithFunction("isnotnull", nullFunction(true)),
 		ksql.WithFunction("isempty", emptyFunction(false)),
@@ -708,4 +733,65 @@ func unquoteName(value string) string {
 		return value[1 : len(value)-1]
 	}
 	return value
+}
+
+func toTimespanFunction(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+	if len(arguments) != 1 {
+		return ksql.TypedExpression{}, fmt.Errorf("totimespan requires one argument")
+	}
+	if arguments[0].Type == ksql.TypeTimespan {
+		return arguments[0], nil
+	}
+	return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_totimespan", Args: []sqlast.Expr{arguments[0].SQL}}}, nil
+}
+
+// constantTicks reads a compiled constant timespan, including negation.
+func constantTicks(expr sqlast.Expr) (int64, bool) {
+	sign := int64(1)
+	if unary, ok := expr.(*sqlast.Unary); ok && unary.Operator == "-" {
+		sign, expr = -1, unary.Operand
+	}
+	literal, ok := expr.(*sqlast.Literal)
+	if !ok || literal.Kind != sqlast.NumberLiteral {
+		return 0, false
+	}
+	ticks, err := strconv.ParseInt(literal.Value, 10, 64)
+	return sign * ticks, err == nil
+}
+
+// extractFunction maps extract(regex, group, source [, typeof(T)]); the
+// optional type converts the capture, and failed conversions are null.
+func extractFunction(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+	if len(arguments) != 3 && len(arguments) != 4 {
+		return ksql.TypedExpression{}, fmt.Errorf("extract requires a regex, capture group, source and optional typeof(T)")
+	}
+	values := []sqlast.Expr{arguments[0].SQL, arguments[1].SQL, arguments[2].SQL}
+	result := ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_extract", Args: values}}
+	if len(arguments) == 3 {
+		return result, nil
+	}
+	literal, ok := arguments[3].SQL.(*sqlast.Literal)
+	if !ok || literal.Kind != sqlast.StringLiteral {
+		return ksql.TypedExpression{}, fmt.Errorf("extract type must be typeof(T)")
+	}
+	conversions := map[string]struct {
+		function string
+		kind     ksql.ScalarType
+	}{
+		"int": {"kql_toint", ksql.TypeInt}, "int32": {"kql_toint", ksql.TypeInt},
+		"long": {"kql_tolong", ksql.TypeLong}, "int64": {"kql_tolong", ksql.TypeLong},
+		"real": {"kql_toreal", ksql.TypeReal}, "double": {"kql_toreal", ksql.TypeReal},
+		"bool": {"kql_tobool", ksql.TypeBool}, "boolean": {"kql_tobool", ksql.TypeBool},
+		"datetime": {"kql_todatetime", ksql.TypeDateTime}, "date": {"kql_todatetime", ksql.TypeDateTime},
+		"timespan": {"kql_totimespan", ksql.TypeTimespan}, "time": {"kql_totimespan", ksql.TypeTimespan},
+		"guid": {"kql_toguid", ksql.TypeString},
+	}
+	if literal.Value == "string" {
+		return result, nil
+	}
+	conversion, ok := conversions[literal.Value]
+	if !ok {
+		return ksql.TypedExpression{}, fmt.Errorf("extract does not support typeof(%s)", literal.Value)
+	}
+	return ksql.TypedExpression{Type: conversion.kind, SQL: &sqlast.Call{Name: conversion.function, Args: []sqlast.Expr{result.SQL}}}, nil
 }
