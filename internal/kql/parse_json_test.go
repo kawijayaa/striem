@@ -12,7 +12,7 @@ func TestParseJSONContracts(t *testing.T) {
 		for _, tc := range []struct{ input, want string }{
 			{`"not json"`, `"not json"`},
 			{`"{bad}"`, `"{bad}"`},
-			{`""`, `""`},
+			{`""`, `<nil>`}, // gettype(parse_json('')) is null in Microsoft's gettype table.
 			{`"é\u0000"`, `"é\u0000"`},
 			{`" { \"long\" : 9223372036854775807 } "`, `{"long":9223372036854775807}`},
 			{`" [1, true, null] "`, `[1,true,null]`},

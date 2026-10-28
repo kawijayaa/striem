@@ -137,23 +137,142 @@ func kqlHash(value any, kind string, modValue any) any {
 	return int64(uint64(hash) % uint64(mod))
 }
 
-// kqlHashMany combines the values' hashes. Kusto documents that the
-// combination may change and is only comparable within one query.
+// kqlHashMany combines the values' hashes as hash_combine does, so
+// hash_many(a, b) == hash_combine(hash(a), hash(b)) as Kusto documents.
+// Kusto notes the combination may change and is only comparable within one
+// query.
 func kqlHashMany(kinds string, values ...any) any {
 	types := strings.Split(kinds, ",")
 	if len(types) != len(values) {
 		return nil
 	}
-	combined := make([]byte, 0, 8*len(values))
+	hashes := make([]uint64, len(values))
 	for i, value := range values {
-		data, ok := hashBytes(value, types[i])
-		var hash uint64
-		if ok {
-			hash = xxhash64(data)
+		if data, ok := hashBytes(value, types[i]); ok {
+			hashes[i] = xxhash64(data)
 		}
+	}
+	return combineHashes(hashes)
+}
+
+// kqlHashCombine combines long hash values; a null hashes as 0, as an
+// unhashable hash_many value does.
+func kqlHashCombine(values ...any) any {
+	hashes := make([]uint64, len(values))
+	for i, value := range values {
+		if hash, ok := value.(int64); ok {
+			hashes[i] = uint64(hash)
+		}
+	}
+	return combineHashes(hashes)
+}
+
+func combineHashes(hashes []uint64) int64 {
+	combined := make([]byte, 0, 8*len(hashes))
+	for _, hash := range hashes {
 		combined = binary.LittleEndian.AppendUint64(combined, hash)
 	}
 	return int64(xxhash64(combined))
+}
+
+// kqlGetType names a dynamic value's runtime type as Kusto does: JSON
+// integers are int or long by range, objects are dictionary, and null or
+// unparsable values are null.
+func kqlGetType(value any) any {
+	text, ok := textArgument(value)
+	if !ok || sqliteNull(value) {
+		return "null"
+	}
+	switch typed := value.(type) {
+	case int64:
+		return integerType(typed)
+	case float64:
+		return "real"
+	}
+	decoded, ok := decodeJSONNumbers(text)
+	if !ok {
+		return "null"
+	}
+	return jsonTypeName(decoded)
+}
+
+// kqlGetTypeAt names the type of base[key1][key2]..., read from the JSON
+// container so extracted strings and Booleans keep their type. String keys
+// select object members and integer keys array elements, negative ones from
+// the end.
+func kqlGetTypeAt(base any, keys ...any) any {
+	text, ok := textArgument(base)
+	if !ok || sqliteNull(base) {
+		return "null"
+	}
+	value, ok := decodeJSONNumbers(text)
+	if !ok {
+		return "null"
+	}
+	for _, key := range keys {
+		switch container := value.(type) {
+		case map[string]any:
+			name, ok := key.(string)
+			if !ok {
+				return "null"
+			}
+			value = container[name]
+		case []any:
+			index, ok := key.(int64)
+			if !ok {
+				return "null"
+			}
+			if index < 0 {
+				index += int64(len(container))
+			}
+			if index < 0 || index >= int64(len(container)) {
+				return "null"
+			}
+			value = container[index]
+		default:
+			return "null"
+		}
+	}
+	return jsonTypeName(value)
+}
+
+func decodeJSONNumbers(text string) (any, bool) {
+	if len(text) > maxReplacementBytes {
+		return nil, false
+	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var decoded any
+	if decoder.Decode(&decoded) != nil || decoder.More() {
+		return nil, false
+	}
+	return decoded, true
+}
+
+func jsonTypeName(value any) string {
+	switch typed := value.(type) {
+	case bool:
+		return "bool"
+	case string:
+		return "string"
+	case map[string]any:
+		return "dictionary"
+	case []any:
+		return "array"
+	case json.Number:
+		if integer, err := typed.Int64(); err == nil {
+			return integerType(integer)
+		}
+		return "real"
+	}
+	return "null"
+}
+
+func integerType(value int64) string {
+	if value >= math.MinInt32 && value <= math.MaxInt32 {
+		return "int"
+	}
+	return "long"
 }
 
 // kqlParseCommandLine splits a Windows command line as CommandLineToArgvW
@@ -578,7 +697,6 @@ func writeSortedJSON(buffer *bytes.Buffer, value any) {
 		buffer.Write(encoded)
 	}
 }
-
 
 // kqlAssert returns true, or fails the query with message when the
 // condition is false.

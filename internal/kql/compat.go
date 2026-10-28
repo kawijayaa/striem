@@ -582,16 +582,22 @@ func compatibilityOptions() []ksql.Option {
 	}
 	for _, name := range []string{"startofday", "endofday", "startofweek", "endofweek", "startofmonth", "endofmonth", "startofyear", "endofyear"} {
 		name := name
-		options = append(options, ksql.WithFunction(name, func(args []sqlast.Expr) (sqlast.Expr, error) {
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(args) < 1 || len(args) > 2 {
-				return nil, fmt.Errorf("%s requires one datetime and an optional integer offset", name)
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires one datetime and an optional integer offset", name)
+			}
+			if args[0].Type != ksql.TypeDateTime && args[0].Type != ksql.TypeUnknown && args[0].Type != ksql.TypeDynamic {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires a datetime", name)
 			}
 			offset := sqlast.Expr(&sqlast.Literal{Kind: sqlast.NumberLiteral, Value: "0"})
 			if len(args) == 2 {
-				offset = args[1]
+				if args[1].Type != ksql.TypeInt && args[1].Type != ksql.TypeLong && args[1].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s offset must be an integer", name)
+				}
+				offset = args[1].SQL
 			}
 			unit := strings.TrimPrefix(strings.TrimPrefix(name, "startof"), "endof")
-			return &sqlast.Call{Name: "kql_calendar", Args: []sqlast.Expr{args[0], stringLiteral(unit), offset, &sqlast.Literal{Kind: sqlast.BooleanLiteral, Value: strconv.FormatBool(strings.HasPrefix(name, "end"))}}}, nil
+			return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_calendar", Args: []sqlast.Expr{args[0].SQL, stringLiteral(unit), offset, &sqlast.Literal{Kind: sqlast.BooleanLiteral, Value: strconv.FormatBool(strings.HasPrefix(name, "end"))}}}}, nil
 		}))
 	}
 	for _, name := range []string{"dcount", "dcountif", "count_distinct", "count_distinctif"} {

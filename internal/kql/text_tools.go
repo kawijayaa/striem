@@ -48,6 +48,45 @@ func textToolOptions() []ksql.Option {
 			values[0] = text(strings.Join(kinds, ","))
 			return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "kql_hash_many", Args: values}}, nil
 		}),
+		ksql.WithTypedFunction("gettype", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 {
+				return ksql.TypedExpression{}, fmt.Errorf("gettype requires one scalar")
+			}
+			switch args[0].Type {
+			case ksql.TypeDynamic, ksql.TypeUnknown:
+				// A dynamic value's runtime type is its JSON encoding's.
+				// Extracted elements lose it (strings unquote, true is 1), so
+				// an index chain passes its container and keys instead.
+				var keys []sqlast.Expr
+				base := args[0].SQL
+				for {
+					index, ok := base.(*sqlast.Index)
+					if !ok || len(keys) >= 32 {
+						break
+					}
+					keys = append([]sqlast.Expr{index.Index}, keys...)
+					base = index.Value
+				}
+				if len(keys) > 0 && len(keys) < 32 {
+					return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_gettype_at", Args: append([]sqlast.Expr{base}, keys...)}}, nil
+				}
+				return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_gettype", Args: []sqlast.Expr{args[0].SQL}}}, nil
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: text(string(args[0].Type))}, nil
+		}),
+		ksql.WithTypedFunction("hash_combine", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) < 2 || len(args) > 64 {
+				return ksql.TypedExpression{}, fmt.Errorf("hash_combine takes 2 to 64 long hash values")
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if arg.Type != ksql.TypeLong && arg.Type != ksql.TypeInt && arg.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("hash_combine arguments must be long hash values")
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeLong, SQL: &sqlast.Call{Name: "kql_hash_combine", Args: values}}, nil
+		}),
 		ksql.WithTypedFunction("indexof_regex", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(args) < 2 || len(args) > 5 {
 				return ksql.TypedExpression{}, fmt.Errorf("indexof_regex requires a string, a regex and optional start, length and occurrence")

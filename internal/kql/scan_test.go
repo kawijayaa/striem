@@ -56,6 +56,7 @@ func TestCompileTerminatesSafely(t *testing.T) {
 func TestForensicTextFunctions(t *testing.T) {
 	db := featureDatabase(t)
 	for _, tc := range []struct{ query, want string }{
+		{`print h1 = hash("Hello"), h2 = hash("World") | extend c = hash_combine(h1, h2), same = hash_combine(h1, h2) == hash_many("Hello", "World"), n = isnull(hash_combine(h1, long(null))) | project h1, h2, same, n`, `[[753694413698530628 1846988464401551951 1 0]]`},
 		{`print a=hash("World"), b=hash("World", 100), c=hash(datetime("2015-01-01")), d=hash_many("Hello", "World") == hash_many("Hello", "World"), e=hash_many("Hello", "World") != hash_many("World", "Hello"), n=hash(string(null))`, `[[1846988464401551951 51 1380966698541616202 1 1 <nil>]]`},
 		{`print a=parse_command_line("echo \"hello world!\"", "windows"), b=parse_command_line(strcat(@"C:\Program Files\x.exe", ' "a b" c\\"d "e""f" g\\\\"h"'), "windows"), c=parse_command_line(@"""C:\Program Files\x.exe"" -n", "windows"), bad=parse_command_line("x", "linux")`,
 			`[[["echo","hello world!"] ["C:\\Program","Files\\x.exe","a b","c\"d","e\"f","g\\h"] ["C:\\Program Files\\x.exe","-n"] <nil>]]`},
@@ -118,6 +119,11 @@ func TestAssert(t *testing.T) {
 	db := featureDatabase(t)
 	if got := fmt.Sprint(featureRows(t, db, `print x = assert(1 < 2, "ok")`)); got != `[[1]]` {
 		t.Fatalf("assert(true) = %s", got)
+	}
+	// Microsoft's example passes a positional argument after a named one.
+	checked := `let checkLength = (len:long, s:string) { assert(len > 0, "Length must be greater than zero") and strlen(s) > len }; datatable(input:string) ['123', '4567'] | where checkLength(len=3, input)`
+	if got := fmt.Sprint(featureRows(t, db, checked)); got != `[[4567]]` {
+		t.Fatalf("checkLength = %s", got)
 	}
 	compiled, err := Compile(`print x = assert(1 > 2, "numbers broke")`, time.Now(), featureCatalog())
 	if err != nil {
@@ -255,5 +261,46 @@ func TestTypedExpansionConversions(t *testing.T) {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
 			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
 		}
+	}
+}
+
+// Microsoft's union examples with views, wildcards and isfuzzy.
+func TestUnionPatterns(t *testing.T) {
+	db := featureDatabase(t)
+	views := "let View_1 = view () { print x=1 }; let View_2 = view () { print x=1 }; let OtherView_1 = view () { print x=1 };\n"
+	for _, tc := range []struct{ query, want string }{
+		{views + `union isfuzzy=true View*, SomeView*, OtherView* | count`, `[[3]]`},
+		{views + `union isfuzzy=true (View_1 | where x > 0), (View_2 | where x > 0), (View_3 | where x > 0) | count`, `[[2]]`},
+		{views + `union withsource=T View* | order by T asc | project T`, `[[View_1] [View_2]]`},
+		{views + `union *View_1 | count`, `[[2]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	if _, err := Compile(views+`union SomeView*`, time.Now(), featureCatalog()); err == nil {
+		t.Error("union of an unmatched pattern without isfuzzy should fail")
+	}
+}
+
+// Microsoft's gettype table, element types read from their JSON container,
+// blank parse_json, typed calendar functions and guid literals.
+func TestRuntimeTypes(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print a=gettype("a"), b=gettype(111), c=gettype(1==1), d=gettype(now()), e=gettype(1s), f=gettype(parse_json('1')), g=gettype(parse_json(' "abc" ')), h=gettype(parse_json(' {"abc":1} ')), i=gettype(parse_json(' [1, 2, 3] ')), j=gettype(123.45), k=gettype(parse_json(''))`,
+			`[[string long bool datetime timespan int string dictionary array real null]]`},
+		{`print a=gettype(dynamic({"a":"123"}).a), b=gettype(dynamic({"a":true}).a), c=gettype(dynamic({"a":{"b":[1, "x"]}}).a.b[-1]), d=gettype(dynamic([1])[5]), e=gettype(parse_json("5000000000")), f=gettype(dynamic(null))`,
+			`[[string bool string null long null]]`},
+		{`print a=isnull(parse_json("  ")), b=tostring(parse_json("")), c=parse_json("abc")`, `[[1  "abc"]]`},
+		{`range h from startofmonth(datetime(2023-02-01 05:00)) to datetime(2023-02-01 23:00) step 4.534h | count`, `[[6]]`},
+		{`print g = guid(12E8B78D-55B4-46AE-B068-26D7A0080254)`, `[[12e8b78d-55b4-46ae-b068-26d7a0080254]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	if _, err := Compile(`print startofmonth("x")`, time.Now(), featureCatalog()); err == nil {
+		t.Error("startofmonth of a string should fail")
 	}
 }

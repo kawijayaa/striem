@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -20,6 +21,10 @@ func kqlParseJSON(value any) (any, error) {
 	}
 	if !utf8.ValidString(text) {
 		return nil, fmt.Errorf("parse_json input must be valid UTF-8")
+	}
+	// Kusto parses empty or blank text as null: gettype(parse_json('')).
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
 	}
 	if json.Valid([]byte(text)) {
 		var compact bytes.Buffer
