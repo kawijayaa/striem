@@ -41,7 +41,7 @@ Status as verified on 2026-10-29. Each item names the check that verifies it.
 
 ## Known limitations
 
-- **NaN:** SQLite turns a NaN result into NULL, so `0.0/0.0` and `avg()` over an empty input are null rather than Kusto's NaN.
+- **NaN (accepted for production):** SQLite turns a NaN result into NULL, so `0.0/0.0` and `avg()` over an empty input are null rather than Kusto's NaN.
 - **Old browsers:** browsers without `JSON.rawJSON` (before Chrome 114, Firefox 135 and Safari 18.4) show integers beyond 2^53 inside dynamic values as exact digit strings rather than numbers.
-- **Publishing:** CI checks out KSQL at the commit pinned in the Docker workflows. That commit must be pushed to the KSQL repository before CI can build.
+- **Publishing:** CI checks out KSQL at the commit pinned in the Docker workflows. Push KSQL before Striem whenever the pin moves.
 - **Out of scope by decision:** KQL features outside the CTF scope report unsupported errors. These include geo, series, graph, external plugins, activity metrics, fork/facet and pattern mining. See `KQL_IMPLEMENTATION.md`.
