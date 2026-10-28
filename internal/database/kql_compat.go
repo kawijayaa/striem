@@ -94,6 +94,9 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
+	if err := c.RegisterAggregator("kql_buildschema", func() *buildSchemaAggregate { return &buildSchemaAggregate{} }, true); err != nil {
+		return err
+	}
 	if err := c.RegisterAggregator("kql_tdigest_merge", func() *tdigestMerge { return &tdigestMerge{} }, true); err != nil {
 		return err
 	}

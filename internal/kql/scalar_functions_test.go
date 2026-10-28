@@ -148,3 +148,19 @@ func TestSetRequestOptions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's buildschema example: types in first-seen order, nested
+// objects and array indexers.
+func TestBuildSchema(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(value: dynamic) [dynamic({"x":1, "y":3.5}), dynamic({"x":"somevalue", "z":[1, 2, 3]}), dynamic({"y":{"w":"zzz"}, "t":["aa", "bb"], "z":["foo"]})] | summarize buildschema(value)`,
+			`[[{"x":["long","string"],"y":["double",{"w":"string"}],"z":{"` + "`indexer`" + `":["long","string"]},"t":{"` + "`indexer`" + `":"string"}}]]`},
+		{`datatable(value: dynamic) [dynamic(null)] | summarize s=buildschema(value)`, `[[<nil>]]`},
+		{`datatable(value: dynamic) [dynamic({"a":[]}), dynamic({"a":true})] | summarize s=buildschema(value)`, `[[{"a":[{"` + "`indexer`" + `":null},"bool"]}]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

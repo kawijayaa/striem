@@ -51,5 +51,11 @@ func collectOptions() []ksql.Option {
 				value, &sqlast.Literal{Kind: sqlast.StringLiteral, Value: kind}, limit}}}, nil
 		}))
 	}
+	options = append(options, ksql.WithTypedAggregate("buildschema", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		if len(args) != 1 || (args[0].Type != ksql.TypeDynamic && args[0].Type != ksql.TypeUnknown) {
+			return ksql.TypedExpression{}, fmt.Errorf("buildschema requires one dynamic value")
+		}
+		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_buildschema", Args: []sqlast.Expr{args[0].SQL}}}, nil
+	}))
 	return options
 }
