@@ -165,6 +165,7 @@ func init() {
 			"kql_hash_combine":                     kqlHashCombine,
 			"kql_gettype":                          kqlGetType,
 			"kql_gettype_at":                       kqlGetTypeAt,
+			"kql_parse_version":                    kqlParseVersion,
 			"kql_parse_command_line":               kqlParseCommandLine,
 			"kql_parse_path":                       kqlParsePath,
 			"kql_regex_quote":                      kqlRegexQuote,

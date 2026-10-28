@@ -304,3 +304,22 @@ func TestRuntimeTypes(t *testing.T) {
 		t.Error("startofmonth of a string should fail")
 	}
 }
+
+// Microsoft's parse_version comparison example; values are 32 zero-padded
+// digits so comparisons stay exact.
+func TestParseVersion(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(lab: string, v: string) ["Lab A", "0.0.0.5", "Lab B", "0.0.7.0", "Lab D","0.0.3", "Lab C", "0.2", "Lab G", "0.1.2.0", "Lab F", "1.2.3.4", "Lab E", "1"]
+| extend parsed_version = parse_version(v) | extend needs_update = iff(parsed_version < parse_version("1.0.0.0"), "Yes", "No") | project lab, v, needs_update | sort by lab asc, v, needs_update`,
+			`[[Lab A 0.0.0.5 Yes] [Lab B 0.0.7.0 Yes] [Lab C 0.2 Yes] [Lab D 0.0.3 Yes] [Lab E 1 No] [Lab F 1.2.3.4 No] [Lab G 0.1.2.0 Yes]]`},
+		{`print a = parse_version("1.2.3.4"), b = parse_version("1.0") == parse_version("1.0.0.0"), c = parse_version("1.0.0.1") < parse_version("1.0.0.2"), d = parse_version("99999999.0.0.0") > parse_version("9.99999999")`,
+			`[[00000001000000020000000300000004 1 1 1]]`},
+		{`print a = isnull(parse_version("1.2.3.4.5")), b = isnull(parse_version("1..2")), c = isnull(parse_version("123456789")), d = isnull(parse_version("v1")), e = isnull(parse_version("")), f = isnull(parse_version(string(null))), g = isnull(parse_version("-1"))`,
+			`[[1 1 1 1 1 1 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

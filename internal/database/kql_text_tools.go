@@ -268,6 +268,38 @@ func jsonTypeName(value any) string {
 	return "null"
 }
 
+// kqlParseVersion encodes one to four dot-separated parts of up to eight
+// digits as Kusto's p1*10^24 + p2*10^16 + p3*10^8 + p4, missing parts
+// trailing zeros. Kusto returns a decimal; this returns the 32 zero-padded
+// digits, so comparisons and sorting stay exact where a real would not.
+func kqlParseVersion(value any) any {
+	text, ok := textArgument(value)
+	if !ok || sqliteNull(value) || len(text) > 64 {
+		return nil
+	}
+	parts := strings.Split(strings.TrimSpace(text), ".")
+	if len(parts) > 4 {
+		return nil
+	}
+	var encoded strings.Builder
+	for i := 0; i < 4; i++ {
+		part := "0"
+		if i < len(parts) {
+			part = parts[i]
+		}
+		if len(part) == 0 || len(part) > 8 {
+			return nil
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return nil
+			}
+		}
+		encoded.WriteString(strings.Repeat("0", 8-len(part)) + part)
+	}
+	return encoded.String()
+}
+
 func integerType(value int64) string {
 	if value >= math.MinInt32 && value <= math.MaxInt32 {
 		return "int"

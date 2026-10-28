@@ -74,6 +74,12 @@ func textToolOptions() []ksql.Option {
 			}
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: text(string(args[0].Type))}, nil
 		}),
+		ksql.WithTypedFunction("parse_version", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 || (args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown && args[0].Type != ksql.TypeDynamic) {
+				return ksql.TypedExpression{}, fmt.Errorf("parse_version requires a string")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_parse_version", Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}),
 		ksql.WithTypedFunction("hash_combine", func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(args) < 2 || len(args) > 64 {
 				return ksql.TypedExpression{}, fmt.Errorf("hash_combine takes 2 to 64 long hash values")
