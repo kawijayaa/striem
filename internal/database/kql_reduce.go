@@ -21,6 +21,8 @@ const (
 	maxReduceValues = 1 << 18
 	maxReduceBytes  = 64 << 20
 	maxReduceTerms  = 256
+	// maxReduceTotalTerms bounds the frequency table across distinct values.
+	maxReduceTotalTerms = 1 << 22
 )
 
 type reduceAggregate struct {
@@ -52,8 +54,11 @@ func (a *reduceAggregate) Step(value any, thresholdValue any, separatorsValue an
 		return nil
 	}
 	if _, seen := a.counts[text]; !seen {
-		if len(a.order) >= maxReduceValues || a.bytes+len(text) > maxReduceBytes {
+		if len(a.order) >= maxReduceValues {
 			return fmt.Errorf("reduce input exceeds %d distinct values", maxReduceValues)
+		}
+		if a.bytes+len(text) > maxReduceBytes {
+			return fmt.Errorf("reduce input exceeds %d bytes of distinct values", maxReduceBytes)
 		}
 		a.order = append(a.order, text)
 		a.bytes += len(text)
@@ -108,6 +113,7 @@ func (a *reduceAggregate) Done() (any, error) {
 	}
 	entries := make([]entry, len(a.order))
 	var total int64
+	totalTerms := 0
 	type position struct {
 		index int
 		term  string
@@ -117,6 +123,9 @@ func (a *reduceAggregate) Done() (any, error) {
 		terms, separators := a.split(value)
 		if len(terms) > maxReduceTerms {
 			terms, separators = []string{value}, []string{"", ""}
+		}
+		if totalTerms += len(terms); totalTerms > maxReduceTotalTerms {
+			return nil, fmt.Errorf("reduce input exceeds %d terms", maxReduceTotalTerms)
 		}
 		entries[i] = entry{terms, separators}
 		count := a.counts[value]
