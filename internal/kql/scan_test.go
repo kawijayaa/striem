@@ -323,3 +323,50 @@ func TestParseVersion(t *testing.T) {
 		}
 	}
 }
+
+// column_ifexists, bag_pack_columns, table() with a parameter and data
+// scope, and documented aliases.
+func TestColumnAndTableFunctions(t *testing.T) {
+	db := featureDatabase(t)
+	data := `datatable(Id: string, Value: string, Other: long) ["A", "val_a", 1, "B", "val_b", 2]`
+	for _, tc := range []struct{ query, want string }{
+		{data + ` | project column_ifexists("Capital", Id), column_ifexists("Value", "none"), columnifexists("Missing", Other * 10)`, `[[A val_a 10] [B val_b 20]]`},
+		{data + ` | extend Packed = bag_pack_columns(Id, Value) | project Packed`, `[[{"Id":"A","Value":"val_a"}] [{"Id":"B","Value":"val_b"}]]`},
+		{`let T = datatable(x: long) [1, 2, 3]; let foo = (tableName: string) { table(tableName) | count }; foo('T')`, `[[3]]`},
+		{`let T = datatable(x: long) [1, 2]; table('T', 'hotcache') | count`, `[[2]]`},
+		{`let f = (c: string) { datatable(a: long) [5] | project v = column_ifexists(c, -1) }; union (f("a")), (f("b")) | order by v asc`, `[[-1] [5]]`},
+		{`print a = arraylength(dynamic([1, 2])), b = array_strcat(dynamic(["x", "y"]), "-"), c = hash_xxhash64("World"), d = hash_xxhash64("World", 100)`, `[[2 x-y 1846988464401551951 51]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		data + ` | project column_ifexists(strcat("I", "d"), 1)`,
+		data + ` | project bag_pack_columns(Id, strlen(Value))`,
+		`let T = datatable(x: long) [1]; table('T', 'cold')`,
+		`table('sqlite_master')`,
+	} {
+		if _, err := Compile(query, time.Now(), featureCatalog()); err == nil {
+			t.Errorf("%s: want a compile error", query)
+		}
+	}
+}
+
+// Microsoft's punycode examples, round trips and malformed input.
+func TestPunycode(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print a = punycode_from_string('académie-française'), b = punycode_to_string('acadmie-franaise-npb1a'), c = punycode_from_string('艺术')`, `[[acadmie-franaise-npb1a académie-française cqv902d]]`},
+		{`datatable(domain:string)['Lê Lợi。Thuận Thiên。com', 'Riðill｡Skáldskaparmál｡org', "Kaledvoulc'h.Artorījos.edu"] | extend str = punycode_domain_to_string(domain) | project str`,
+			`[[xn--L Li-gpa4517b.xn--Thun Thin-s4a7194f.com] [xn--Riill-jta.xn--Skldskaparml-dbbj.org] [Kaledvoulc'h.xn--Artorjos-ejb.edu]]`},
+		{`datatable(encoded:string)["xn--Ge-mia.Bulg.edu", "xn--Lin-8na.Celtchair.org", "xn--Ry-lja8c.xn--Jng-uta63a.xn--Bng-9ka.com"] | extend domain = punycode_domain_from_string(encoded) | project domain`,
+			`[[Gáe.Bulg.edu] [Lúin.Celtchair.org] [Rúyì.Jīngū.Bàng.com]]`},
+		{`print a = punycode_to_string('ab$c'), b = punycode_to_string('é'), c = punycode_domain_from_string('xn--99999999999.com'), d = isnull(punycode_to_string(string(null))), e = punycode_domain_from_string('аpple.com')`, `[[   1 аpple.com]]`},
+		{`print punycode_domain_from_string(punycode_domain_to_string('раураl.com'))`, `[[раураl.com]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

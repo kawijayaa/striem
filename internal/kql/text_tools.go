@@ -149,6 +149,15 @@ func textToolOptions() []ksql.Option {
 			return ksql.TypedExpression{Type: result, SQL: &sqlast.Call{Name: "kql_extract_json", Args: []sqlast.Expr{args[0].SQL, args[1].SQL, kind}}}, nil
 		}))
 	}
+	for _, name := range []string{"punycode_from_string", "punycode_to_string", "punycode_domain_to_string", "punycode_domain_from_string"} {
+		sqlName := "kql_" + name
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 1 || (args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires one string", name)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: sqlName, Args: []sqlast.Expr{args[0].SQL}}}, nil
+		}))
+	}
 	return options
 }
 
