@@ -3,6 +3,7 @@ package kql
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // Microsoft's scan examples: cumulative sums, fill-forward, sessions with
@@ -29,5 +30,21 @@ func TestScanOperator(t *testing.T) {
 		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
 			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
 		}
+	}
+}
+
+// Queries that crash or hang the compiler are denials of service; Compile
+// reports compiler panics as errors and the lexer terminates on Unicode
+// digits.
+func TestCompileTerminatesSafely(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = Compile("print ٦", time.Now())
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("compiling a Unicode digit did not terminate")
 	}
 }

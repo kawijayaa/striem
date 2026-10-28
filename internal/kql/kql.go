@@ -193,7 +193,13 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("line %d, column %d: %s", e.Line, e.Column, e.Message)
 }
 
-func Compile(source string, now time.Time, compileOptions ...CompileOption) (CompiledQuery, error) {
+func Compile(source string, now time.Time, compileOptions ...CompileOption) (compiled CompiledQuery, err error) {
+	// A compiler bug must surface as an error, never crash the caller.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			compiled, err = CompiledQuery{}, &Error{Message: fmt.Sprintf("internal compiler error: %v", recovered), Line: 1, Column: 1}
+		}
+	}()
 	// The FTS optimization parses before the compiler does, so enforce the
 	// source limit here as well as in the compiler configuration.
 	if len(source) > maxSourceBytes {
