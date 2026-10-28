@@ -57,5 +57,13 @@ func collectOptions() []ksql.Option {
 		}
 		return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: "kql_buildschema", Args: []sqlast.Expr{args[0].SQL}}}, nil
 	}))
+	for name, sqlName := range map[string]string{"reduce_patterns": "kql_reduce", "reduce_source": "kql_reduce_source"} {
+		options = append(options, ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) != 3 || (args[0].Type != ksql.TypeString && args[0].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("reduce requires a string expression")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeDynamic, SQL: &sqlast.Call{Name: sqlName, Args: []sqlast.Expr{args[0].SQL, args[1].SQL, args[2].SQL}}}, nil
+		}))
+	}
 	return options
 }

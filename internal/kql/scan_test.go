@@ -1,6 +1,7 @@
 package kql
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,5 +132,44 @@ func TestAssert(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "assertion failed: numbers broke") {
 		t.Fatalf("assert(false) error = %v", err)
+	}
+}
+
+// Microsoft's reduce examples and kind=source.
+func TestReduce(t *testing.T) {
+	db := featureDatabase(t)
+	cities := `datatable (City: string) ["San Bernard", "San Jose", "San Diego", "Moscow", "Moscow", "One -on- One", "Two -on- Three", "Paris", "Lone"]`
+	for _, tc := range []struct{ query, want string }{
+		{`range x from 1 to 10 step 1 | project str = strcat("foo", "Z", tostring(x)) | reduce by str`, `[[others 10 ]]`},
+		{`range x from 1 to 10 step 1 | project str = strcat("foo", "Z", tostring(x)) | reduce by str with characters="Z"`, `[[foo* 10 fooZ1]]`},
+		{`range x from 1 to 1000 step 1 | project MyText = strcat("MachineLearningX", tostring(x % 10)) | reduce by MyText with threshold=0.5, characters="X"`, `[[MachineLearning* 1000 MachineLearningX1]]`},
+		{`range x from 1 to 1000 step 1 | project MyText = strcat("MachineLearningX", tostring(x % 10)) | reduce by MyText with threshold=0.01, characters="X" | count`, `[[10]]`},
+		{cities + ` | reduce by City with threshold=0.15`, `[[San * 3 San Bernard] [Moscow 2 Moscow] [* -on- * 2 One -on- One] [others 2 ]]`},
+		{cities + ` | reduce kind=source by City with threshold=0.15 | where City in ("San Jose", "Paris")`, `[[San Jose San *] [Paris others]]`},
+		{`datatable (s: string) [] | reduce by s`, `[]`},
+		{`datatable (s: string) ["a", "a"] | extend s = iff(true, string(null), s) | reduce by s`, `[]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		`datatable (s: string) ["a"] | reduce by s with threshold=2`,
+		`datatable (s: string) ["a"] | reduce kind=other by s`,
+		`datatable (s: string) ["a"] | reduce by s with foo=1`,
+	} {
+		compiled, err := Compile(query, time.Now(), featureCatalog())
+		if err == nil {
+			var rows *sql.Rows
+			if rows, err = db.Query(compiled.SQL, compiled.Args...); err == nil {
+				for rows.Next() {
+				}
+				err = rows.Err()
+				rows.Close()
+			}
+		}
+		if err == nil {
+			t.Errorf("%s: want an error", query)
+		}
 	}
 }
