@@ -88,6 +88,21 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
+	for name, mode := range map[string]string{"kql_tdigest": "digest", "kql_percentile": "single", "kql_percentiles_array": "array"} {
+		mode := mode
+		if err := c.RegisterAggregator(name, func() *percentileAggregate { return &percentileAggregate{mode: mode} }, true); err != nil {
+			return err
+		}
+	}
+	if err := c.RegisterAggregator("kql_tdigest_merge", func() *tdigestMerge { return &tdigestMerge{} }, true); err != nil {
+		return err
+	}
+	for name, merge := range map[string]bool{"kql_hll": false, "kql_hll_merge": true} {
+		merge := merge
+		if err := c.RegisterAggregator(name, func() *hllAggregate { return &hllAggregate{merge: merge} }, true); err != nil {
+			return err
+		}
+	}
 	if err := c.RegisterAggregator("kql_make_bag", func() *bagAggregate { return &bagAggregate{} }, true); err != nil {
 		return err
 	}
