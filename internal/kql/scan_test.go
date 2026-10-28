@@ -173,3 +173,38 @@ func TestReduce(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's StormEvents sequence_detect example on its matching records:
+// every chain within the windows is an occurrence.
+func TestSequenceDetect(t *testing.T) {
+	db := featureDatabase(t)
+	storms := `datatable (StartTime: datetime, EventType: string, State: string) [
+		datetime(2007-05-08 00:00), "Excessive Heat", "CALIFORNIA", datetime(2007-05-08 16:02), "Wildfire", "CALIFORNIA",
+		datetime(2007-05-10 11:30), "Wildfire", "CALIFORNIA", datetime(2007-07-23 12:00), "Excessive Heat", "SOUTH DAKOTA",
+		datetime(2007-07-27 09:00), "Wildfire", "SOUTH DAKOTA", datetime(2007-07-24 00:00), "Wildfire", "TEXAS",
+		datetime(2007-08-31 08:00), "Excessive Heat", "CALIFORNIA", datetime(2007-09-01 11:28), "Wildfire", "CALIFORNIA",
+		datetime(2007-09-02 12:00), "Excessive Heat", "CALIFORNIA", datetime(2007-09-02 13:30), "Wildfire", "CALIFORNIA",
+		datetime(2007-10-01 00:00), "Excessive Heat", "CALIFORNIA", datetime(2007-10-07 00:00), "Wildfire", "CALIFORNIA"]`
+	for _, tc := range []struct{ query, want string }{
+		{storms + ` | evaluate sequence_detect(StartTime, 5d, 5d, heat=(EventType == "Excessive Heat"), wildfire=(EventType == 'Wildfire'), State) | project State, tostring(heat_StartTime), tostring(wildfire_StartTime), tostring(Duration)`,
+			`[[CALIFORNIA 2007-05-08T00:00:00.000000000Z 2007-05-08T16:02:00.000000000Z 16:02:00] [CALIFORNIA 2007-05-08T00:00:00.000000000Z 2007-05-10T11:30:00.000000000Z 2.11:30:00] [SOUTH DAKOTA 2007-07-23T12:00:00.000000000Z 2007-07-27T09:00:00.000000000Z 3.21:00:00] [CALIFORNIA 2007-08-31T08:00:00.000000000Z 2007-09-01T11:28:00.000000000Z 1.03:28:00] [CALIFORNIA 2007-08-31T08:00:00.000000000Z 2007-09-02T13:30:00.000000000Z 2.05:30:00] [CALIFORNIA 2007-09-02T12:00:00.000000000Z 2007-09-02T13:30:00.000000000Z 01:30:00]]`},
+		// Three steps: each step within 1h of the previous, all within 90m.
+		{`datatable (T: datetime, E: string, U: string) [datetime(2026-01-01 00:00), "login", "a", datetime(2026-01-01 00:30), "sudo", "a", datetime(2026-01-01 01:20), "exfil", "a", datetime(2026-01-01 00:10), "login", "b", datetime(2026-01-01 01:30), "sudo", "b", datetime(2026-01-01 00:00), "sudo", "c"] | evaluate sequence_detect(T, 1h, 90m, E == "login", E == "sudo", E == "exfil", U) | project U, tostring(Duration)`,
+			`[[a 01:20:00]]`},
+		{`datatable (T: datetime, E: string) [datetime(2026-01-01), "x"] | evaluate sequence_detect(T, 1h, 1h, E == "x", E == "y") | count`, `[[0]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		`datatable (T: datetime, E: string) [] | evaluate sequence_detect(T, 1h, 1h, E)`,
+		`datatable (T: string, E: string) [] | evaluate sequence_detect(T, 1h, 1h, E == "x")`,
+		`datatable (T: datetime, E: string) [] | evaluate sequence_detect(T, 1, 1h, E == "x")`,
+		`datatable (T: datetime, E: string) [] | evaluate sequence_detect(T, 1h, 1h, E == "x", strlen(E) + 1)`,
+	} {
+		if _, err := Compile(query, time.Now(), featureCatalog()); err == nil {
+			t.Errorf("%s: want a compile error", query)
+		}
+	}
+}
