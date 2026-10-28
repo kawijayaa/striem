@@ -18,7 +18,7 @@ func TestParseOperatorExecution(t *testing.T) {
 	db := featureDatabase(t)
 	for _, tc := range []struct{ query, want string }{
 		{parseTraces + `Traces | parse EventText with * "resourceName=" resourceName ", totalSlices=" totalSlices: long * "sliceNumber=" sliceNumber: long * "lockTime=" lockTime ", releaseTime=" releaseTime: date "," * "previousLockTime=" previousLockTime: date ")" * | project resourceName, totalSlices, sliceNumber, lockTime, releaseTime, previousLockTime`,
-			`[[PipelineScheduler 27 23 02/17/2016 08:40:01 2016-02-17T08:40:01.000000000Z 2016-02-17T08:39:01.000000000Z] [<nil> <nil> <nil> <nil> <nil> <nil>]]`},
+			`[[PipelineScheduler 27 23 02/17/2016 08:40:01 2016-02-17T08:40:01.000000000Z 2016-02-17T08:39:01.000000000Z] [ <nil> <nil>  <nil> <nil>]]`},
 		{parseTraces + `Traces | parse kind=relaxed EventText with * "resourceName=" resourceName ", totalSlices=" totalSlices: long ", sliceNumber=" sliceNumber: long * "lockTime=" lockTime ", releaseTime=" releaseTime: date "," * "previousLockTime=" previousLockTime: date ")" * | project totalSlices, sliceNumber, releaseTime, previousLockTime`,
 			`[[27 23 2016-02-17T08:40:01.000000000Z 2016-02-17T08:39:01.000000000Z] [<nil> 20 <nil> 2016-02-17T08:39:01.000000000Z]]`},
 		{parseTraces + `Traces | parse-where EventText with * "sliceNumber=" sliceNumber: long * "releaseTime=" releaseTime: date "," * | project sliceNumber, releaseTime`,

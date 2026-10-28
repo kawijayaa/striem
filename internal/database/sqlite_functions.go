@@ -90,7 +90,7 @@ func init() {
 		}
 		for name, function := range map[string]any{
 			"kql_regex_captures":                   kqlRegexCaptures,
-			"kql_key_values":                       runtime.KeyValuesJSON,
+			"kql_key_values":                       kqlKeyValues,
 			"kql_toguid":                           kqlToGUID,
 			"kql_math":                             kqlMath,
 			"kql_number_class":                     kqlNumberClass,
@@ -292,11 +292,17 @@ func (collection *kqlCollection) Step(value any, dynamic int64) error {
 }
 
 func (collection *kqlCollection) Done() (string, error) {
+	if collection.values == nil {
+		// An empty group still produces an empty dynamic array.
+		return "[]", nil
+	}
 	encoded, err := json.Marshal(collection.values)
 	return string(encoded), err
 }
 
-func kqlHas(value, term string, caseSensitive int64) bool {
+func kqlHas(valueValue, termValue any, caseSensitive int64) bool {
+	value, _ := textArgument(valueValue)
+	term, _ := textArgument(termValue)
 	if caseSensitive == 0 {
 		value, term = strings.ToLower(value), strings.ToLower(term)
 	}
@@ -493,7 +499,14 @@ func tokenBoundary(value string, offset, direction int) bool {
 	return !unicode.IsLetter(character) && !unicode.IsDigit(character) && character != '_'
 }
 
-func kqlExtract(pattern string, capture int64, value string) (string, error) {
+// kqlExtract treats a null source as empty text, matching tostring(null).
+func kqlExtract(patternValue, captureValue, valueValue any) (any, error) {
+	pattern, patternOK := textArgument(patternValue)
+	value, valueOK := textArgument(valueValue)
+	capture, captureOK := captureValue.(int64)
+	if !patternOK || !valueOK || !captureOK {
+		return nil, nil
+	}
 	if len(pattern) > 512 {
 		return "", fmt.Errorf("extract pattern exceeds 512 characters")
 	}
@@ -1098,4 +1111,24 @@ func parseIPv4Range(value string) (netip.Prefix, bool) {
 		return netip.Prefix{}, false
 	}
 	return netip.PrefixFrom(address, 32), true
+}
+
+// textArgument reads SQLite text, treating SQL null ([]byte(nil)) as empty.
+func textArgument(value any) (string, bool) {
+	switch text := value.(type) {
+	case string:
+		return text, true
+	case []byte:
+		return string(text), true
+	}
+	return "", false
+}
+
+func kqlKeyValues(valueValue, optionsValue any) (any, error) {
+	value, valueOK := textArgument(valueValue)
+	options, optionsOK := textArgument(optionsValue)
+	if !valueOK || !optionsOK {
+		return nil, nil
+	}
+	return runtime.KeyValuesJSON(value, options)
 }

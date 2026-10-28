@@ -163,7 +163,7 @@ func TestRegexpCacheIsSharedBoundedAndConcurrent(t *testing.T) {
 	if _, err := kqlRegex(`^regex$`, "regex"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := kqlExtract(`^(extract)$`, 1, "extract"); err != nil {
+	if _, err := kqlExtract(`^(extract)$`, int64(1), "extract"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := kqlTrim(`\s`, " value "); err != nil {
