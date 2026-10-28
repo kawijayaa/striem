@@ -96,3 +96,17 @@ func TestSessionsAndRowsNear(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's top-nested "other column data" pattern and top-hitters.
+func TestTopNestedAndHitters(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(id: string, timestamp: datetime, otherInformation: string)["Barak", datetime(2015-01-01), "1", "Barak", datetime(2016-01-01), "2", "Barak", datetime(2017-01-20), "3", "Donald", datetime(2017-01-20), "4", "Donald", datetime(2017-01-18), "5", "Donald", datetime(2017-01-19), "6"] | top-nested of id by Ignore0=max(1), top-nested 2 of timestamp by Ignore1=max(timestamp), top-nested of otherInformation by Ignore2=max(1) | project-away Ignore0, Ignore1, Ignore2 | order by id asc, timestamp asc`,
+			`[[Barak 2016-01-01T00:00:00.000000000Z 2] [Barak 2017-01-20T00:00:00.000000000Z 3] [Donald 2017-01-19T00:00:00.000000000Z 6] [Donald 2017-01-20T00:00:00.000000000Z 4]]`},
+		{`Events | top-hitters 1 of host`, `[[a 2]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}
