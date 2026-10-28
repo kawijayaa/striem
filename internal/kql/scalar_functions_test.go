@@ -70,3 +70,24 @@ func TestPackAll(t *testing.T) {
 		t.Fatal("non-constant pack_all argument accepted")
 	}
 }
+
+// Microsoft's has_ipv4 examples and the prefix/any forms; temporal range.
+func TestIPv4SearchAndTemporalRange(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print a=has_ipv4('05:04:54 127.0.0.1 GET /favicon.ico 404', '127.0.0.1'), b=has_ipv4('05:04:54 127.0.0.256 GET /favicon.ico 404', '127.0.0.256'), c=has_ipv4('05:04:54127.0.0.1 GET /favicon.ico 404', '127.0.0.1'), d=has_ipv4('ip=10.0.0.1.', '10.0.0.1'), e=has_ipv4('10.0.0.12', '10.0.0.1')`, `[[1 0 0 1 0]]`},
+		{`print a=has_ipv4_prefix('05:04:54 127.0.0.1 GET', '127.0.'), b=has_ipv4_prefix('05:04:54 127.0.0.1 GET', '127.0'), c=has_ipv4_prefix('x 127.0.0.1', '127.0.0.1'), d=has_ipv4_prefix('x 127.0.0.1', '27.')`, `[[1 0 1 0]]`},
+		{`print a=has_any_ipv4('src 10.0.0.1 dst 10.0.0.2', '1.1.1.1', '10.0.0.2'), b=has_any_ipv4('src 10.0.0.1', dynamic(['8.8.8.8', '10.0.0.1'])), c=has_any_ipv4_prefix('src 192.168.1.5', dynamic(['10.', '192.168.'])), d=has_any_ipv4('none', '1.1.1.1')`, `[[1 1 1 0]]`},
+		{`print r=range(datetime(2024-01-01), datetime(2024-01-01 02:00), 1h), s=range(1h, 3h, 1h), e=range(datetime(2024-01-02), datetime(2024-01-01), 1h)`,
+			`[[["2024-01-01T00:00:00.000000000Z","2024-01-01T01:00:00.000000000Z","2024-01-01T02:00:00.000000000Z"] ["01:00:00","02:00:00","03:00:00"] []]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{`print range(datetime(2024-01-01), datetime(2024-01-02))`, `print range(datetime(2024-01-01), 5, 1h)`, `print has_any_ipv4(dynamic([]), '1.1.1.1')`} {
+		if _, err := Compile(query, time.Now()); err == nil {
+			t.Fatalf("invalid call accepted: %s", query)
+		}
+	}
+}

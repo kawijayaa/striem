@@ -24,6 +24,10 @@ var scalarFunctions = map[string]geoFunction{
 }
 
 func init() {
+	// has_ipv4 and has_ipv4_prefix take one address; the has_any forms take
+	// several, or dynamic arrays.
+	scalarFunctions["has_ipv4"] = geoFunction{"kql_has_ipv4", "ss", 2, ksql.TypeBool, nil}
+	scalarFunctions["has_ipv4_prefix"] = geoFunction{"kql_has_ipv4_prefix", "ss", 2, ksql.TypeBool, nil}
 	for _, quantity := range []string{"angle", "energy", "force", "length", "mass", "speed", "temperature", "volume"} {
 		scalarFunctions["convert_"+quantity] = geoFunction{"kql_convert_" + quantity, "nss", 3, ksql.TypeReal, nil}
 	}
@@ -41,6 +45,22 @@ func scalarParameterAccepts(kind byte, t ksql.ScalarType) bool {
 
 func scalarFunctionOptions(functions map[string]geoFunction, accepts func(byte, ksql.ScalarType) bool) []ksql.Option {
 	var options []ksql.Option
+	for name, runtime := range map[string]string{"has_any_ipv4": "kql_has_ipv4", "has_any_ipv4_prefix": "kql_has_ipv4_prefix"} {
+		name, runtime := name, runtime
+		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(args) < 2 || len(args) > 65 {
+				return ksql.TypedExpression{}, fmt.Errorf("%s takes a source and 1 to 64 addresses", name)
+			}
+			values := make([]sqlast.Expr, len(args))
+			for i, arg := range args {
+				if arg.Type != ksql.TypeString && arg.Type != ksql.TypeUnknown && (i == 0 || arg.Type != ksql.TypeDynamic) {
+					return ksql.TypedExpression{}, fmt.Errorf("%s requires strings or dynamic arrays", name)
+				}
+				values[i] = arg.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeBool, SQL: &sqlast.Call{Name: runtime, Args: values}}, nil
+		}))
+	}
 	for name, function := range functions {
 		name, function := name, function
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

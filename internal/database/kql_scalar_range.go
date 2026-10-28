@@ -1,9 +1,13 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
+
+	"github.com/kawijayaa/ksql"
 )
 
 const maxScalarRangeElements = 1 << 20
@@ -80,4 +84,53 @@ func kqlScalarRange(startValue, stopValue, stepValue any) (any, error) {
 	}
 	result = append(result, ']')
 	return string(result), nil
+}
+
+// kqlTemporalRange is range(datetime, datetime, timespan) or
+// range(timespan, timespan, timespan): datetimes and Kusto timespan text in
+// a dynamic array. The step is in ticks and must be non-zero.
+func kqlTemporalRange(kind string, startValue, stopValue, stepValue any) (any, error) {
+	step, ok := stepValue.(int64)
+	if !ok || step == 0 {
+		return nil, nil
+	}
+	var start, stop int64
+	switch kind {
+	case "datetime":
+		from, okFrom := parsedDatetime(startValue)
+		to, okTo := parsedDatetime(stopValue)
+		if !okFrom || !okTo {
+			return nil, nil
+		}
+		start, stop = datetimeTicks(from).Int64(), datetimeTicks(to).Int64()
+	case "timespan":
+		from, okFrom := startValue.(int64)
+		to, okTo := stopValue.(int64)
+		if !okFrom || !okTo {
+			return nil, nil
+		}
+		start, stop = from, to
+	default:
+		return nil, fmt.Errorf("unknown range kind %s", kind)
+	}
+	var elements []any
+	for current, count := start, 0; count < maxScalarRangeElements; count++ {
+		if (step > 0 && current > stop) || (step < 0 && current < stop) {
+			break
+		}
+		if kind == "datetime" {
+			elements = append(elements, ticksDatetime(big.NewInt(current)))
+		} else {
+			elements = append(elements, ksql.FormatTimespan(current))
+		}
+		if (step > 0 && current > math.MaxInt64-step) || (step < 0 && current < math.MinInt64-step) {
+			break
+		}
+		current += step
+	}
+	if elements == nil {
+		elements = []any{}
+	}
+	encoded, err := json.Marshal(elements)
+	return string(encoded), err
 }
