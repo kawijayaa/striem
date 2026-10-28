@@ -324,6 +324,10 @@ func normalizeDateTimeLiterals(query sqlast.Query) {
 		for _, child := range node.Queries {
 			normalizeDateTimeLiterals(child)
 		}
+	case *sqlast.RecursiveQuery:
+		normalizeDateTimeLiterals(node.Anchor)
+		normalizeDateTimeLiterals(node.Step)
+		normalizeDateTimeLiterals(node.Query)
 	}
 }
 
