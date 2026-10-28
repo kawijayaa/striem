@@ -588,7 +588,13 @@ func kqlBagKeys(value any) any {
 
 func kqlToDatetime(value any) any {
 	text, ok := value.(string)
-	if !ok || len(text) > 35 || strings.HasPrefix(text, "0000-") || !isoDatetimePattern.MatchString(text) {
+	if !ok {
+		return nil
+	}
+	if len(text) > 35 || strings.HasPrefix(text, "0000-") || !isoDatetimePattern.MatchString(text) {
+		if parsed, ok := parseKQLDatetimeFormats(text); ok {
+			return eventtime.Format(parsed)
+		}
 		return nil
 	}
 
