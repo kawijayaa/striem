@@ -91,7 +91,7 @@ func init() {
 		for name, function := range map[string]any{
 			"kql_regex_captures":                   kqlRegexCaptures,
 			"kql_key_values":                       kqlKeyValues,
-			"kql_scalar_text":                      runtime.ScalarText,
+			"kql_value_text":                       runtime.ScalarText,
 			"kql_toguid":                           kqlToGUID,
 			"kql_math":                             kqlMath,
 			"kql_round":                            kqlRound,

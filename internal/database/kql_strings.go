@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kawijayaa/ksql"
+	"github.com/kawijayaa/ksql/runtime"
 )
 
 // KQL indexes characters from zero; SQLite substr indexes from one and its
@@ -131,7 +132,7 @@ func kqlScalarText(value any, kind string) any {
 		if math.IsNaN(v) || math.IsInf(v, 0) {
 			return nil
 		}
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return runtime.FormatReal(v)
 	}
 	return nil
 }

@@ -121,6 +121,32 @@ func compatibilityOptions() []ksql.Option {
 		}))
 	}
 
+	for _, name := range []string{"covariance", "covariancep", "covarianceif", "covariancepif"} {
+		name := name
+		options = append(options, ksql.WithTypedAggregate(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			required := 2
+			if strings.HasSuffix(name, "if") {
+				required = 3
+			}
+			if len(args) != required {
+				return ksql.TypedExpression{}, fmt.Errorf("%s requires %d arguments", name, required)
+			}
+			for _, arg := range args[:2] {
+				if !numericType(arg.Type) {
+					return ksql.TypedExpression{}, fmt.Errorf("%s requires numeric expressions", name)
+				}
+			}
+			x, y := args[0].SQL, args[1].SQL
+			if required == 3 {
+				if args[2].Type != ksql.TypeBool && args[2].Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("%s predicate must be Boolean", name)
+				}
+				x = conditionalValue(x, args[2].SQL)
+			}
+			return ksql.TypedExpression{Type: ksql.TypeReal, SQL: &sqlast.Call{Name: "kql_" + strings.TrimSuffix(name, "if"), Args: []sqlast.Expr{x, y}}}, nil
+		}))
+	}
+
 	for _, name := range []string{"parse_json", "parsejson", "todynamic", "toobject"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

@@ -235,7 +235,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
 		dialect.WithRegexCapturesFunction("kql_regex_captures"),
 		dialect.WithKeyValuesFunction("kql_key_values"),
-		dialect.WithScalarTextFunction("kql_scalar_text"),
+		dialect.WithScalarTextFunction("kql_value_text"),
 		dialect.WithDatetimeArithmeticFunctions("kql_datetime_add_ticks", "kql_datetime_diff_ticks"),
 	)
 	if settings.bagKeys != nil {

@@ -35,3 +35,20 @@ func TestScalarRuntimeFunctions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's covariance examples, plus single-row and null-pair edges.
+func TestCovarianceAggregates(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(x:real, y:real) [1.0, 14.0, 2.0, 10.0, 3.0, 17.0, 4.0, 20.0, 5.0, 50.0] | summarize s=covariance(x, y), p=covariancep(x, y)`, `[[20.5 16.4]]`},
+		{`range x from 1 to 100 step 1 | extend y = iff(x % 2 == 0, x * 2, x * 3) | summarize s=covarianceif(x, y, x % 3 == 0), p=round(covariancepif(x, y, x % 3 == 0), 9)`, `[[2142 2077.090909091]]`},
+		{`datatable(x:real, y:real) [1.0, 2.0, real(null), 5.0, 3.0, real(null)] | summarize one=covariance(x, y), pop=covariancep(x, y)`, `[[<nil> 0]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	if _, err := Compile(`print x=1 | summarize covariance(x, "a")`, time.Now()); err == nil {
+		t.Fatal("non-numeric covariance accepted")
+	}
+}

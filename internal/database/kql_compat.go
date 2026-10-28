@@ -82,6 +82,12 @@ func registerKQLCompatibility(c *sqlite3.SQLiteConn) error {
 			return err
 		}
 	}
+	for name, population := range map[string]bool{"kql_covariance": false, "kql_covariancep": true} {
+		population := population
+		if err := c.RegisterAggregator(name, func() *covariance { return &covariance{population: population} }, true); err != nil {
+			return err
+		}
+	}
 	if err := c.RegisterAggregator("kql_make_bag", func() *bagAggregate { return &bagAggregate{} }, true); err != nil {
 		return err
 	}
