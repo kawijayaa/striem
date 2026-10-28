@@ -12,6 +12,8 @@ test('native console preserves numeric JSON and uses explicit query and manageme
     expect(route.request().postDataJSON()).toEqual({ query: '.show tables', parameters: {} });
     await route.fulfill({ json: { tables: [] } });
   });
+  await page.goto('/');
+  await expect(page.locator('#kusto-link')).toBeVisible();
   await page.goto('/kusto.html');
   await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
   await page.getByLabel('KQL', { exact: true }).fill('print x=limit');
@@ -37,6 +39,9 @@ test('native console preserves numeric JSON and uses explicit query and manageme
 
 test('native console keeps execution disabled when no service is configured', async ({ page }) => {
   await page.route('**/api/kusto/capabilities', route => route.fulfill({ json: { enabled: false, management: false } }));
+  await page.goto('/');
+  await expect(page.locator('#ingestion-screen')).toHaveCount(0);
+  await expect(page.locator('#kusto-link')).toBeHidden();
   await page.goto('/kusto.html');
   await expect(page.getByText('A Kusto service connection has not been configured by the administrator.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeDisabled();

@@ -1051,13 +1051,15 @@ function renderActiveTask(): void {
   const question = activeQuestion();
   if (!question) return;
   const questionIndex = challengeState.questions.findIndex(candidate => candidate.id === question.id);
-  progress.textContent = `Task ${questionIndex + 1} of ${challengeState.totalQuestions} · ${challengeState.solvedQuestions} solved`;
+  progress.textContent = challengeState.completed
+    ? `All ${challengeState.totalQuestions} tasks solved`
+    : `Task ${questionIndex + 1} of ${challengeState.totalQuestions} · ${challengeState.solvedQuestions} solved`;
   title.textContent = challengeState.completed ? 'Challenge complete' : question.title;
   prompt.textContent = challengeState.completed
     ? 'Every task is solved. Copy the flag and submit it to the CTF platform.'
     : question.prompt;
   if (!lastResult) {
-    $('#empty-results-title').textContent = `Run a query for “${question.title}”`;
+    $('#empty-results-title').textContent = challengeState.completed ? 'Run a query' : `Run a query for “${question.title}”`;
     $('#empty-results-detail').textContent = 'Start with the prepared query, then use Fields to add the evidence you need. Press Shift+Enter to run.';
     const emptyAction = $<HTMLButtonElement>('#empty-results-action');
     emptyAction.textContent = 'Run current query';
@@ -1552,6 +1554,7 @@ renderActiveTask();
 renderSidePanelView();
 loadFields();
 loadQuestions();
+void showKustoLink();
 scheduleQueryValidation(editor.state.doc.toString());
 let timelineResizeTimer: number | undefined;
 window.addEventListener('resize', () => {
@@ -1564,3 +1567,16 @@ window.setInterval(() => {
   if (!challengeState.totalQuestions || document.hidden || document.activeElement?.matches('#active-task-answer')) return;
   void loadQuestions(true);
 }, 15_000);
+
+// showKustoLink reveals the native console link only when an administrator
+// configured a Kusto service.
+async function showKustoLink(): Promise<void> {
+  try {
+    const capabilities = await request<unknown>('/api/kusto/capabilities');
+    if (capabilities && typeof capabilities === 'object' && 'enabled' in capabilities && capabilities.enabled === true) {
+      $('#kusto-link').classList.remove('hidden');
+    }
+  } catch {
+    // The link stays hidden when capabilities are unavailable.
+  }
+}

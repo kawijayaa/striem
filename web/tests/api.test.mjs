@@ -36,3 +36,12 @@ test('integers beyond 2^53 inside dynamic values keep their exact digits', async
   assert.equal(JSON.stringify(body.rows[0].d), '{"id":9223372036854775807,"small":5,"real":1.5e+300,"list":[-9007199254740993]}');
   assert.equal(body.rows[0].d.small, 5);
 });
+
+test('without JSON.rawJSON, integers beyond 2^53 keep their digits as strings', async () => {
+  const { quoteUnsafeIntegers } = await import('../src/api.ts');
+  const text = '{"a":9223372036854775807,"s":"9223372036854775807 \\" 123456789012345678","n":[-9007199254740993,9007199254740991,1.5e300,12345678901234567890.5]}';
+  const parsed = JSON.parse(quoteUnsafeIntegers(text));
+  assert.equal(parsed.a, '9223372036854775807');
+  assert.equal(parsed.s, '9223372036854775807 " 123456789012345678');
+  assert.deepEqual(parsed.n, ['-9007199254740993', 9007199254740991, 1.5e300, 12345678901234567890.5]);
+});

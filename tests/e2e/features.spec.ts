@@ -1087,6 +1087,7 @@ test('answer drafts persist, wrong answers recover, completion unlocks flag and 
   await page.locator('#active-task-answer').fill('alice');
   await page.locator('#active-task-submit').click();
   await expect(page.locator('#active-task-title')).toHaveText('Challenge complete');
+  await expect(page.locator('#active-task-progress')).toHaveText('All 2 tasks solved');
   await expect(page.locator('#active-task-answer-value')).toHaveValue('flag{browser_features_pass}');
   await page.locator('#active-task-next').click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('flag{browser_features_pass}');
