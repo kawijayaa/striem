@@ -52,3 +52,21 @@ func TestCovarianceAggregates(t *testing.T) {
 		t.Fatal("non-numeric covariance accepted")
 	}
 }
+
+// Microsoft's pack_all example, which packs every input column.
+func TestPackAll(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(Source:string,Target:string,CharsCount:long)['555-1234','555-1212',46, '555-1313','',42, '','555-3456',74] | extend Packed=pack_all(), PackedIgnoreNullEmpty=pack_all(true) | project Packed, PackedIgnoreNullEmpty`,
+			`[[{"CharsCount":46,"Source":"555-1234","Target":"555-1212"} {"CharsCount":46,"Source":"555-1234","Target":"555-1212"}] [{"CharsCount":42,"Source":"555-1313","Target":""} {"CharsCount":42,"Source":"555-1313"}] [{"CharsCount":74,"Source":"","Target":"555-3456"} {"CharsCount":74,"Target":"555-3456"}]]`},
+		{`datatable(a:long, b:dynamic)[1, dynamic(null), 2, dynamic([1])] | project p=pack_all(true)`, `[[{"a":1}] [{"a":2,"b":[1]}]]`},
+		{`print x=1 | project p=pack_all(false)`, `[[{"x":1}]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	if _, err := Compile(`print x=1 | project pack_all(x)`, time.Now()); err == nil {
+		t.Fatal("non-constant pack_all argument accepted")
+	}
+}
