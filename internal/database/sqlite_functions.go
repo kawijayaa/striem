@@ -145,6 +145,23 @@ func init() {
 			"kql_geo_h3cell_to_central_point":      kqlGeoH3CellToCentralPoint,
 			"kql_geo_h3cell_to_polygon":            kqlGeoH3CellToPolygon,
 			"kql_geo_polygon_to_h3cells":           kqlGeoPolygonToH3Cells,
+			"kql_convert_angle":                    func(value, from, to any) any { return kqlConvertUnit("angle", value, from, to) },
+			"kql_convert_energy":                   func(value, from, to any) any { return kqlConvertUnit("energy", value, from, to) },
+			"kql_convert_force":                    func(value, from, to any) any { return kqlConvertUnit("force", value, from, to) },
+			"kql_convert_length":                   func(value, from, to any) any { return kqlConvertUnit("length", value, from, to) },
+			"kql_convert_mass":                     func(value, from, to any) any { return kqlConvertUnit("mass", value, from, to) },
+			"kql_convert_speed":                    func(value, from, to any) any { return kqlConvertUnit("speed", value, from, to) },
+			"kql_convert_temperature":              func(value, from, to any) any { return kqlConvertUnit("temperature", value, from, to) },
+			"kql_convert_volume":                   func(value, from, to any) any { return kqlConvertUnit("volume", value, from, to) },
+			"kql_format_bytes":                     kqlFormatBytes,
+			"kql_string_size":                      kqlStringSize,
+			"kql_base64_encode_fromguid":           kqlBase64EncodeFromGUID,
+			"kql_base64_decode_toguid":             kqlBase64DecodeToGUID,
+			"kql_datetime_utc_to_local":            kqlDatetimeUTCToLocal,
+			"kql_datetime_local_to_utc":            kqlDatetimeLocalToUTC,
+			"kql_beta_pdf":                         kqlBetaPDF,
+			"kql_beta_cdf":                         kqlBetaCDF,
+			"kql_beta_inv":                         kqlBetaInv,
 			"kql_series_reduce":                    kqlSeriesReduce,
 			"kql_array_sort_asc":                   kqlArraySort(false),
 			"kql_array_sort_desc":                  kqlArraySort(true),
@@ -223,6 +240,9 @@ func init() {
 		}
 		// rand is volatile: SQLite must evaluate it for every row.
 		if err := connection.RegisterFunc("kql_rand", kqlRand, false); err != nil {
+			return err
+		}
+		if err := connection.RegisterFunc("kql_new_guid", kqlNewGUID, false); err != nil {
 			return err
 		}
 		for name, function := range sqlMathFunctions() {

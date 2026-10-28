@@ -26,6 +26,7 @@ func compatibilityOptions() []ksql.Option {
 	options = append(options, mathOptions()...)
 	options = append(options, seriesOptions()...)
 	options = append(options, geoOptions()...)
+	options = append(options, scalarFunctionOptions(scalarFunctions, scalarParameterAccepts)...)
 	for _, name := range []string{"extract_all", "extractall"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
