@@ -422,3 +422,26 @@ func TestStringOperatorSemantics(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's array_sort examples project one column per array, indexed
+// calls keep the sorted arrays, and real division by zero is ±∞.
+func TestArraySortColumnsAndDivision(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`let array1 = dynamic([1,3,4,5,2]); let array2 = dynamic(["a","b","c","d","e"]); print array_sort_asc(array1,array2)`, `[[[1,2,3,4,5] ["a","e","b","c","d"]]]`},
+		{`let array1 = dynamic([1,3,4,5,2]); let array2 = dynamic(["a","b","c","d","e"]); print array_sort_desc(array1,array2)`, `[[[5,4,3,2,1] ["d","c","b","e","a"]]]`},
+		{`datatable(command:string, command_time:datetime, user_id:string) ['chmod', datetime(2019-07-15), "user1", 'ls', datetime(2019-07-02), "user1", 'rm', datetime(2019-07-23), "user2", 'pwd', datetime(2019-07-25), "user2"] | summarize timestamps = make_list(command_time), commands = make_list(command) by user_id | project user_id, c = array_sort_asc(timestamps, commands)[1] | order by user_id asc`,
+			`[[user1 ["ls","chmod"]] [user2 ["rm","pwd"]]]`},
+		{`print (n, l) = array_sort_asc(dynamic([2, 1]), dynamic(["b", "a"]), false)`, `[[[1,2] ["a","b"]]]`},
+		{`range x from -1 to 1 step 1 | extend y = 0.0 | extend div = 1.0*x/y | project inf = isinf(div), finite = isfinite(div), nan = isnan(div)`, `[[1 0 0] [0 <nil> 0] [1 0 0]]`},
+		{`print a = 7.0 / 2, b = 7 / 2, c = 5 / 0.5, d = isnull(real(null) / 2)`, `[[3.5 3 10 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	compiled, err := Compile(`let array1 = dynamic([1]); let array2 = dynamic(["a"]); print array_sort_asc(array1, array2)`, time.Now(), featureCatalog())
+	if err != nil || len(compiled.Columns) != 2 || compiled.Columns[0] != "array1_sorted" || compiled.Columns[1] != "array2_sorted" {
+		t.Errorf("array_sort columns: %v %v", compiled.Columns, err)
+	}
+}

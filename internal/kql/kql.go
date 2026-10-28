@@ -248,6 +248,8 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (com
 		dialect.WithScalarTextFunction("kql_value_text"),
 		dialect.WithDatetimeArithmeticFunctions("kql_datetime_add_ticks", "kql_datetime_diff_ticks"),
 	)
+	// SQLite returns null for x/0.0; Kusto divides to ±∞.
+	options = append(options, ksql.WithRealDivision("kql_divide"))
 	if settings.bagKeys != nil {
 		options = append(options, ksql.WithBagKeysResolver(func(query sqlast.Query, args []any) ([]ksql.BagKey, error) {
 			normalizeDateTimeLiterals(query)

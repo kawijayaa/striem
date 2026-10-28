@@ -41,7 +41,7 @@ func TestMathAndPredicateFunctions(t *testing.T) {
 func TestSortingBinningAndRandom(t *testing.T) {
 	db := featureDatabase(t)
 	for _, tc := range []struct{ query, want string }{
-		{`let array1 = dynamic([1,3,4,5,2]); let array2 = dynamic(["a","b","c","d","e"]); print array_sort_asc(array1,array2)`, `[[[[1,2,3,4,5],["a","e","b","c","d"]]]]`},
+		{`let array1 = dynamic([1,3,4,5,2]); let array2 = dynamic(["a","b","c","d","e"]); print array_sort_asc(array1,array2)`, `[[[1,2,3,4,5] ["a","e","b","c","d"]]]`}, // Microsoft shows array1_sorted and array2_sorted columns.
 		{`let Names = "John,Paul,Jane,Kao"; let SortedNames = strcat_array(array_sort_asc(split(Names, ",")), ","); print result = SortedNames`, `[[Jane,John,Kao,Paul]]`},
 		{`datatable(command:string, command_time:datetime, user_id:string)['chmod', datetime(2019-07-15), "user1", 'ls', datetime(2019-07-02), "user1", 'dir', datetime(2019-07-22), "user1", 'rm', datetime(2019-07-23), "user2", 'pwd', datetime(2019-07-25), "user2"] | summarize timestamps = make_list(command_time), commands = make_list(command) by user_id | project user_id, commands_in_chronological_order = array_sort_asc(timestamps, commands)[1] | order by user_id asc`,
 			`[[user1 ["ls","chmod","dir"]] [user2 ["rm","pwd"]]]`},

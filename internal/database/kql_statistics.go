@@ -68,3 +68,18 @@ func (s *statistic) Done() any {
 	}
 	return value
 }
+
+// kqlDivide divides reals as Kusto does: a nonzero value over zero is ±∞.
+// Zero over zero is NaN in Kusto; SQLite cannot store NaN, so it is null.
+func kqlDivide(leftValue, rightValue any) any {
+	left, okLeft := number(leftValue)
+	right, okRight := number(rightValue)
+	if !okLeft || !okRight {
+		return nil
+	}
+	result := left / right
+	if math.IsNaN(result) {
+		return nil
+	}
+	return result
+}
