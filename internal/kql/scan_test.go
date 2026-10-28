@@ -208,3 +208,52 @@ func TestSequenceDetect(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's sliding_window_counts example, plus dimensions and windows
+// that end after the data.
+func TestSlidingWindowCounts(t *testing.T) {
+	db := featureDatabase(t)
+	data := `let start = datetime(2017 - 08 - 01); let end = datetime(2017 - 08 - 07); let lookbackWindow = 3d; let bin = 1d;
+let T = datatable(UserId: string, Timestamp: datetime) ['Bob', datetime(2017 - 08 - 01), 'David', datetime(2017 - 08 - 01), 'David', datetime(2017 - 08 - 01), 'John', datetime(2017 - 08 - 01), 'Bob', datetime(2017 - 08 - 01),
+'Ananda', datetime(2017 - 08 - 02), 'Atul', datetime(2017 - 08 - 02), 'John', datetime(2017 - 08 - 02), 'Ananda', datetime(2017 - 08 - 03), 'Atul', datetime(2017 - 08 - 03), 'Atul', datetime(2017 - 08 - 03),
+'John', datetime(2017 - 08 - 03), 'Bob', datetime(2017 - 08 - 03), 'Betsy', datetime(2017 - 08 - 04), 'Bob', datetime(2017 - 08 - 05)];
+`
+	for _, tc := range []struct{ query, want string }{
+		{data + `T | evaluate sliding_window_counts(UserId, Timestamp, start, end, lookbackWindow, bin)`,
+			`[[2017-08-01T00:00:00.000000000Z 5 3] [2017-08-02T00:00:00.000000000Z 8 5] [2017-08-03T00:00:00.000000000Z 13 5] [2017-08-04T00:00:00.000000000Z 9 5] [2017-08-05T00:00:00.000000000Z 7 5] [2017-08-06T00:00:00.000000000Z 2 2] [2017-08-07T00:00:00.000000000Z 1 1]]`},
+		{data + `T | extend Team = iff(UserId startswith "A", "a", "b") | evaluate sliding_window_counts(UserId, Timestamp, start, datetime(2017-08-02), 1d, 1d, Team) | project tostring(Timestamp), Team, Count, dcount | order by Timestamp asc, Team asc`,
+			`[[2017-08-01T00:00:00.000000000Z b 5 3] [2017-08-02T00:00:00.000000000Z a 2 2] [2017-08-02T00:00:00.000000000Z b 1 1]]`},
+		{`datatable (Id: long, At: long) [1, 3, 2, 4, 1, 9] | evaluate sliding_window_counts(Id, At, 0, 10, 4, 2)`, `[[2 1 1] [4 2 2] [6 1 1] [8 1 1] [10 1 1]]`},
+		{`datatable (Id: long, At: datetime) [] | evaluate sliding_window_counts(Id, At, datetime(2020-01-01), datetime(2020-01-02), 1d, 1h) | count`, `[[0]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{
+		`datatable (Id: long, At: string) [] | evaluate sliding_window_counts(Id, At, 0, 1, 1, 1)`,
+		`datatable (Id: long, At: datetime) [] | evaluate sliding_window_counts(Id, At, now(), now(), 1d, "week")`,
+		`datatable (Id: long, At: datetime) [] | evaluate sliding_window_counts(Id, At, now(), now(), 1d)`,
+	} {
+		if _, err := Compile(query, time.Now(), featureCatalog()); err == nil {
+			t.Errorf("%s: want a compile error", query)
+		}
+	}
+}
+
+// Typed mv-expand converts with KQL semantics: SQLite's TIMESTAMP cast
+// turned "2017-08-01T00:00:00Z" into 2017.
+func TestTypedExpansionConversions(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`print x=dynamic(["2017-08-01T00:00:00Z", "bad", null]) | mv-expand x to typeof(datetime)`, `[[2017-08-01T00:00:00.000000000Z] [<nil>] [<nil>]]`},
+		{`print x=dynamic(["1.00:00:00"]) | mv-expand x to typeof(timespan) | project y = tostring(x + 1h)`, `[[1.01:00:00]]`},
+		{`print x=dynamic(["6f8e1a4c-3c4f-4a3e-9b1f-0a9c2b7f1e33"]) | mv-expand x to typeof(guid) | project tostring(x)`, `[[6f8e1a4c-3c4f-4a3e-9b1f-0a9c2b7f1e33]]`},
+		{`print x=dynamic(["2017-08-01"]), y=dynamic([1, 2]) | mv-expand x to typeof(datetime), y to typeof(long) | project tostring(x), y`, `[[2017-08-01T00:00:00.000000000Z 1] [ 2]]`},
+		{`print d = datetime(2017 - 08 - 01 10:30)`, `[[2017-08-01T10:30:00.000000000Z]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}
