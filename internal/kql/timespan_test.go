@@ -60,3 +60,18 @@ func TestTemporalFormatting(t *testing.T) {
 		}
 	}
 }
+
+// Timespans inside dynamic values and text conversions use Kusto's text form,
+// as in Microsoft's pack_array example.
+func TestTimespansInDynamicAndText(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`range x from 1 to 3 step 1 | extend y = tostring(x * 2) | extend z = (x * 2) * 1s | project pack_array(x, y, z)`, `[[[1,"2","00:00:02"]] [[2,"4","00:00:04"]] [[3,"6","00:00:06"]]]`},
+		{`print b=bag_pack("t", 90m), s=strcat_delim("-", 1h, "x"), r=strrep(1m, 2, ","), v=reverse(1h)`, `[[{"t":"01:30:00"} 01:00:00-x 00:01:00,00:01:00 00:00:10]]`},
+		{`datatable(n:string,c:long)["a",1] | extend d = bag_pack("name", n, "c", c) | summarize l=make_list(d)`, `[[[{"c":1,"name":"a"}]]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

@@ -26,7 +26,7 @@ func characterStringOptions() []ksql.Option {
 				return ksql.TypedExpression{}, fmt.Errorf("reverse requires 1 scalar argument")
 			}
 			switch args[0].Type {
-			case ksql.TypeString, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeBool, ksql.TypeDateTime, ksql.TypeUnknown:
+			case ksql.TypeString, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeBool, ksql.TypeDateTime, ksql.TypeTimespan, ksql.TypeUnknown:
 			default:
 				return ksql.TypedExpression{}, fmt.Errorf("reverse scalar type %s remains unsupported", args[0].Type)
 			}

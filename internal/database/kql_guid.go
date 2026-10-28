@@ -16,14 +16,15 @@ func kqlToGUID(value any) any {
 	if len(text) == 38 && ((text[0] == '{' && text[37] == '}') || (text[0] == '(' && text[37] == ')')) {
 		text = text[1:37]
 	}
-	switch len(text) {
-	case 36:
-		if text[8] != '-' || text[13] != '-' || text[18] != '-' || text[23] != '-' {
+	// Microsoft's toguid example accepts hyphens in non-standard positions,
+	// so any hyphenation of exactly 32 hex digits converts.
+	if strings.Contains(text, "-") {
+		if strings.HasPrefix(text, "-") || strings.HasSuffix(text, "-") || strings.Contains(text, "--") {
 			return nil
 		}
-		text = text[:8] + text[9:13] + text[14:18] + text[19:23] + text[24:]
-	case 32:
-	default:
+		text = strings.ReplaceAll(text, "-", "")
+	}
+	if len(text) != 32 {
 		return nil
 	}
 	if _, err := hex.DecodeString(text); err != nil {

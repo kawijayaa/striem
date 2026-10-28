@@ -30,7 +30,7 @@ func stringJoinOptions() []ksql.Option {
 			values := []sqlast.Expr{args[0].SQL}
 			for _, arg := range args[1:] {
 				switch arg.Type {
-				case ksql.TypeString, ksql.TypeBool, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeDateTime, ksql.TypeUnknown:
+				case ksql.TypeString, ksql.TypeBool, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeDateTime, ksql.TypeTimespan, ksql.TypeUnknown:
 				default:
 					return ksql.TypedExpression{}, fmt.Errorf("strcat_delim scalar conversion for %s remains unsupported", arg.Type)
 				}
@@ -51,7 +51,7 @@ func stringJoinOptions() []ksql.Option {
 					continue
 				}
 				switch arg.Type {
-				case ksql.TypeString, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeBool, ksql.TypeDateTime, ksql.TypeUnknown:
+				case ksql.TypeString, ksql.TypeInt, ksql.TypeLong, ksql.TypeReal, ksql.TypeBool, ksql.TypeDateTime, ksql.TypeTimespan, ksql.TypeUnknown:
 				default:
 					return ksql.TypedExpression{}, fmt.Errorf("strrep scalar conversion for %s remains unsupported", arg.Type)
 				}

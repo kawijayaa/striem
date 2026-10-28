@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kawijayaa/ksql"
 )
 
 // KQL indexes characters from zero; SQLite substr indexes from one and its
@@ -120,6 +122,9 @@ func kqlScalarText(value any, kind string) any {
 	case int64:
 		if kind == "bool" {
 			return strconv.FormatBool(v != 0)
+		}
+		if kind == "timespan" {
+			return ksql.FormatTimespan(v)
 		}
 		return strconv.FormatInt(v, 10)
 	case float64:

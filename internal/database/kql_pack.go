@@ -19,7 +19,8 @@ func packJSONValue(value any, kind string) (json.RawMessage, error) {
 			value = number != 0
 		}
 	}
-	if kind == "string" {
+	if kind == "string" || kind == "timespan" {
+		// Kusto serializes timespans in dynamic values as [-][d.]hh:mm:ss text.
 		value = kqlScalarText(value, kind)
 	}
 	if kind == "dynamic" {

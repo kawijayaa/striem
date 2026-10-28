@@ -15,8 +15,12 @@ var (
 	rfc822DatetimePattern   = regexp.MustCompile(`^(?:([A-Za-z]{3}), )?(\d{1,2}) ([A-Za-z]{3}) (\d{2}) (\d{1,2}):(\d{2})(?::(\d{2}))?(?: GMT)?$`)
 	rfc850DatetimePattern   = regexp.MustCompile(`^(?:([A-Za-z]{6,9}), )?(\d{1,2})-([A-Za-z]{3})-(\d{2}) (\d{1,2}):(\d{2})(?::(\d{2}))?(?: GMT)?$`)
 	sortableDatetimePattern = regexp.MustCompile(`^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?: GMT)?$`)
-	usDatetimePattern       = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?)?$`)
-	datetimeMonths          = map[string]time.Month{"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+	usDatetimePattern       = regexp.MustCompile(`^(\d{1,2})([/-])(\d{1,2})[/-](\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?)?$`)
+	// Unpadded ISO dates (1970-5-12) and the comma form datetime(2025, 6, 14[, h, m, s])
+	// used in Microsoft's examples.
+	shortDatePattern = regexp.MustCompile(`^(\d{4})-(\d{1,2})-(\d{1,2})$`)
+	commaDatePattern = regexp.MustCompile(`^(\d{1,4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})(?:\s*,\s*(\d{1,2})(?:\s*,\s*(\d{1,2})(?:\s*,\s*(\d{1,2}))?)?)?$`)
+	datetimeMonths   = map[string]time.Month{"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
 )
 
 func parseKQLDatetimeFormats(text string) (time.Time, bool) {
@@ -53,10 +57,16 @@ func parseKQLDatetimeFormats(text string) (time.Time, bool) {
 	}
 	if match := usDatetimePattern.FindStringSubmatch(text); match != nil {
 		fraction := 0
-		if match[7] != "" {
-			fraction = atoi((match[7] + "000000")[:7])
+		if match[8] != "" {
+			fraction = atoi((match[8] + "000000")[:7])
 		}
-		return datetimeFromParts(atoi(match[3]), atoi(match[1]), atoi(match[2]), atoi(match[4]), atoi(match[5]), atoi(match[6]), fraction)
+		return datetimeFromParts(atoi(match[4]), atoi(match[1]), atoi(match[3]), atoi(match[5]), atoi(match[6]), atoi(match[7]), fraction)
+	}
+	if match := shortDatePattern.FindStringSubmatch(text); match != nil {
+		return datetimeFromParts(atoi(match[1]), atoi(match[2]), atoi(match[3]), 0, 0, 0, 0)
+	}
+	if match := commaDatePattern.FindStringSubmatch(text); match != nil {
+		return datetimeFromParts(atoi(match[1]), atoi(match[2]), atoi(match[3]), atoi(match[4]), atoi(match[5]), atoi(match[6]), 0)
 	}
 	return time.Time{}, false
 }

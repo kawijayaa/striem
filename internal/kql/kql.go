@@ -604,14 +604,14 @@ func compilerOptions(now time.Time) []ksql.Option {
 			return ksql.TypedExpression{Type: ksql.TypeDateTime, SQL: &sqlast.Call{Name: "kql_datetime_add_ticks", Args: []sqlast.Expr{stringLiteral(eventtime.Format(now)), negative}}}, nil
 		}),
 		ksql.WithFunction("datetime", datetimeFunction),
-		ksql.WithFunction("toint", conversionFunction("kql_toint")),
-		ksql.WithFunction("tolong", conversionFunction("kql_tolong")),
-		ksql.WithFunction("toreal", conversionFunction("kql_toreal")),
-		ksql.WithFunction("todouble", conversionFunction("kql_toreal")),
-		ksql.WithFunction("tobool", conversionFunction("kql_tobool")),
-		ksql.WithFunction("toboolean", conversionFunction("kql_tobool")),
-		ksql.WithFunction("todatetime", ksql.SQLFunction("kql_todatetime")),
-		ksql.WithFunction("toguid", conversionFunction("kql_toguid")),
+		ksql.WithTypedFunction("toint", typedRule(conversionFunction("kql_toint"), ksql.TypeInt)),
+		ksql.WithTypedFunction("tolong", typedRule(conversionFunction("kql_tolong"), ksql.TypeLong)),
+		ksql.WithTypedFunction("toreal", typedRule(conversionFunction("kql_toreal"), ksql.TypeReal)),
+		ksql.WithTypedFunction("todouble", typedRule(conversionFunction("kql_toreal"), ksql.TypeReal)),
+		ksql.WithTypedFunction("tobool", typedRule(conversionFunction("kql_tobool"), ksql.TypeBool)),
+		ksql.WithTypedFunction("toboolean", typedRule(conversionFunction("kql_tobool"), ksql.TypeBool)),
+		ksql.WithTypedFunction("todatetime", typedRule(ksql.SQLFunction("kql_todatetime"), ksql.TypeDateTime)),
+		ksql.WithTypedFunction("toguid", typedRule(conversionFunction("kql_toguid"), ksql.TypeString)),
 		ksql.WithTypedFunction("totimespan", toTimespanFunction),
 		ksql.WithTypedFunction("format_datetime", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(arguments) != 2 || (arguments[0].Type != ksql.TypeDateTime && arguments[0].Type != ksql.TypeUnknown) || (arguments[1].Type != ksql.TypeString && arguments[1].Type != ksql.TypeUnknown) {
@@ -645,20 +645,20 @@ func compilerOptions(now time.Time) []ksql.Option {
 			}
 			return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_dayofweek", Args: []sqlast.Expr{arguments[0].SQL}}}, nil
 		}),
-		ksql.WithFunction("array_length", ksql.SQLFunction("kql_array_length")),
-		ksql.WithFunction("bag_keys", ksql.SQLFunction("kql_bag_keys")),
-		ksql.WithFunction("bag_has_key", ksql.SQLFunction("kql_bag_has_key")),
-		ksql.WithFunction("base64_decode_tostring", ksql.SQLFunction("kql_base64_decode_tostring")),
-		ksql.WithFunction("url_decode", ksql.SQLFunction("kql_url_decode")),
-		ksql.WithFunction("ipv4_is_private", ksql.SQLFunction("kql_ipv4_is_private")),
-		ksql.WithFunction("ipv4_is_in_range", ksql.SQLFunction("kql_ipv4_is_in_range")),
+		ksql.WithTypedFunction("array_length", typedRule(ksql.SQLFunction("kql_array_length"), ksql.TypeLong)),
+		ksql.WithTypedFunction("bag_keys", typedRule(ksql.SQLFunction("kql_bag_keys"), ksql.TypeDynamic)),
+		ksql.WithTypedFunction("bag_has_key", typedRule(ksql.SQLFunction("kql_bag_has_key"), ksql.TypeBool)),
+		ksql.WithTypedFunction("base64_decode_tostring", typedRule(ksql.SQLFunction("kql_base64_decode_tostring"), ksql.TypeString)),
+		ksql.WithTypedFunction("url_decode", typedRule(ksql.SQLFunction("kql_url_decode"), ksql.TypeString)),
+		ksql.WithTypedFunction("ipv4_is_private", typedRule(ksql.SQLFunction("kql_ipv4_is_private"), ksql.TypeBool)),
+		ksql.WithTypedFunction("ipv4_is_in_range", typedRule(ksql.SQLFunction("kql_ipv4_is_in_range"), ksql.TypeBool)),
 		ksql.WithTypedFunction("extract", extractFunction),
-		ksql.WithFunction("isnull", nullFunction(false)),
-		ksql.WithFunction("isnotnull", nullFunction(true)),
-		ksql.WithFunction("isempty", emptyFunction(false)),
-		ksql.WithFunction("isnotempty", emptyFunction(true)),
-		ksql.WithFunction("notnull", nullFunction(true)),
-		ksql.WithFunction("notempty", emptyFunction(true)),
+		ksql.WithTypedFunction("isnull", typedRule(nullFunction(false), ksql.TypeBool)),
+		ksql.WithTypedFunction("isnotnull", typedRule(nullFunction(true), ksql.TypeBool)),
+		ksql.WithTypedFunction("isempty", typedRule(emptyFunction(false), ksql.TypeBool)),
+		ksql.WithTypedFunction("isnotempty", typedRule(emptyFunction(true), ksql.TypeBool)),
+		ksql.WithTypedFunction("notnull", typedRule(nullFunction(true), ksql.TypeBool)),
+		ksql.WithTypedFunction("notempty", typedRule(emptyFunction(true), ksql.TypeBool)),
 		ksql.WithAggregate("make_set", ksql.SQLFunction("kql_make_set_value")),
 	}
 }
@@ -822,4 +822,20 @@ func extractFunction(arguments []ksql.TypedExpression) (ksql.TypedExpression, er
 		return ksql.TypedExpression{}, fmt.Errorf("extract does not support typeof(%s)", literal.Value)
 	}
 	return ksql.TypedExpression{Type: conversion.kind, SQL: &sqlast.Call{Name: conversion.function, Args: []sqlast.Expr{result.SQL}}}, nil
+}
+
+// typedRule gives an untyped SQL rule its documented result type, so API
+// metadata formats Booleans, dynamic values and datetimes correctly.
+func typedRule(rule ksql.FunctionRule, kind ksql.ScalarType) ksql.TypedFunctionRule {
+	return func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+		values := make([]sqlast.Expr, len(arguments))
+		for i, argument := range arguments {
+			values[i] = argument.SQL
+		}
+		expression, err := rule(values)
+		if err != nil {
+			return ksql.TypedExpression{}, err
+		}
+		return ksql.TypedExpression{Type: kind, SQL: expression}, nil
+	}
 }
