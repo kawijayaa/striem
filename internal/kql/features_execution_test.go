@@ -75,6 +75,8 @@ func TestDocumentedTabularFeaturesExecute(t *testing.T) {
 		{"search", `Events | search "powershell" | project n | order by n asc`, `[[1] [3]]`},
 		{"search all tables", `search "powershell" | project ['$table'], n | order by n asc`, `[[LeftEvents 1] [RightEvents 3]]`},
 		{"search table patterns", `search in (Right*) user:"carol" or n == 1 | project ['$table'], user`, `[[RightEvents carol]]`},
+		{"find smart", `find user == "carol" | project source_, user, host, n, pack_`, `[[RightEvents carol a 3 {}]]`},
+		{"find pack_all", `find withsource=T in (Left*) where n == 2 project user, pack_all() | project T, user, n=tolong(pack_.n), h=tostring(pack_.host), u=isnull(pack_.user)`, `[[LeftEvents bob 2 b 1]]`},
 		{"search wildcards", `Events | search "power*" and not(host:"b") | count`, `[[2]]`},
 		{"project variants", `Events | project host, user, n | project-away user | project-rename Value=n | project-reorder Value, host | where Value == 1`, `[[1 a]]`},
 		{"project keep", `Events | project-keep host, n | where n == 2`, `[[b 2]]`},
