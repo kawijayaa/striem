@@ -22,6 +22,8 @@ Status as verified on 2026-10-29. Each item names the check that verifies it.
 | Answers are compared in constant time over SHA-256 hashes. The flag appears only when every task is solved. | `TestChallengeProgressAndCompletion` |
 | Concurrent guesses cannot bypass the submission cooldown. | `TestSolvedQuestionsAndConcurrentGuesses` (30 parallel guesses record 1 attempt) |
 | Request bodies, queries, answers and results are bounded: 64 KiB, 32 KiB, 512 characters, and 1,000 rows or 64 MB. Queries stop after 5 s. | API tests; `internal/api/server.go` limits |
+| A query that outlives its 5-second deadline is interrupted repeatedly until it stops, so runaway queries cannot hold connections. The API stays responsive meanwhile, and limit errors explain themselves. | `TestRunawayQueriesStopAtTheirDeadline`, `TestQueryLimitErrorsAreExplained`, container test (6 runaway queries all stop at 5 s) |
+| Hostile queries keep server memory bounded (318 MB peak across range, make_list, cross join and strrep attacks). | Local load test |
 | The compiler does not panic or hang on hostile input. UDF panics are recovered. Regexes are RE2. | `FuzzCompileNeverPanics` (3.5M executions), `FuzzForensicUDFs`, `TestCompileTerminatesSafely` |
 | `reduce`, `parse_user_agent`, `range`, `strrep` and sketches have input caps. | `TestReduceTermCap`, `TestParseUserAgent` |
 | `has` with a per-row term escapes it with `regex_quote`, so data cannot inject regex syntax. | `TestStringOperatorSemantics` |
