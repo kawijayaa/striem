@@ -12,7 +12,7 @@ test('cancellation while reading a response remains an AbortError', async t => {
   t.mock.method(globalThis, 'fetch', async () => ({
     status: 200,
     ok: true,
-    json: async () => { throw error; },
+    text: async () => { throw error; },
   }));
   await assert.rejects(request('/api/query'), candidate => candidate === error);
 });
@@ -27,4 +27,12 @@ test('valid API responses, empty validation responses, and server errors retain 
   assert.equal(await request('/api/query/validate'), null);
   globalThis.fetch = async () => Response.json({ error: 'Invalid query' }, { status: 400 });
   await assert.rejects(request('/api/query'), error => error.error === 'Invalid query');
+});
+
+test('integers beyond 2^53 inside dynamic values keep their exact digits', async t => {
+  const text = '{"rows":[{"d":{"id":9223372036854775807,"small":5,"real":1.5e300,"list":[-9007199254740993]}}]}';
+  t.mock.method(globalThis, 'fetch', async () => new Response(text));
+  const body = await request('/api/query');
+  assert.equal(JSON.stringify(body.rows[0].d), '{"id":9223372036854775807,"small":5,"real":1.5e+300,"list":[-9007199254740993]}');
+  assert.equal(body.rows[0].d.small, 5);
 });

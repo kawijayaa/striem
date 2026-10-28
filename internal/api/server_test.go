@@ -674,7 +674,7 @@ func TestScanRowsNormalizesNonFiniteNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0]["PositiveInfinity"] != nil || results[0]["NegativeInfinity"] != nil || results[0]["Finite"] != 2.5 {
+	if len(results) != 1 || results[0]["PositiveInfinity"] != "Infinity" || results[0]["NegativeInfinity"] != "-Infinity" || results[0]["Finite"] != 2.5 {
 		t.Fatalf("unexpected numeric results: %#v", results)
 	}
 	recorder := httptest.NewRecorder()
@@ -1560,8 +1560,8 @@ func TestSecurityHeaders(t *testing.T) {
 // Integers beyond JavaScript's safe range reach the browser exactly.
 func TestUnsafeIntegersAreExact(t *testing.T) {
 	server := serveStore(t, testStore(t))
-	rows := queryRows(t, server.URL, `print big = hash("World"), small = 42, edge = 9007199254740991, over = 9007199254740992, negative = -9223372036854775807`)
-	want := map[string]any{"big": "1846988464401551951", "small": float64(42), "edge": float64(9007199254740991), "over": "9007199254740992", "negative": "-9223372036854775807"}
+	rows := queryRows(t, server.URL, `print big = hash("World"), small = 42, edge = 9007199254740991, over = 9007199254740992, negative = -9223372036854775807, bare = dynamic(9223372036854775807), inf = 1.0/0.0, ninf = -1.0/0.0`)
+	want := map[string]any{"big": "1846988464401551951", "small": float64(42), "edge": float64(9007199254740991), "over": "9007199254740992", "negative": "-9223372036854775807", "bare": "9223372036854775807", "inf": "Infinity", "ninf": "-Infinity"}
 	for key, value := range want {
 		if rows[0][key] != value {
 			t.Errorf("%s = %#v, want %#v", key, rows[0][key], value)

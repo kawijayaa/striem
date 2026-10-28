@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kawijayaa/ksql"
+	ksqlruntime "github.com/kawijayaa/ksql/runtime"
 	"github.com/kawijayaa/striem/internal/database"
 	"github.com/kawijayaa/striem/internal/kql"
 	webassets "github.com/kawijayaa/striem/web"
@@ -565,10 +566,10 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 		row := make(map[string]any, len(columns))
 		for index, column := range columns {
 			value := values[index]
-			// SQLite can produce infinity from overflow. JSON has no nonfinite
-			// numbers, so preserve the row with a null value instead.
+			// JSON has no nonfinite numbers. Infinite reals, such as 1.0/0.0,
+			// go out as tostring() writes them; SQLite stores NaN as null.
 			if number, ok := value.(float64); ok && (math.IsInf(number, 0) || math.IsNaN(number)) {
-				value = nil
+				value = ksqlruntime.FormatReal(number)
 			}
 			if _, timespan := timespans[column]; timespan {
 				if ticks, ok := value.(int64); ok {
@@ -602,7 +603,11 @@ func scanRows(rows *sql.Rows, dynamicColumns, booleanColumns map[string]struct{}
 				}
 				trimmed := strings.TrimSpace(text)
 				raw := json.RawMessage(trimmed)
-				if json.Valid(raw) {
+				if integer, err := strconv.ParseInt(trimmed, 10, 64); err == nil && (integer > maxSafeInteger || integer < -maxSafeInteger) {
+					// A bare dynamic integer beyond ±2^53 is sent exactly, as
+					// top-level integers are.
+					value = trimmed
+				} else if json.Valid(raw) {
 					value = raw
 				}
 			}
