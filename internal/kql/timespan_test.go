@@ -40,3 +40,23 @@ func TestDocumentedCoreBehavior(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's format_datetime, format_timespan and make_timespan examples.
+func TestTemporalFormatting(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`let dt = datetime(2017-01-29 09:00:05); print v1=format_datetime(dt,'yy-MM-dd [HH:mm:ss]'), v2=format_datetime(dt, 'yyyy-M-dd [H:mm:ss]'), v3=format_datetime(dt, 'yy-MM-dd [hh:mm:ss tt]')`,
+			`[[17-01-29 [09:00:05] 2017-1-29 [9:00:05] 17-01-29 [09:00:05 AM]]]`},
+		{`let dt = datetime(2009-06-15 13:45:30.6175425); print a=format_datetime(dt, 'h:mm tt'), b=format_datetime(dt, 'fff'), c=format_datetime(dt, 'FFFFFFF'), d=format_datetime(datetime(2009-06-15 13:45:30.05), 'ss.F'), e=format_datetime(datetime(0900-01-01), 'yyyy y yy')`,
+			`[[1:45 PM 617 6175425 30 0900 0 00]]`},
+		{`let t = time(29.09:00:05.12345); print v1=format_timespan(t, 'dd.hh:mm:ss:FF'), v2=format_timespan(t, 'ddd.h:mm:ss [fffffff]')`,
+			`[[29.09:00:05:12 029.9:00:05 [1234500]]]`},
+		{`print ['timespan'] = make_timespan(1,12,30,55.123), a=tostring(make_timespan(2, 30)), b=make_timespan(24, 0), c=make_timespan(1, 2, 3)`,
+			`[[1314551230000 02:30:00 <nil> 37230000000]]`},
+		{`print x=tostring(make_timespan(1,12,30,55.123))`, `[[1.12:30:55.1230000]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Fatalf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+}

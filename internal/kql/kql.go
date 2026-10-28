@@ -613,6 +613,31 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithFunction("todatetime", ksql.SQLFunction("kql_todatetime")),
 		ksql.WithFunction("toguid", conversionFunction("kql_toguid")),
 		ksql.WithTypedFunction("totimespan", toTimespanFunction),
+		ksql.WithTypedFunction("format_datetime", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(arguments) != 2 || (arguments[0].Type != ksql.TypeDateTime && arguments[0].Type != ksql.TypeUnknown) || (arguments[1].Type != ksql.TypeString && arguments[1].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("format_datetime requires a datetime and a format string")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_format_datetime", Args: []sqlast.Expr{arguments[0].SQL, arguments[1].SQL}}}, nil
+		}),
+		ksql.WithTypedFunction("format_timespan", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(arguments) != 2 || (arguments[0].Type != ksql.TypeTimespan && arguments[0].Type != ksql.TypeUnknown) || (arguments[1].Type != ksql.TypeString && arguments[1].Type != ksql.TypeUnknown) {
+				return ksql.TypedExpression{}, fmt.Errorf("format_timespan requires a timespan and a format string")
+			}
+			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_format_timespan", Args: []sqlast.Expr{arguments[0].SQL, arguments[1].SQL}}}, nil
+		}),
+		ksql.WithTypedFunction("make_timespan", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
+			if len(arguments) < 2 || len(arguments) > 4 {
+				return ksql.TypedExpression{}, fmt.Errorf("make_timespan requires 2 to 4 numeric arguments")
+			}
+			values := make([]sqlast.Expr, len(arguments))
+			for i, argument := range arguments {
+				if argument.Type != ksql.TypeInt && argument.Type != ksql.TypeLong && argument.Type != ksql.TypeReal && argument.Type != ksql.TypeUnknown {
+					return ksql.TypedExpression{}, fmt.Errorf("make_timespan requires numeric arguments")
+				}
+				values[i] = argument.SQL
+			}
+			return ksql.TypedExpression{Type: ksql.TypeTimespan, SQL: &sqlast.Call{Name: "kql_make_timespan", Args: values}}, nil
+		}),
 		ksql.WithTypedFunction("totime", toTimespanFunction),
 		ksql.WithTypedFunction("dayofweek", func(arguments []ksql.TypedExpression) (ksql.TypedExpression, error) {
 			if len(arguments) != 1 || (arguments[0].Type != ksql.TypeDateTime && arguments[0].Type != ksql.TypeUnknown) {

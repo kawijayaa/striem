@@ -28,6 +28,8 @@ parameters as constants.
 
 ## Verified implementation increments
 
+- Added `format_datetime`, `format_timespan` and `make_timespan` with every documented specifier and Microsoft's examples, `range` over datetimes and timespans (KSQL), and Kusto's default result names: `sum(a)` is `sum_a`, `make_list(a)` is `list_a`, `bin(t, 1h)` is `t`, and unnamed scalar calls are `ColumnN`, from the pinned Kusto.Language `ResultNameKind` metadata. `project` still names unnamed calls `ColumnN` instead of inferring them.
+
 - Fixed SQL math functions failing with "no such function": this SQLite build has no math extension, so Striem now implements `sqrt`, `pow`, `exp`, `ln`, `log10`, `floor`, `ceiling`, `sign` and the trigonometric functions, with nonfinite or out-of-domain results as null. `log` is the natural logarithm (KSQL had emitted base-10 SQL `log`). `floor(value, roundTo)` is the documented alias of `bin`. `tostring(bool)` returns `true`/`false`, `strcat` converts null arguments to empty strings, and `in`/`!in`/`in~`/`!in~` expand dynamic array members.
 
 - Fixed timespans and datetime arithmetic. Timespan literals (`1d`, `2h + 30m`, `datetime + 1d`) produced SQL INTERVAL text SQLite could not parse, and `datetime - datetime` silently subtracted text to 0. KSQL now types timespans as 100ns ticks with Kusto's operator overloads; Striem supplies datetime add/diff UDFs, typed `now()`/`now(offset)`/`ago()`/`bin()`, `totimespan`/`totime`, `dayofweek`, and API formatting as `[-][d.]hh:mm:ss[.fffffff]`. `typeof(T)` is now a type literal, so `extract(..., typeof(real))` converts captures as documented.
