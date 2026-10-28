@@ -11,7 +11,18 @@ import (
 )
 
 func compatibilityOptions() []ksql.Option {
-	options := []ksql.Option{ksql.WithFunction("bin", binFunction)}
+	options := []ksql.Option{ksql.WithFunction("bin", binFunction), scalarRangeOption(), countOfOption()}
+	options = append(options, ipv4Options()...)
+	options = append(options, ipv6Options()...)
+	options = append(options, ipRangeOptions()...)
+	options = append(options, base64Options()...)
+	options = append(options, hashOptions()...)
+	options = append(options, unicodeOptions()...)
+	options = append(options, bitwiseOptions()...)
+	options = append(options, characterStringOptions()...)
+	options = append(options, stringJoinOptions()...)
+	options = append(options, datetimeConstructOptions()...)
+	options = append(options, datetimePartOptions()...)
 	for _, name := range []string{"extract_all", "extractall"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {

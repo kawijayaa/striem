@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"math"
 	"reflect"
@@ -338,7 +339,7 @@ func TestKQLToDatetime(t *testing.T) {
 		{name: "date only", value: "2024-02-29", want: "2024-02-29T00:00:00.000000000Z"},
 		{name: "invalid date", value: "2023-02-29T00:00:00Z"},
 		{name: "invalid time", value: "2024-01-02T25:00:00Z"},
-		{name: "missing seconds", value: "2024-01-02T03:04Z"},
+		{name: "minute precision UTC", value: "2024-01-02T03:04Z", want: "2024-01-02T03:04:00.000000000Z"},
 		{name: "unsafe SQLite syntax", value: "2024-01-02 03:04:05 UTC"},
 		{name: "surrounding whitespace", value: " 2024-01-02T03:04:05Z"},
 		{name: "SQL integer", value: int64(0)},
@@ -457,7 +458,7 @@ func TestKQLBase64DecodeToString(t *testing.T) {
 		{name: "ASCII", value: "aGVsbG8=", want: "hello"},
 		{name: "Unicode", value: "8J+MjQ==", want: "🌍"},
 		{name: "empty", value: "", want: ""},
-		{name: "maximum input", value: strings.Repeat("A", maxDecodeInputBytes), want: strings.Repeat("\x00", maxDecodeInputBytes/4*3)},
+		{name: "maximum decoded payload", value: base64.StdEncoding.EncodeToString(make([]byte, maxDecodeInputBytes)), want: strings.Repeat("\x00", maxDecodeInputBytes)},
 		{name: "malformed alphabet", value: "!!!!"},
 		{name: "unpadded", value: "aGVsbG8"},
 		{name: "URL safe", value: "_w=="},
@@ -465,7 +466,8 @@ func TestKQLBase64DecodeToString(t *testing.T) {
 		{name: "newline", value: "aGVs\nbG8="},
 		{name: "space", value: "aGVs bG8="},
 		{name: "invalid UTF-8 result", value: "/w=="},
-		{name: "oversized", value: strings.Repeat("A", maxDecodeInputBytes+4)},
+		{name: "oversized", value: strings.Repeat("A", base64.StdEncoding.EncodedLen(maxDecodeInputBytes)+4)},
+		{name: "decoded overflow at encoded limit", value: strings.Repeat("A", base64.StdEncoding.EncodedLen(maxDecodeInputBytes))},
 		{name: "integer", value: int64(1)},
 		{name: "blob", value: []byte("aGVsbG8=")},
 		{name: "SQL null", value: nil},

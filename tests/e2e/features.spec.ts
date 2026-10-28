@@ -1244,3 +1244,17 @@ test('management autocomplete executes catalog and schema command pipelines', as
   await run(page,1);
   await expect(page.locator('#result-body')).toContainText('System.DateTime');
 });
+
+test('query parameter autocomplete executes a defaulted declaration', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'declare quer');
+  await editor.press('End');
+  await editor.press('Control+Space');
+  await page.locator('.cm-completionLabel').filter({ hasText: /^declare query_parameters$/ }).click();
+  await expect(editor).toHaveText('declare query_parameters ');
+  await editor.pressSequentially('(threshold:long=1); datatable(n:long)[0,2,3] | where n>threshold');
+  await run(page, 2);
+  await expect(page.locator('#result-body')).toContainText('2');
+  await expect(page.locator('#result-body')).toContainText('3');
+});

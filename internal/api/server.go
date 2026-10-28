@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -296,10 +297,10 @@ func (s *Server) schema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"challengeName": challengeName,
 		"tables":        tables,
-		"statements":    []string{"let"},
+		"statements":    []string{"let", "declare query_parameters"},
 		"operators":     []string{"where", "filter", "search", "project", "project-away", "project-keep", "project-rename", "project-reorder", "extend", "summarize", "distinct", "order by", "sort by", "top", "take", "limit", "sample", "sample-distinct", "count", "serialize", "as", "mv-expand", "mv-apply", "union", "join", "lookup", "invoke"},
 		"commands":      []string{".show tables", ".show table <name> cslschema", ".show table <name> kqlschema", ".show table <name> schema as json"},
-		"functions":     []string{"now", "ago", "datetime", "bool", "boolean", "toscalar", "materialize", "arg_max", "arg_min", "argmax", "argmin", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "repeat", "array_concat", "array_iff", "array_iif", "array_index_of", "array_sum", "series_sum", "zip", "array_reverse", "array_slice", "array_split", "array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right", "bag_keys", "bag_has_key", "bag_merge", "bag_zip", "bag_remove_keys", "bag_set_key", "set_has_element", "set_union", "set_intersect", "set_difference", "set_equals", "jaccard_index", "base64_decode_tostring", "url_decode", "parse_url", "parseurl", "parse_urlquery", "parseurlquery", "ipv4_is_private", "ipv4_is_in_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "minif", "max", "maxif", "avg", "avgif", "make_set", "make_list", "take_any", "take_anyif", "any", "anyif"},
+		"functions":     []string{"now", "ago", "datetime", "bool", "boolean", "toscalar", "materialize", "arg_max", "arg_min", "argmax", "argmin", "tostring", "toint", "tolong", "toreal", "todouble", "todatetime", "tolower", "toupper", "isnull", "isnotnull", "isempty", "isnotempty", "parse_json", "parse_csv", "parse_xml", "extract_all", "extractall", "parsejson", "todynamic", "toobject", "array_length", "repeat", "array_concat", "array_iff", "array_iif", "array_index_of", "array_sum", "series_sum", "zip", "array_reverse", "array_slice", "array_split", "array_rotate_left", "array_rotate_right", "array_shift_left", "array_shift_right", "bag_keys", "bag_has_key", "bag_merge", "bag_zip", "bag_remove_keys", "bag_set_key", "set_has_element", "set_union", "set_intersect", "set_difference", "set_equals", "jaccard_index", "gzip_compress_to_base64_string", "gzip_decompress_from_base64_string", "zlib_compress_to_base64_string", "zlib_decompress_from_base64_string", "base64_decode_tostring", "base64_decodestring", "base64_encode_tostring", "base64_encodestring", "base64_decode_toarray", "base64_encode_fromarray", "range", "binary_all_and", "binary_all_or", "binary_all_xor", "tohex", "make_datetime", "datetime_add", "datetime_diff", "unixtime_seconds_todatetime", "unixtime_milliseconds_todatetime", "unixtime_microseconds_todatetime", "unixtime_nanoseconds_todatetime", "datetime_part", "datepart", "getyear", "getmonth", "monthofyear", "dayofmonth", "dayofyear", "hourofday", "week_of_year", "countof", "strcat_array", "strcat_delim", "strrep", "translate", "reverse", "binary_and", "binary_or", "binary_xor", "binary_not", "binary_shift_left", "binary_shift_right", "bitset_count_ones", "unicode_codepoints_from_string", "unicode_codepoints_to_string", "to_utf8", "make_string", "hash_md5", "hash_sha1", "hash_sha256", "url_decode", "url_encode", "url_encode_component", "parse_url", "parseurl", "parse_urlquery", "parseurlquery", "ipv4_is_private", "ipv4_is_in_range", "parse_ipv4", "parse_ipv4_mask", "format_ipv4", "format_ipv4_mask", "ipv4_netmask_suffix", "ipv4_compare", "ipv4_is_match", "ipv4_range_to_cidr_list", "parse_ipv6", "parse_ipv6_mask", "ipv6_compare", "ipv6_is_match", "ipv6_is_in_range", "ipv4_is_in_any_range", "ipv6_is_in_any_range", "iff", "case", "coalesce", "strlen", "substring", "strcat", "split", "extract", "trim", "replace_string", "count", "countif", "sumif", "sum", "min", "minif", "max", "maxif", "avg", "avgif", "make_set", "make_list", "take_any", "take_anyif", "any", "anyif"},
 	})
 }
 
@@ -312,7 +313,8 @@ func schemaColumns(fields []kql.Field) []map[string]string {
 }
 
 type queryRequest struct {
-	Query string `json:"query"`
+	Query      string               `json:"query"`
+	Parameters localParameterValues `json:"parameters"`
 }
 
 type answerRequest struct {
@@ -423,7 +425,12 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 		return kql.CompiledQuery{}, false
 	}
 	var request queryRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil || !utf8.Valid(body) {
+		writeError(w, http.StatusBadRequest, "request must be UTF-8 JSON within 64 KiB", nil)
+		return kql.CompiledQuery{}, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Query) == "" {
 		writeError(w, http.StatusBadRequest, "query is required", nil)
@@ -443,6 +450,7 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 	tableCatalog := s.tableCatalog
 	s.mu.RUnlock()
 	compiled, err := kql.Compile(request.Query, time.Now(), kql.CompileConfig{
+		Parameters:    localQueryParameters(request.Parameters),
 		Tables:        tableCatalog,
 		FullTextIndex: s.store.FullTextIndexEnabled(),
 	})

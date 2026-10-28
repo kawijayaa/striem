@@ -87,6 +87,12 @@ export function queryCompletionContext(query: string, position: number): QueryCo
   const boundary = Math.max(pipe, statement);
   const segment = code.slice(boundary + 1);
   const source = pipe <= statement;
+  const declaration = source && segment.match(/^(\s*)([A-Za-z_]+(?:[ \t]+[A-Za-z_]*)?[ \t]*)$/);
+  if (declaration && 'declare query_parameters'.startsWith(declaration[2]!.trim().replace(/[ \t]+/g, ' ').toLowerCase())) {
+    const from = boundary + 1 + declaration[1]!.length;
+    const suffix = query.slice(position).match(/^[A-Za-z_0-9]*(?:[ \t]+query_parameters\b)?/i)?.[0] ?? '';
+    return { from, to: position + suffix.length, kind: 'source', prefix: query.slice(from, position) };
+  }
   const phrase = !source && segment.match(/^\s*(order|sort)[ \t]+(?:b|by)?$/i);
   if (phrase) {
     const from = boundary + 1 + segment.search(/\S/);

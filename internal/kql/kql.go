@@ -147,6 +147,7 @@ func fieldScalarType(value string) ksql.ScalarType {
 type compileSettings struct {
 	tables        TableCatalog
 	fullTextIndex bool
+	parameters    map[string]any
 }
 
 type CompileOption interface {
@@ -160,11 +161,13 @@ func (catalog TableCatalog) apply(settings *compileSettings) {
 type CompileConfig struct {
 	Tables        TableCatalog
 	FullTextIndex bool
+	Parameters    map[string]any
 }
 
 func (config CompileConfig) apply(settings *compileSettings) {
 	settings.tables = config.Tables
 	settings.fullTextIndex = config.FullTextIndex
+	settings.parameters = config.Parameters
 }
 
 type Error struct {
@@ -206,6 +209,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 		options = append(options, ksql.WithManagementCatalog(metadata))
 	}
 	options = append(options,
+		ksql.WithQueryParameters(settings.parameters),
 		ksql.WithCatalog(catalog),
 		ksql.WithSource("table", tableSource(tables, fullTextTerms)),
 		ksql.WithLimits(ksql.Limits{
@@ -305,6 +309,12 @@ func normalizeDateTimeSource(source sqlast.Source) {
 
 func normalizeDateTimeExpr(expr sqlast.Expr) sqlast.Expr {
 	switch node := expr.(type) {
+	case *sqlast.Parameter:
+		if node.Kind == sqlast.DateTimeLiteral {
+			argument := *node
+			argument.Kind = sqlast.StringLiteral
+			return &sqlast.Call{Name: "kql_todatetime", Args: []sqlast.Expr{&argument}}
+		}
 	case *sqlast.Literal:
 		if node.Kind == sqlast.StringLiteral && strings.ContainsRune(node.Value, 0) {
 			// SQLite SQL text cannot contain NUL, even inside a quoted literal.

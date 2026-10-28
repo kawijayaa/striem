@@ -2,6 +2,28 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { queryCompletionContext } from '../src/features/completion-context.ts';
 
+test('query parameter headers complete across words and restore the next statement context', () => {
+  for (const query of ['decla', 'declare q', 'declare query_par', 'let x=1;\nDECLARE  qu']) {
+    const context = queryCompletionContext(query, query.length);
+    assert.equal(context.kind, 'source', query);
+    assert.match(context.prefix, /^decl/i, query);
+  }
+  for (const [query, position] of [
+    ['declare query_parameters (n:long=1)', 3],
+    ['declare query_parameters (n:long=1)', 10],
+  ]) {
+    const context = queryCompletionContext(query, position);
+    assert.equal(query.slice(context.from, context.to), 'declare query_parameters');
+  }
+  for (const [query, kind] of [
+    ['declare query_parameters(n:long=1); Tel', 'source'],
+    ['declare query_parameters(n:long=1); Telemetry | pro', 'operator'],
+    ['Telemetry | declare q', 'expression'],
+  ]) assert.equal(queryCompletionContext(query, query.length).kind, kind, query);
+  const quoted = 'declare query_parameters(text:string="decla';
+  assert.equal(queryCompletionContext(quoted, quoted.length), null);
+});
+
 test('management commands complete standalone headers, table names and schema formats', () => {
   for (const [query, kind, prefix] of [
     ['.sh', 'management', '.sh'], ['// note\n.show tabl', 'management', '.show tabl'],

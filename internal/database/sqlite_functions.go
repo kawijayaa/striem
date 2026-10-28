@@ -2,7 +2,6 @@ package database
 
 import (
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -88,6 +87,72 @@ func init() {
 		if err := connection.RegisterFunc("kql_ipv4_is_in_range", kqlIPv4IsInRange, true); err != nil {
 			return err
 		}
+		for name, function := range map[string]any{
+			"kql_parse_ipv4":                       kqlParseIPv4,
+			"kql_parse_ipv4_mask":                  kqlParseIPv4Mask,
+			"kql_format_ipv4":                      kqlFormatIPv4,
+			"kql_format_ipv4_mask":                 kqlFormatIPv4Mask,
+			"kql_ipv4_netmask_suffix":              kqlIPv4NetmaskSuffix,
+			"kql_ipv4_compare":                     kqlIPv4Compare,
+			"kql_ipv4_is_match":                    kqlIPv4IsMatch,
+			"kql_ipv4_range_to_cidr_list":          kqlIPv4RangeToCIDRList,
+			"kql_parse_ipv6":                       kqlParseIPv6,
+			"kql_parse_ipv6_mask":                  kqlParseIPv6Mask,
+			"kql_ipv6_compare":                     kqlIPv6Compare,
+			"kql_ipv6_is_match":                    kqlIPv6IsMatch,
+			"kql_make_datetime":                    kqlMakeDatetime,
+			"kql_unixtime_seconds_todatetime":      kqlUnixSeconds,
+			"kql_unixtime_milliseconds_todatetime": kqlUnixMilliseconds,
+			"kql_unixtime_microseconds_todatetime": kqlUnixMicroseconds,
+			"kql_unixtime_nanoseconds_todatetime":  kqlUnixNanoseconds,
+			"kql_datetime_part":                    kqlDatetimePart,
+			"kql_datetime_diff":                    kqlDatetimeDiff,
+			"kql_datetime_add":                     kqlDatetimeAdd,
+			"kql_countof":                          kqlCountOf,
+			"kql_strcat_delim":                     kqlStrcatDelim,
+			"kql_join_scalar_text":                 kqlJoinScalarText,
+			"kql_strcat_array":                     kqlStrcatArray,
+			"kql_strrep":                           kqlStrrep,
+			"kql_translate":                        kqlTranslate,
+			"kql_reverse":                          kqlReverse,
+			"kql_tohex":                            kqlToHex,
+			"kql_binary_and":                       kqlBinaryAnd,
+			"kql_binary_or":                        kqlBinaryOr,
+			"kql_binary_xor":                       kqlBinaryXor,
+			"kql_binary_not":                       kqlBinaryNot,
+			"kql_binary_shift_left":                kqlBinaryShiftLeft,
+			"kql_binary_shift_right":               kqlBinaryShiftRight,
+			"kql_bitset_count_ones":                kqlBitsetCountOnes,
+			"kql_scalar_range":                     kqlScalarRange,
+			"kql_codepoints_from_string":           kqlCodepointsFromString,
+			"kql_codepoints_to_string":             kqlCodepointsToString,
+			"kql_hash_md5":                         kqlHashMD5,
+			"kql_hash_sha1":                        kqlHashSHA1,
+			"kql_hash_sha256":                      kqlHashSHA256,
+			"kql_url_encode":                       kqlURLEncode,
+			"kql_url_encode_component":             kqlURLEncodeComponent,
+			"kql_gzip_compress":                    kqlGzipCompress,
+			"kql_gzip_decompress":                  kqlGzipDecompress,
+			"kql_zlib_compress":                    kqlZlibCompress,
+			"kql_zlib_decompress":                  kqlZlibDecompress,
+			"kql_base64_encode_tostring":           kqlBase64EncodeToString,
+			"kql_base64_decode_toarray":            kqlBase64DecodeToArray,
+			"kql_base64_encode_fromarray":          kqlBase64EncodeFromArray,
+			"kql_ipv4_is_in_any_range":             kqlIPv4IsInAnyRange,
+			"kql_ipv6_is_in_any_range":             kqlIPv6IsInAnyRange,
+			"kql_ipv6_is_in_range":                 kqlIPv6IsInRange,
+		} {
+			if err := connection.RegisterFunc(name, function, true); err != nil {
+				return err
+			}
+		}
+		for _, operation := range []string{"and", "or", "xor"} {
+			operation := operation
+			if err := connection.RegisterAggregator("kql_binary_all_"+operation, func() *bitwiseAggregate { return &bitwiseAggregate{operation: operation} }, true); err != nil {
+				return err
+			}
+		}
+
 		if err := connection.RegisterAggregator("kql_make_list", func() *kqlCollection { return &kqlCollection{} }, true); err != nil {
 			return err
 		}
@@ -133,7 +198,7 @@ func sqliteNull(value any) bool {
 	return ok && bytes == nil
 }
 
-var isoDatetimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?$`)
+var isoDatetimePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?)?$`)
 
 var regexpCache = func() *lru.Cache {
 	cache, err := lru.New(regexpCacheEntries)
@@ -523,23 +588,30 @@ func kqlBagKeys(value any) any {
 
 func kqlToDatetime(value any) any {
 	text, ok := value.(string)
-	if !ok || !isoDatetimePattern.MatchString(text) {
+	if !ok || len(text) > 35 || strings.HasPrefix(text, "0000-") || !isoDatetimePattern.MatchString(text) {
 		return nil
 	}
 
 	var parsed time.Time
 	var err error
-	switch {
-	case len(text) == len("2006-01-02"):
+	if len(text) == 10 {
 		parsed, err = time.ParseInLocation("2006-01-02", text, time.UTC)
-	case strings.HasSuffix(text, "Z") || text[len(text)-6] == '+' || text[len(text)-6] == '-':
-		parsed, err = time.Parse(time.RFC3339Nano, strings.Replace(text, " ", "T", 1))
-	default:
-		parsed, err = time.ParseInLocation("2006-01-02T15:04:05", strings.Replace(text, " ", "T", 1), time.UTC)
+	} else {
+		normalized := strings.Replace(text, " ", "T", 1)
+		if len(normalized) == 16 || normalized[16] != ':' {
+			normalized = normalized[:16] + ":00" + normalized[16:]
+		}
+		if strings.HasSuffix(normalized, "Z") || normalized[len(normalized)-6] == '+' || normalized[len(normalized)-6] == '-' {
+			parsed, err = time.Parse(time.RFC3339Nano, normalized)
+		} else {
+			parsed, err = time.ParseInLocation("2006-01-02T15:04:05", normalized, time.UTC)
+		}
 	}
-	if err != nil {
+	parsed = parsed.UTC()
+	if err != nil || parsed.Year() < 1 || parsed.Year() > 9999 {
 		return nil
 	}
+
 	return eventtime.Format(parsed)
 }
 
@@ -625,12 +697,8 @@ func kqlParseKV(schemaValue, pairDelimiterValue, kvDelimiterValue, sourceValue a
 }
 
 func kqlBase64DecodeToString(value any) any {
-	text, ok := value.(string)
-	if !ok || len(text) > maxDecodeInputBytes || strings.ContainsAny(text, "\r\n") {
-		return nil
-	}
-	decoded, err := base64.StdEncoding.Strict().DecodeString(text)
-	if err != nil || !utf8.Valid(decoded) || base64.StdEncoding.EncodeToString(decoded) != text {
+	decoded, ok := decodeKQLBase64(value)
+	if !ok || !utf8.Valid(decoded) {
 		return nil
 	}
 	return string(decoded)
@@ -638,11 +706,11 @@ func kqlBase64DecodeToString(value any) any {
 
 func kqlURLDecode(value any) any {
 	text, ok := value.(string)
-	if !ok || len(text) > maxDecodeInputBytes || !utf8.ValidString(text) {
+	if !ok || len(text) > 3*maxDecodeInputBytes || !utf8.ValidString(text) {
 		return nil
 	}
 	decoded, err := url.PathUnescape(text)
-	if err != nil || !utf8.ValidString(decoded) {
+	if err != nil || len(decoded) > maxDecodeInputBytes || !utf8.ValidString(decoded) {
 		return nil
 	}
 	return decoded

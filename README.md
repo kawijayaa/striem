@@ -58,6 +58,9 @@ Read-only management commands use the logical database namespace `striem`: `.sho
 
 The local query API parses and compiles queries into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
 
+[Query parameters](docs/QUERY_PARAMETERS.md) can supply typed JSON values through
+the local API or scalar literal defaults through `declare query_parameters(...)`.
+
 Optional [native Kusto API routes](docs/NATIVE_KUSTO.md) execute query language,
 management commands and external-service features on a configured Kusto service.
 They use server-side credentials and preserve multiple typed result tables.
