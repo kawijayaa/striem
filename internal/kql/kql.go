@@ -723,7 +723,6 @@ func compilerOptions(now time.Time) []ksql.Option {
 		ksql.WithTypedFunction("isnotempty", typedRule(emptyFunction(true), ksql.TypeBool)),
 		ksql.WithTypedFunction("notnull", typedRule(nullFunction(true), ksql.TypeBool)),
 		ksql.WithTypedFunction("notempty", typedRule(emptyFunction(true), ksql.TypeBool)),
-		ksql.WithAggregate("make_set", ksql.SQLFunction("kql_make_set_value")),
 	}
 }
 

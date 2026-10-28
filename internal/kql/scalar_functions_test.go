@@ -91,3 +91,47 @@ func TestIPv4SearchAndTemporalRange(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's mv-apply examples with take, top, summarize and item indexes.
+func TestMvApplySubqueries(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable (index: int, Arr: dynamic)[0, dynamic([7]), 1, dynamic([6, 11, 7])] | mv-apply Arr2=Arr to typeof(long) on (take 2) | order by index asc, Arr2 asc`, `[[0 [7] 7] [1 [6,11,7] 6] [1 [6,11,7] 11]]`},
+		{`datatable (index: int, Arr: dynamic)[0, dynamic([1, 5, 3]), 1, dynamic([10, 2, 5, 7])] | mv-apply topElem=Arr to typeof(long) on (top 1 by topElem) | order by index asc`, `[[0 [1,5,3] 5] [1 [10,2,5,7] 10]]`},
+		{`datatable (index: int, Arr: dynamic)[0, dynamic([5, 1, 3]), 1, dynamic([4, 10, 8, 7])] | mv-apply Arr2=Arr to typeof(long) on (top 2 by Arr2 | summarize Top2=make_list(Arr2)) | order by index asc`, `[[0 [5,1,3] [5,3]] [1 [4,10,8,7] [10,8]]]`},
+		{`datatable (Val:int, Arr1:dynamic, Arr2:dynamic)[1, dynamic(['A1', 'A2', 'A3']), dynamic([10, 30, 7]), 7, dynamic(['B1', 'B2', 'B5']), dynamic([15, 11, 50])] | mv-apply NewArr1=Arr1, NewArr2=Arr2 to typeof(long) on (top 2 by NewArr2 | summarize NewArr1=make_list(NewArr1), NewArr2=make_list(NewArr2)) | order by Val asc`,
+			`[[1 ["A1","A2","A3"] [10,30,7] ["A2","A1"] [30,10]] [7 ["B1","B2","B5"] [15,11,50] ["B5","B1"] [50,15]]]`},
+		{`datatable (row: int, Arr: dynamic)[0, dynamic([5, 1, 3]), 1, dynamic([4, 10, 8, 7])] | mv-apply with_itemindex=index value=Arr to typeof(long) on (where index >= 2) | order by row asc, index asc`, `[[0 [5,1,3] 3 2] [1 [4,10,8,7] 8 2] [1 [4,10,8,7] 7 3]]`},
+		{`print rings = dynamic([["a"], ["b", "c"]]) | mv-apply rings on (summarize cells = make_list(rings))`, `[[["a","b","c"]]]`},
+		{`datatable (g: string, Arr: dynamic)["x", dynamic([1, 2, 2]), "y", dynamic([3])] | mv-apply v=Arr to typeof(long) on (distinct v | count) | order by g asc`, `[[x [1,2,2] 2] [y [3] 1]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	if _, err := Compile(`print a=dynamic([1]) | mv-apply a on (join (print a=1) on a)`, time.Now()); err == nil {
+		t.Fatal("unsupported mv-apply subquery accepted")
+	}
+}
+
+// make_list and make_set add the elements of dynamic arrays (Microsoft's
+// geo and H3 examples rely on it), skip nulls, and honor maximum sizes.
+func TestCollectAggregates(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`datatable(x:long)[1, 2, long(null), 2, 3] | summarize l=make_list(x), s=make_set(x), n=make_list_with_nulls(x), i=make_list_if(x, x > 1), si=make_set_if(x, x > 1, 1), m=make_list(x, 2)`, `[[[1,2,2,3] [1,2,3] [1,2,null,2,3] [2,2,3] [2] [1,2]]]`},
+		{`datatable(d:dynamic)[dynamic([1, 2]), dynamic([2, 3]), dynamic({"a":1}), dynamic(null)] | summarize l=make_list(d), s=make_set(d)`, `[[[1,2,2,3,{"a":1}] [1,2,3,{"a":1}]]]`},
+		{`datatable(d:dynamic)[dynamic([[1], [2]])] | summarize l=make_list(d), p=make_list(pack_array(d))`, `[[[[1],[2]] [[[1],[2]]]]]`},
+		{`datatable(b:bool, t:timespan, s:string)[true, 1h, "a<b", false, 2m, "a<b"] | summarize b=make_list(b), t=make_list(t), s=make_set(s)`, `[[[true,false] ["01:00:00","00:02:00"] ["a<b"]]]`},
+		{`datatable(x:long)[] | summarize l=make_list(x), s=makeset(x)`, `[[[] []]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{`print x=1 | summarize make_list_if(x, 1)`, `print x=1 | summarize make_list_with_nulls(x, 5)`, `print x=1 | summarize make_set(x, 1.5)`} {
+		if _, err := Compile(query, time.Now()); err == nil {
+			t.Fatalf("invalid call accepted: %s", query)
+		}
+	}
+}

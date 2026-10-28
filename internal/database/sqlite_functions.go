@@ -273,6 +273,12 @@ func init() {
 		if err := connection.RegisterAggregator("kql_make_set", func() *kqlCollection { return &kqlCollection{distinct: true, seen: make(map[string]struct{})} }, true); err != nil {
 			return err
 		}
+		for name, config := range map[string][2]bool{"kql_collect_list": {false, false}, "kql_collect_set": {true, false}, "kql_collect_list_nulls": {false, true}} {
+			config := config
+			if err := connection.RegisterAggregator(name, func() *collectAggregate { return &collectAggregate{distinct: config[0], nulls: config[1]} }, true); err != nil {
+				return err
+			}
+		}
 		if err := connection.RegisterAggregator("kql_make_set_value", func() *kqlValueCollection {
 			return &kqlValueCollection{collection: kqlCollection{distinct: true, seen: make(map[string]struct{})}}
 		}, true); err != nil {
