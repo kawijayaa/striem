@@ -71,3 +71,28 @@ func TestForensicTextFunctions(t *testing.T) {
 		}
 	}
 }
+
+// Microsoft's row_window_session and rows_near examples.
+func TestSessionsAndRowsNear(t *testing.T) {
+	db := featureDatabase(t)
+	events := `datatable (ID:string, Timestamp:datetime) ["1", datetime(2024-04-11 10:00:00), "2", datetime(2024-04-11 10:18:00), "1", datetime(2024-04-11 11:00:00), "3", datetime(2024-04-11 11:30:00), "2", datetime(2024-04-11 13:30:00), "2", datetime(2024-04-11 10:16:00)]`
+	values := `datatable (Timestamp:datetime, Value:long, State:string)[datetime(2021-06-01), 1, "Success", datetime(2021-06-02), 4, "Success", datetime(2021-06-03), 3, "Success", datetime(2021-06-04), 11, "Success", datetime(2021-06-05), 15, "Success", datetime(2021-06-06), 2, "Success", datetime(2021-06-07), 19, "Error", datetime(2021-06-08), 12, "Success", datetime(2021-06-09), 7, "Success", datetime(2021-06-10), 9, "Success"]`
+	for _, tc := range []struct{ query, want string }{
+		{events + ` | sort by ID asc, Timestamp asc | extend SessionStarted = row_window_session(Timestamp, 1h, 5m, ID != prev(ID)) | project ID, tostring(Timestamp), tostring(SessionStarted)`,
+			`[[1 2024-04-11T10:00:00.000000000Z 2024-04-11T10:00:00.000000000Z] [1 2024-04-11T11:00:00.000000000Z 2024-04-11T11:00:00.000000000Z] [2 2024-04-11T10:16:00.000000000Z 2024-04-11T10:16:00.000000000Z] [2 2024-04-11T10:18:00.000000000Z 2024-04-11T10:16:00.000000000Z] [2 2024-04-11T13:30:00.000000000Z 2024-04-11T13:30:00.000000000Z] [3 2024-04-11T11:30:00.000000000Z 2024-04-11T11:30:00.000000000Z]]`},
+		{`range t from datetime(2024-01-01 00:00) to datetime(2024-01-01 00:20) step 4m | extend n = 1, s = row_window_session(t, 10m, 5m) | project tostring(s), n`,
+			`[[2024-01-01T00:00:00.000000000Z 1] [2024-01-01T00:00:00.000000000Z 1] [2024-01-01T00:00:00.000000000Z 1] [2024-01-01T00:12:00.000000000Z 1] [2024-01-01T00:12:00.000000000Z 1] [2024-01-01T00:12:00.000000000Z 1]]`},
+		{values + ` | sort by Timestamp asc | evaluate rows_near(State == "Error", 2) | project Value`, `[[15] [2] [19] [12] [7]]`},
+		{values + ` | sort by Timestamp asc | evaluate rows_near(State == "Error", 1, 3) | project Value`, `[[2] [19] [12] [7] [9]]`},
+		{values + ` | sort by Timestamp asc | evaluate rows_near(Value > 100, 2) | count`, `[[0]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for _, query := range []string{`print t=now() | extend row_window_session(t, 1h, 1h)`, `print t=now() | evaluate rows_near(true, -1)`, `print t=now() | evaluate rows_near(1, 2)`} {
+		if _, err := Compile(query, time.Now()); err == nil {
+			t.Fatalf("invalid query accepted: %s", query)
+		}
+	}
+}
