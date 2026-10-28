@@ -24,6 +24,7 @@ func compatibilityOptions() []ksql.Option {
 	options = append(options, datetimeConstructOptions()...)
 	options = append(options, datetimePartOptions()...)
 	options = append(options, mathOptions()...)
+	options = append(options, seriesOptions()...)
 	for _, name := range []string{"extract_all", "extractall"} {
 		name := name
 		options = append(options, ksql.WithTypedFunction(name, func(args []ksql.TypedExpression) (ksql.TypedExpression, error) {
