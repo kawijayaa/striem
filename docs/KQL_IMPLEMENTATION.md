@@ -14,7 +14,7 @@ The companion KSQL checkout has a feature ledger covering more than 650 entries.
 
 ## Current integration
 
-The query-parameter increment uses KSQL commit `6ecaa5a`, which CI now pins.
+CI pins KSQL commit `aa3ca06`, which includes query parameters and `parse`.
 That commit is local to the companion checkout until it is published; remote CI
 cannot fetch it before then. Constant-only adapter arguments, such as
 `extract_all` patterns, still require compiler metadata to recognize bound
@@ -27,6 +27,12 @@ parameters as constants.
 - The compiler's `not()` implementation now supplies Boolean metadata directly. The former application metadata-recovery workaround was removed.
 
 ## Verified implementation increments
+
+- Added `parse` and `parse-where` through KSQL's typed `ParseSpec` lowering and a Striem `kql_regex_captures` UDF that returns one RE2 capture array per row. Simple, regex (with `i`/`m`/`s`/`U` flags) and relaxed kinds, typed columns, strict all-or-nothing conversion, relaxed per-column nulls, user groups inside regex constants and anchored matching are covered. Microsoft's simple, email, regex, regex-flag, relaxed and parse-where examples execute with documented values, as do SQL-like data through the API, aggregation after extraction, schema metadata and positioned diagnostics. A compiler fence (`LIMIT -1 OFFSET 0`) keeps one capture evaluation per row while rows still stream to `take`. The editor, API discovery and a Playwright scenario include both operators. Exact engine regexes for bool/datetime/timespan/guid columns, `parse-kv` and live-engine certification remain open. See KSQL `docs/parse-operator.md` and [Microsoft parse](https://learn.microsoft.com/en-us/kusto/query/parse-operator?view=microsoft-fabric).
+
+- Extended runtime datetime conversion to every example in Microsoft's RFC 822, RFC 850 and Sortable format tables, with optional seconds, a `GMT` zone, weekday consistency checks and a 1969–2068 two-digit-year window. A bounded `M/d/yyyy H:mm[:ss[.fffffff]]` fallback reproduces the parse operator examples; Microsoft does not list it among supported formats. The existing ISO rules are unchanged. Two-digit-year pivots, other zones and .NET-style culture parsing remain uncertified. [Microsoft datetime formats](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/datetime?view=microsoft-fabric).
+
+- Fixed KSQL placeholder numbering for `matches regex` and other regex operators on SQLite. Bound literal operands had been swapped, so `"abc" matches regex "^a"` returned false.
 
 - Added Striem SQLite adapters for `parse_ipv6`, `parse_ipv6_mask`, `ipv6_compare`, `ipv6_is_match` and `ipv6_is_in_range`. Native and mapped IPv4 examples retain unsigned 128-bit address data, expanded lowercase output, inherited/explicit masking and typed string/long/bool results. Tests exercise every IPv6 mask width, Microsoft's parse/mask and mixed-comparison examples, invalid/null inputs, filtering, scalar functions, query parameters and JSON Boolean/null metadata. Fuzz properties cover canonical idempotence, masking and comparison symmetry. API discovery and editor completion include the names. This remains application runtime support; IPv4-compatible lexical equivalences, ambiguous prefix forms, full coercion/constant folding, full multi-range edge semantics and live-engine certification remain open. See [IPv6 guide](IPV6_FUNCTIONS.md).
 
@@ -361,7 +367,7 @@ Added typed `bag_merge()` (2–64 bags, shallow merge with leftmost duplicate va
 
 - Added typed gzip/zlib base64 compression and decompression mappings. Deterministic stored-block encoding matches Microsoft’s published byte strings; standard compressed blocks decode with header/checksum validation. Tests cover block boundaries, Unicode/empty values, corruption/truncation, trailing streams, a 4 MiB expansion budget and parameterized API output. Exact engine encoding beyond examples, null/coercion policies, constant folding and live-service certification remain open. See [compression guide](COMPRESSION_FUNCTIONS.md).
 
-- Added a separate native Kusto browser console with explicit query/management modes, encoded-string parameters, progressive requests, cancellation and exact JSON display/download. A no-store capabilities route exposes only enabled/management flags. Unit tests preserve long/decimal response digits and exercise request modes/limits/errors; Go recorder tests cover capability flags and built static delivery. Browser scenarios are added but unexecuted under current socket restrictions. Schema-aware native completion, tabular browsing, validation and live-service/browser certification remain open. See [native guide](NATIVE_KUSTO.md).
+- Added a separate native Kusto browser console with explicit query/management modes, encoded-string parameters, progressive requests, cancellation and exact JSON display/download. A no-store capabilities route exposes only enabled/management flags. Unit tests preserve long/decimal response digits and exercise request modes/limits/errors; Go recorder tests cover capability flags and built static delivery. Both browser scenarios pass under Playwright Chromium. Schema-aware native completion, tabular browsing, validation and live-service/browser certification remain open. See [native guide](NATIVE_KUSTO.md).
 
 - Added typed URL encoders for form-style plus spaces and percent-encoded component spaces, lowercase UTF-8 escaping, bounded expansion and string result metadata. Decoder input budget now accommodates maximum encoder percent expansion while retaining a decoded-size cap. Execution/API tests cover parameter values, Unicode, punctuation, function bindings and schema; fuzz properties compare independent path/form decoding. Literal-plus behavior in the existing decoder, exact punctuation/coercion rules, the documented trailing-slash discrepancy and live-engine certification remain open. See [URL encoding guide](URL_ENCODING.md).
 

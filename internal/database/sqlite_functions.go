@@ -88,6 +88,7 @@ func init() {
 			return err
 		}
 		for name, function := range map[string]any{
+			"kql_regex_captures":                   kqlRegexCaptures,
 			"kql_parse_ipv4":                       kqlParseIPv4,
 			"kql_parse_ipv4_mask":                  kqlParseIPv4Mask,
 			"kql_format_ipv4":                      kqlFormatIPv4,

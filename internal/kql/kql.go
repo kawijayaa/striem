@@ -224,6 +224,7 @@ func Compile(source string, now time.Time, compileOptions ...CompileOption) (Com
 	target := dialect.SQLite(
 		dialect.WithRegexFunction("kql_regex"),
 		dialect.WithRegexCaseInsensitiveFlag("(?i)"),
+		dialect.WithRegexCapturesFunction("kql_regex_captures"),
 	)
 	compiler := ksql.New(target, options...)
 	result := compiler.Compile(source)

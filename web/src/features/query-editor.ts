@@ -21,7 +21,7 @@ const keywords = new Set([
   'let', 'declare', 'query_parameters', 'where', 'filter', 'search', 'project', 'project-away', 'project-keep', 'project-rename', 'project-reorder',
   'extend', 'summarize', 'distinct', 'order', 'sort', 'top', 'take',
   'getschema', 'limit', 'sample', 'sample-distinct', 'count', 'serialize', 'as', 'mv-expand', 'mv-apply', 'union', 'join',
-  'lookup', 'invoke', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
+  'lookup', 'invoke', 'parse', 'parse-where', 'with', 'flags', 'simple', 'regex', 'relaxed', 'kind', 'innerunique', 'rightsemi', 'rightanti', 'inner', 'leftouter', 'rightouter', 'fullouter', 'leftsemi', 'leftanti', 'with_itemindex',
   'on', 'by', 'of', 'asc', 'desc', 'granny-asc', 'granny-desc',
 ]);
 const logicalOperators = new Set([
@@ -65,6 +65,8 @@ const operatorCompletions = createCompletions('keyword', [
   ['union', 'Combine compatible table rows'], ['join', 'Correlate rows by matching columns'],
   ['lookup', 'Enrich rows by matching columns'],
   ['invoke', 'Apply a query function to this table'],
+  ['parse', 'Extract typed columns from a string with a pattern'],
+  ['parse-where', 'Extract columns and keep only rows that match'],
 ], label => `${label} `);
 
 const commandCompletions = createCompletions('keyword', [

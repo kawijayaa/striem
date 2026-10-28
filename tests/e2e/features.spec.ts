@@ -1258,3 +1258,18 @@ test('query parameter autocomplete executes a defaulted declaration', async ({ p
   await expect(page.locator('#result-body')).toContainText('2');
   await expect(page.locator('#result-body')).toContainText('3');
 });
+
+test('parse operator autocompletes and extracts typed columns', async ({ page }) => {
+  await open(page);
+  const editor = page.locator('.cm-content');
+  await edit(page, 'print Message="user=root port=22" ');
+  await editor.press('End');
+  await editor.pressSequentially('| pars', { delay: 40 });
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^parse-where$/ })).toBeVisible();
+  await expect(page.locator('.cm-completionLabel').filter({ hasText: /^parse$/ })).toBeVisible();
+  await editor.press('Escape');
+  await edit(page, 'print Message="user=root port=22" | parse Message with "user=" User " port=" Port:long | project User, Port');
+  await run(page, 1);
+  await expect(page.locator('#results-panel')).toContainText('root');
+  await expect(page.locator('#results-panel')).toContainText('22');
+});
