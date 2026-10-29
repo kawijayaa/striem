@@ -8,7 +8,7 @@ COPY web/src ./web/src
 COPY web/public ./web/public
 RUN npm run build
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache gcc musl-dev
 COPY go.mod go.sum ./
@@ -19,7 +19,7 @@ COPY . .
 COPY --from=web /src/web/dist ./web/dist
 RUN CGO_ENABLED=1 go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /out/striem ./cmd/striem
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN addgroup -S striem && adduser -S -G striem striem
 WORKDIR /app
 COPY --from=build /out/striem /usr/local/bin/striem

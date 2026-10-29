@@ -8,7 +8,7 @@ The interface includes live preflight query diagnostics, table and field complet
 
 ## Run
 
-Local development requires Node.js 22, Go 1.24, a C toolchain for SQLite, and the independent [KSQL repository](https://github.com/kawijayaa/ksql) checked out at `../ksql`. Striem uses that sibling Go module directly; compiler source is not bundled here.
+Local development requires Node.js 22, a supported Go release (1.27 or later; Go fixes security issues only in its two newest releases), a C toolchain for SQLite, and the independent [KSQL repository](https://github.com/kawijayaa/ksql) checked out at `../ksql`. Striem uses that sibling Go module directly; compiler source is not bundled here.
 
 ```bash
 npm ci
