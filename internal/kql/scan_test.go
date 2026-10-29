@@ -445,3 +445,30 @@ func TestArraySortColumnsAndDivision(t *testing.T) {
 		t.Errorf("array_sort columns: %v %v", compiled.Columns, err)
 	}
 }
+
+// Regex arguments may come from let values, function parameters and query
+// parameters; each call still validates the actual pattern, and per-row
+// patterns are rejected.
+func TestParameterizedRegexArguments(t *testing.T) {
+	db := featureDatabase(t)
+	for _, tc := range []struct{ query, want string }{
+		{`let f = (pat:string) { print extract_all(pat, "a1b22") }; f(@"(\d+)")`, `[[["1","22"]]]`},
+		{`declare query_parameters(pat:string = @"(\d+)"); print extract_all(pat, "a1b22")`, `[[["1","22"]]]`},
+		{`let f = (p:string) { print replace_regex("a1b22", p, "#") }; f(@"\d+")`, `[[a#b#]]`},
+		{`declare query_parameters(p:string = @"\d+"); print replace_regex("a1b22", p, "#")`, `[[a#b#]]`},
+		{`let p = @"(\d)(\w)"; print extract(p, 2, "x1y")`, `[[y]]`},
+	} {
+		if got := fmt.Sprint(featureRows(t, db, tc.query)); got != tc.want {
+			t.Errorf("%s\n got %s\nwant %s", tc.query, got, tc.want)
+		}
+	}
+	for query, want := range map[string]string{
+		`let f = (p:string) { print extract_all(p, "a") }; f("(")`:        "regex is invalid",
+		`let f = (p:string) { print extract_all(p, "a") }; f("nogroups")`: "capture groups",
+		`datatable(p:string)["(\\d)"] | project extract_all(p, "a1")`:      "constant string",
+	} {
+		if _, err := Compile(query, time.Now(), featureCatalog()); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error %v, want %q", query, err, want)
+		}
+	}
+}

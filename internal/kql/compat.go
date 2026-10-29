@@ -39,19 +39,18 @@ func compatibilityOptions() []ksql.Option {
 					return ksql.TypedExpression{}, fmt.Errorf("%s regex and source must be strings", name)
 				}
 			}
-			pattern, ok := args[0].SQL.(*sqlast.Literal)
-			if !ok || pattern.Kind != sqlast.StringLiteral {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex must be a constant string", name)
-			}
-			if len(pattern.Value) > 512 {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
-			}
-			expression, err := regexp.Compile(pattern.Value)
+			pattern, deferred, err := constantRegex(args[0], name)
 			if err != nil {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
+				return ksql.TypedExpression{}, err
 			}
-			if expression.NumSubexp() < 1 || expression.NumSubexp() > 16 {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex requires between 1 and 16 capture groups", name)
+			if !deferred {
+				expression, err := regexp.Compile(pattern)
+				if err != nil {
+					return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
+				}
+				if expression.NumSubexp() < 1 || expression.NumSubexp() > 16 {
+					return ksql.TypedExpression{}, fmt.Errorf("%s regex requires between 1 and 16 capture groups", name)
+				}
 			}
 			groups := sqlast.Expr(&sqlast.Literal{Kind: sqlast.NullLiteral})
 			if len(args) == 3 {
@@ -389,14 +388,11 @@ func compatibilityOptions() []ksql.Option {
 					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be strings", name)
 				}
 			}
-			pattern, ok := args[0].SQL.(*sqlast.Literal)
-			if !ok || pattern.Kind != sqlast.StringLiteral {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex must be a constant string", name)
+			pattern, deferred, err := constantRegex(args[0], name)
+			if err != nil {
+				return ksql.TypedExpression{}, err
 			}
-			if len(pattern.Value) > 512 {
-				return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
-			}
-			if _, err := regexp.Compile(pattern.Value); err != nil {
+			if _, err := regexp.Compile(pattern); !deferred && err != nil {
 				return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
 			}
 			return ksql.TypedExpression{Type: ksql.TypeString, SQL: &sqlast.Call{Name: "kql_" + name, Args: []sqlast.Expr{args[0].SQL, args[1].SQL}}}, nil
@@ -467,16 +463,16 @@ func compatibilityOptions() []ksql.Option {
 					return ksql.TypedExpression{}, fmt.Errorf("%s arguments must be strings", name)
 				}
 				values[i] = arg.SQL
-				if i > 0 {
-					literal, ok := arg.SQL.(*sqlast.Literal)
-					if !ok || literal.Kind != sqlast.StringLiteral {
+				if i > 0 && !arg.Deferred {
+					text, ok := arg.Constant.(string)
+					if !arg.HasConstant || !ok {
 						return ksql.TypedExpression{}, fmt.Errorf("%s regex and rewrite must be constant strings", name)
 					}
 					if i == 1 {
-						if len(literal.Value) > 512 {
+						if len(text) > 512 {
 							return ksql.TypedExpression{}, fmt.Errorf("%s regex exceeds 512 bytes", name)
 						}
-						if _, err := regexp.Compile(literal.Value); err != nil {
+						if _, err := regexp.Compile(text); err != nil {
 							return ksql.TypedExpression{}, fmt.Errorf("%s regex is invalid: %w", name, err)
 						}
 					}
@@ -680,4 +676,21 @@ func integerSQLConstant(expr sqlast.Expr) bool {
 		return false
 	}
 	return !strings.ContainsAny(literal.Value, ".eE")
+}
+
+// constantRegex reads a regex argument known at compile time: a literal, a
+// let value or a bound query parameter. While a function declaration is
+// validated, a parameter's regex is deferred to each call.
+func constantRegex(arg ksql.TypedExpression, name string) (string, bool, error) {
+	if arg.Deferred {
+		return "", true, nil
+	}
+	pattern, ok := arg.Constant.(string)
+	if !arg.HasConstant || !ok {
+		return "", false, fmt.Errorf("%s regex must be a constant string", name)
+	}
+	if len(pattern) > 512 {
+		return "", false, fmt.Errorf("%s regex exceeds 512 bytes", name)
+	}
+	return pattern, false, nil
 }

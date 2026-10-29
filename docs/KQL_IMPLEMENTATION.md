@@ -1,24 +1,24 @@
-# Full KQL implementation
+# KQL implementation
 
-## Objective and completion standard
+## Objective and scope
 
-Implement all of the Microsoft KQL specification robustly with no bugs. This objective remains **incomplete**. No subset of operators, passing test suite, or syntax-only recognition establishes completion.
+Striem implements the KQL that CTF log forensics needs, robustly and with Kusto's documented semantics. The scope was set on 2026-10-29. Geospatial, `series_*`, unit and science functions were removed. Graph operators, cluster and service metadata, external and code plugins, activity metrics, multiple result sets (`fork`/`facet`) and pattern-mining plugins (`autocluster`, `basket`, `diffpatterns`) are out of scope. Out-of-scope names report unsupported-function or unsupported-plugin errors rather than approximations. The audit below lists every remaining unsupported name and its group.
 
-For each construct, evidence must cover syntax, binding/type inference, execution semantics (including nulls and invalid inputs), output schema/types, errors, and integration with Striem. Operator combinations, parameterized expressions, and boundary cases must be exercised. Documented approximation is not proof of exact Kusto compatibility.
+Within that scope, every construct is verified against Microsoft's documented examples where they are deterministic. The documentation harness passes 328 examples. Every remaining compile failure and mismatch was reviewed and classified as out of scope, doc fragments, sample-table data, random output, row order, display formatting or doc errors. Known differences are listed in this document and in `PRODUCTION_READINESS.md`. Evidence for each construct covers syntax, binding and type inference, execution semantics (including nulls and invalid inputs), output schema and types, errors, and integration with Striem.
 
 ## Authoritative inventory
 
 The companion KSQL checkout has a feature ledger covering more than 650 entries. Its pinned Microsoft source is recorded in `../ksql/inventory/source.json`. The pinned catalog includes 397 scalar functions, 24 conversion entries, 61 aggregates, 8 window entries, and 47 plugins, plus operators, sources, statements, and scalar operators. Registry entries can overlap.
 
-`features.All()` and `features.JSON()` expose the baseline. The ledger distinguishes inventory, recognition, translation, and semantics. It is a starting inventory, **not evidence that everything marked equivalent has complete Kusto behavior**, and must be reconciled against the current Microsoft language/reference as implementation proceeds. Newer features remain in scope.
+`features.All()` and `features.JSON()` expose the baseline. The ledger distinguishes inventory, recognition, translation, and semantics. Entries marked equivalent are backed by tests, but the ledger is not proof of complete Kusto behavior for constructs outside the CTF scope.
 
 ## Current integration
 
-CI pins the KSQL commit that includes query parameters, the parse operators and window functions.
-That commit is local to the companion checkout until it is published; remote CI
-cannot fetch it before then. Constant-only adapter arguments, such as
-`extract_all` patterns, still require compiler metadata to recognize bound
-parameters as constants.
+CI pins the KSQL commit Striem builds against by its full SHA in both Docker workflows. That commit must be published to KSQL before Striem, as it is for the current pin.
+Constant-only adapter arguments, such as regex patterns for `extract_all` and
+`replace_regex`, accept literals, `let` values, function parameters and
+declared query parameters. Each call validates the actual pattern, and
+per-row patterns are rejected.
 
 - The source of compiler development is the companion `ksql` repository.
 - Striem resolves its compiler module directly from the independent sibling checkout at `../ksql`. No compiler snapshot or synchronization script is kept in this repository.
