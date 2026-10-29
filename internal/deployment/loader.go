@@ -77,6 +77,10 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 		return nil, fmt.Errorf("open manifest directory: %w", err)
 	}
 	defer root.Close()
+	manifestInfo, err := os.Stat(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat deployment manifest: %w", err)
+	}
 	seen := make(map[string]struct{}, len(manifest.Datasets))
 	seenTables := make(map[string]string, len(manifest.Datasets))
 	indexedPathSet := make(map[string]struct{})
@@ -128,6 +132,11 @@ func Load(ctx context.Context, store *database.Store, manifestPath string) (load
 		}
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("dataset %q must be a regular file", configured.Name)
+		}
+		// Ingesting the manifest would publish the flag and accepted answers
+		// as queryable events.
+		if os.SameFile(info, manifestInfo) {
+			return nil, fmt.Errorf("dataset %q path is the deployment manifest", configured.Name)
 		}
 		signature, err := datasetSignature(configured, path, info)
 		if err != nil {

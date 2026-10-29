@@ -481,6 +481,33 @@ func TestLoadConfinesDatasetPaths(t *testing.T) {
 	}
 }
 
+// A dataset cannot ingest the manifest, directly or through a link, since
+// that would make the flag and accepted answers queryable.
+func TestLoadRejectsManifestAsDataset(t *testing.T) {
+	for _, path := range []string{"challenge.yaml", "./challenge.yaml", "manifest-link.csv"} {
+		t.Run(path, func(t *testing.T) {
+			directory := t.TempDir()
+			manifestPath := filepath.Join(directory, "challenge.yaml")
+			manifest := "flag: striem{secret}\nquestions:\n  - id: q\n    title: T\n    prompt: P\n    acceptedAnswers: [secret]\n" +
+				"datasets:\n  - name: test\n    table: Test\n    path: " + path + "\n    format: csv\n    source: fixture\n    timestampPath: ts\n"
+			if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("challenge.yaml", filepath.Join(directory, "manifest-link.csv")); err != nil {
+				t.Fatal(err)
+			}
+			store, err := database.Open(filepath.Join(directory, "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			if _, err := Load(t.Context(), store, manifestPath); err == nil || !strings.Contains(err.Error(), "is the deployment manifest") {
+				t.Fatalf("Load error = %v, want the manifest to be rejected", err)
+			}
+		})
+	}
+}
+
 func TestChallengeLimitsCountUnicodeCharacters(t *testing.T) {
 	manifest := Manifest{Flag: strings.Repeat("界", 512), Questions: []Question{{ID: "unicode", Title: strings.Repeat("界", 120), Prompt: strings.Repeat("界", 8192), AcceptedAnswers: []string{strings.Repeat("界", 512)}}}}
 	if _, err := validateChallenge(manifest); err != nil {
