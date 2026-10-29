@@ -241,7 +241,7 @@ func init() {
 		}, true); err != nil {
 			return err
 		}
-		return nil
+		return restrictQueryConnection(connection)
 	}})
 }
 
