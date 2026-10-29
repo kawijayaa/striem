@@ -24,7 +24,7 @@ Status as verified on 2026-10-29. Each item names the check that verifies it.
 | Request bodies, queries, answers and results are bounded: 64 KiB, 32 KiB, 512 characters, and 1,000 rows or 64 MB. Queries stop after 5 s. | API tests; `internal/api/server.go` limits |
 | A query that outlives its 5-second deadline is interrupted repeatedly until it stops, so runaway queries cannot hold connections. The API stays responsive meanwhile, and limit errors explain themselves. | `TestRunawayQueriesStopAtTheirDeadline`, `TestQueryLimitErrorsAreExplained`, container test (6 runaway queries all stop at 5 s) |
 | Hostile queries keep server memory bounded (318 MB peak across range, make_list, cross join and strrep attacks). | Local load test |
-| The compiler does not panic or hang on hostile input. UDF panics are recovered. Regexes are RE2. | `FuzzCompileNeverPanics` (3.5M executions), `FuzzForensicUDFs`, `TestCompileTerminatesSafely` |
+| The compiler does not panic or hang on hostile input. UDF panics are recovered. Regexes are RE2. | `FuzzCompileNeverPanics` (5-minute runs seeded with every operator added since), `FuzzForensicUDFs` (including `parse_user_agent`), `TestCompileTerminatesSafely` |
 | `reduce`, `parse_user_agent`, `range`, `strrep` and sketches have input caps. | `TestReduceTermCap`, `TestParseUserAgent` |
 | `has` with a per-row term escapes it with `regex_quote`, so data cannot inject regex syntax. | `TestStringOperatorSemantics` |
 | The UI builds icons and results with DOM APIs, not HTML strings. | Code review: `web/src` has no `innerHTML` sinks |
@@ -39,6 +39,7 @@ Status as verified on 2026-10-29. Each item names the check that verifies it.
 | A solved task reports later wrong answers as wrong. | `TestInvestigationQuestionWorkflow`, container smoke test |
 | Screens render with no console errors: the workspace, results, JSON dialog, save-hunt dialog, hunts, all tasks, the completed challenge with its flag, mobile Query/Results/Investigate, and the native console. | Browser screenshot review |
 | A completed challenge reports all tasks solved. The Kusto service link appears only when a service is configured. | `features.spec.ts`, `native-console.spec.ts` |
+| The workspace, results, event dialog, tasks, hunts, mobile layout and native console have no WCAG 2.1 AA violations. Every keyboard-focusable control shows a focus indicator, and Tab moves through the workspace without traps. | `tests/e2e/accessibility.spec.ts` (axe-core) |
 | UI flows work at desktop and mobile widths with no console errors or CSP violations. Covered flows: queries, results, sorting, pivots, the JSON viewer, the timeline, saved hunts, history, autocomplete, tasks and flag, error recovery, and the native console. | 50 Playwright tests and a browser walkthrough |
 
 ## Known limitations

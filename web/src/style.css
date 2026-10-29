@@ -2469,6 +2469,7 @@ tbody tr.selected { background: #263f55; box-shadow: inset 2px 0 #75baf2; }
 .source-row, .field-row, .compact-row, .question-card { color: #d2d0ce; background: #252423; border-bottom-color: #3b3a39; }
 .source-row:hover, .field-row:hover, .compact-main:hover, .question-select:hover { color: #ffffff; background: #2b333a; }
 .source-row.selected { color: #f3f2f1; background: #263f55; box-shadow: inset 2px 0 #75baf2; }
+.source-row.selected .source-details small { color: #c8c6c4; }
 .source-details small, .source-state, .field-type, .compact-main small, .query-preview { color: #a19f9d; }
 .source-row.selected .source-state { color: #9fd0f5; }
 .field-search { background: #1b1a19; border-color: #6b6967; }

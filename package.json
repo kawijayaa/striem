@@ -20,6 +20,7 @@
     "@replit/codemirror-vim": "^6.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "esbuild": "^0.28.1",

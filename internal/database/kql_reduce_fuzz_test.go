@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// The reduce aggregate, parse_version, gettype_at and punycode must not
-// panic on arbitrary text, and punycode decoding inverts encoding.
+// The reduce aggregate, parse_version, gettype_at, parse_user_agent and
+// punycode must not panic on arbitrary text, and punycode decoding inverts
+// encoding.
 func FuzzForensicUDFs(f *testing.F) {
-	for _, seed := range []string{"fooZ1", "a -on- b", "1.2.3.4", `{"a":[1,"x"]}`, "", "Z", "\xff\xfe", "académie-française", "艺术"} {
+	for _, seed := range []string{"fooZ1", "a -on- b", "1.2.3.4", `{"a":[1,"x"]}`, "", "Z", "\xff\xfe", "académie-française", "艺术", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"} {
 		f.Add(seed, "Z")
 	}
 	f.Fuzz(func(t *testing.T, text, characters string) {
@@ -27,6 +28,9 @@ func FuzzForensicUDFs(f *testing.F) {
 		kqlParseVersion(text)
 		kqlGetType(text)
 		kqlGetTypeAt(text, "a", int64(-1), characters)
+		if _, err := kqlParseUserAgent(text, `["browser","os","device"]`); err != nil {
+			t.Fatalf("parse_user_agent(%q): %v", text, err)
+		}
 		kqlPunycodeDomainFromString(text)
 		kqlPunycodeDomainToString(text)
 		if encoded, ok := punycodeEncode(text); ok {
