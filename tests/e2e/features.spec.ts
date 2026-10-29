@@ -1297,3 +1297,28 @@ test('render annotations keep tabular results and report the visualization', asy
   await run(page, 3);
   await expect(page.locator('#query-stats')).toContainText('render columnchart "Counts"');
 });
+
+test('hostile column names, values and JSON keys render as text in every result view', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('dialog', dialog => { errors.push(`dialog: ${dialog.message()}`); void dialog.dismiss(); });
+  const payload = '<img src=x onerror="window.pwned=1">';
+  const query = `print ['<svg onload="window.pwned=1">'] = '${payload}', d = bag_pack('<script>window.pwned=1</script>', '${payload}'), TimeGenerated = now() | render table with (title='<img src=x onerror="window.pwned=1">')`;
+  await open(page, query);
+  await run(page, 1);
+  await expect(page.locator('#result-head')).toContainText('<svg onload="window.pwned=1">');
+  await expect(page.locator('#result-body')).toContainText(payload);
+  await page.getByRole('button', { name: /Open d JSON/ }).first().click();
+  await expect(page.locator('#raw-json')).toContainText('<script>window.pwned=1</script>');
+  await page.locator('#close-dialog').click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#mobile-run-query').click();
+  await expect(page.locator('.mobile-result-card')).toHaveCount(1);
+  await expect(page.locator('.mobile-result-card')).toContainText(payload);
+  await page.locator('.mobile-result-card-main').first().click();
+  // The JSON view escapes quotes, so match an unquoted part of the payload.
+  await expect(page.locator('#raw-json')).toContainText('<img src=x onerror=');
+  expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
+  expect(await page.locator('#results-panel img, #results-panel svg[onload], #raw-dialog img, script:not([src])').count()).toBe(0);
+  expect(errors).toEqual([]);
+});

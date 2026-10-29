@@ -92,6 +92,9 @@ func main() {
 				eventCount += dataset.EventCount
 			}
 			logger.Info("Deployment loaded", "datasets", len(datasets), "events", eventCount)
+			if state, err := store.ChallengeState(context.Background()); err == nil && state.Total > 0 && os.Getenv("STRIEM_ACCESS_KEY") == "" {
+				logger.Warn("Challenge questions are configured without STRIEM_ACCESS_KEY; anyone who can reach this deployment shares its progress and can read the flag once it is solved")
+			}
 		}
 	} else {
 		logger.Warn("STRIEM_CONFIG is not set; starting without events")
