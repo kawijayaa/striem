@@ -20,12 +20,15 @@ import (
 )
 
 type Manifest struct {
-	ChallengeName      string     `json:"challengeName" yaml:"challengeName"`
-	Flag               string     `json:"flag" yaml:"flag"`
-	SubmissionCooldown string     `json:"submissionCooldown" yaml:"submissionCooldown"`
-	FullTextIndex      bool       `json:"fullTextIndex" yaml:"fullTextIndex"`
-	Questions          []Question `json:"questions" yaml:"questions"`
-	Datasets           []Dataset  `json:"datasets" yaml:"datasets"`
+	ChallengeName      string `json:"challengeName" yaml:"challengeName"`
+	Flag               string `json:"flag" yaml:"flag"`
+	SubmissionCooldown string `json:"submissionCooldown" yaml:"submissionCooldown"`
+	// MaxSubmissionCooldown caps the cooldown, which doubles with each wrong
+	// answer after the tenth.
+	MaxSubmissionCooldown string     `json:"maxSubmissionCooldown" yaml:"maxSubmissionCooldown"`
+	FullTextIndex         bool       `json:"fullTextIndex" yaml:"fullTextIndex"`
+	Questions             []Question `json:"questions" yaml:"questions"`
+	Datasets              []Dataset  `json:"datasets" yaml:"datasets"`
 }
 
 type Question struct {
@@ -293,6 +296,17 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 		}
 		cooldown = parsed
 	}
+	maxCooldown := 2 * time.Minute
+	if strings.TrimSpace(manifest.MaxSubmissionCooldown) != "" {
+		parsed, err := time.ParseDuration(manifest.MaxSubmissionCooldown)
+		if err != nil {
+			return database.ChallengeDefinition{}, fmt.Errorf("maxSubmissionCooldown: %w", err)
+		}
+		if parsed < cooldown || parsed > time.Hour {
+			return database.ChallengeDefinition{}, fmt.Errorf("maxSubmissionCooldown must be between submissionCooldown and 1h")
+		}
+		maxCooldown = parsed
+	}
 	flag := strings.TrimSpace(manifest.Flag)
 	if len(manifest.Questions) > 0 && flag == "" {
 		return database.ChallengeDefinition{}, fmt.Errorf("flag is required when questions are configured")
@@ -303,7 +317,7 @@ func validateChallenge(manifest Manifest) (database.ChallengeDefinition, error) 
 	if len(manifest.Questions) > 100 {
 		return database.ChallengeDefinition{}, fmt.Errorf("questions cannot contain more than 100 entries")
 	}
-	challenge := database.ChallengeDefinition{Flag: flag, Cooldown: cooldown, Questions: make([]database.QuestionDefinition, 0, len(manifest.Questions))}
+	challenge := database.ChallengeDefinition{Flag: flag, Cooldown: cooldown, MaxCooldown: maxCooldown, Questions: make([]database.QuestionDefinition, 0, len(manifest.Questions))}
 	seen := make(map[string]struct{}, len(manifest.Questions))
 	for index, configured := range manifest.Questions {
 		configured.ID = strings.TrimSpace(configured.ID)

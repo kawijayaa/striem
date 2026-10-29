@@ -14,9 +14,29 @@ import (
 var ErrQuestionNotFound = errors.New("question not found")
 
 type ChallengeDefinition struct {
-	Flag      string
-	Cooldown  time.Duration
-	Questions []QuestionDefinition
+	Flag     string
+	Cooldown time.Duration
+	// MaxCooldown caps the escalating cooldown; at or below Cooldown, the
+	// cooldown never escalates.
+	MaxCooldown time.Duration
+	Questions   []QuestionDefinition
+}
+
+// escalationFreeAttempts is how many wrong answers a question takes at the
+// base cooldown. Each later one doubles the cooldown, up to MaxCooldown, so
+// a small answer space cannot be guessed exhaustively during an event.
+const escalationFreeAttempts = 10
+
+// cooldownAfter is the wait after a question's attempts wrong answers.
+func (c ChallengeDefinition) cooldownAfter(attempts int) time.Duration {
+	cooldown := c.Cooldown
+	for attempt := escalationFreeAttempts; attempt < attempts && cooldown > 0 && cooldown < c.MaxCooldown; attempt++ {
+		cooldown *= 2
+	}
+	if c.MaxCooldown > c.Cooldown && cooldown > c.MaxCooldown {
+		return c.MaxCooldown
+	}
+	return cooldown
 }
 
 type QuestionDefinition struct {
@@ -212,12 +232,12 @@ WHERE question_id = ? AND revision = ?`, answer, question.ID, question.Revision)
 		state, err := s.ChallengeState(ctx)
 		return AnswerResult{Correct: correct, AlreadySolved: true, State: state}, err
 	}
-	if lastAttempt.Valid && challenge.Cooldown > 0 {
+	if cooldown := challenge.cooldownAfter(attempts); lastAttempt.Valid && cooldown > 0 {
 		last, err := time.Parse(time.RFC3339Nano, lastAttempt.String)
 		if err != nil {
 			return AnswerResult{}, fmt.Errorf("parse last attempt time: %w", err)
 		}
-		if remaining := challenge.Cooldown - now.Sub(last); remaining > 0 {
+		if remaining := cooldown - now.Sub(last); remaining > 0 {
 			return AnswerResult{RetryAfter: remaining}, nil
 		}
 	}

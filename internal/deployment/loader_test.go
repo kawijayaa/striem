@@ -518,3 +518,20 @@ func TestChallengeLimitsCountUnicodeCharacters(t *testing.T) {
 		t.Fatal("513 character answer accepted")
 	}
 }
+
+func TestValidateChallengeMaxSubmissionCooldown(t *testing.T) {
+	question := Question{ID: "q", Title: "T", Prompt: "P", AcceptedAnswers: []string{"a"}}
+	defaults, err := validateChallenge(Manifest{Flag: "f", Questions: []Question{question}})
+	if err != nil || defaults.Cooldown != 3*time.Second || defaults.MaxCooldown != 2*time.Minute {
+		t.Fatalf("default cooldowns = %v..%v, %v", defaults.Cooldown, defaults.MaxCooldown, err)
+	}
+	configured, err := validateChallenge(Manifest{Flag: "f", SubmissionCooldown: "5s", MaxSubmissionCooldown: "10m", Questions: []Question{question}})
+	if err != nil || configured.MaxCooldown != 10*time.Minute {
+		t.Fatalf("configured cap = %v, %v", configured.MaxCooldown, err)
+	}
+	for _, value := range []string{"2s", "2h", "soon"} {
+		if _, err := validateChallenge(Manifest{Flag: "f", SubmissionCooldown: "5s", MaxSubmissionCooldown: value, Questions: []Question{question}}); err == nil {
+			t.Errorf("maxSubmissionCooldown %q was accepted", value)
+		}
+	}
+}

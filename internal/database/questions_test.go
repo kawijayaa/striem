@@ -140,3 +140,56 @@ func TestSolvedQuestionsAndConcurrentGuesses(t *testing.T) {
 		t.Fatalf("wrong answer after solve = %#v, %v", wrong, err)
 	}
 }
+
+// Wrong answers beyond the tenth double the cooldown up to its cap, so a
+// small answer space cannot be guessed exhaustively.
+func TestCooldownEscalatesAfterRepeatedWrongAnswers(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	challenge := ChallengeDefinition{
+		Flag: "flag{x}", Cooldown: time.Second, MaxCooldown: 5 * time.Second,
+		Questions: []QuestionDefinition{{ID: "q", Revision: 1, Title: "Q", Prompt: "P", AcceptedAnswers: []string{"right"}}},
+	}
+	if err := store.ConfigureChallenge(t.Context(), challenge); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	want := []time.Duration{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 5, 5}
+	for attempt, wait := range want {
+		wait *= time.Second
+		result, err := store.SubmitAnswer(t.Context(), "q", fmt.Sprintf("wrong-%d", attempt), now)
+		if err != nil || result.Correct || result.RetryAfter != 0 {
+			t.Fatalf("attempt %d = %#v, %v", attempt+1, result, err)
+		}
+		early, err := store.SubmitAnswer(t.Context(), "q", "right", now.Add(wait-time.Millisecond))
+		if err != nil || early.RetryAfter != time.Millisecond {
+			t.Fatalf("after %d wrong answers, retry = %v, %v; want a %v cooldown", attempt+1, early.RetryAfter, err, wait)
+		}
+		now = now.Add(wait)
+	}
+	solved, err := store.SubmitAnswer(t.Context(), "q", "right", now)
+	if err != nil || !solved.Correct {
+		t.Fatalf("solve after escalation = %#v, %v", solved, err)
+	}
+}
+
+func TestCooldownAfter(t *testing.T) {
+	for _, test := range []struct {
+		challenge ChallengeDefinition
+		attempts  int
+		want      time.Duration
+	}{
+		{ChallengeDefinition{Cooldown: 0, MaxCooldown: time.Minute}, 50, 0},
+		{ChallengeDefinition{Cooldown: 3 * time.Second}, 50, 3 * time.Second},
+		{ChallengeDefinition{Cooldown: 3 * time.Second, MaxCooldown: 2 * time.Minute}, 10, 3 * time.Second},
+		{ChallengeDefinition{Cooldown: 3 * time.Second, MaxCooldown: 2 * time.Minute}, 11, 6 * time.Second},
+		{ChallengeDefinition{Cooldown: 3 * time.Second, MaxCooldown: 2 * time.Minute}, 1 << 30, 2 * time.Minute},
+	} {
+		if got := test.challenge.cooldownAfter(test.attempts); got != test.want {
+			t.Errorf("cooldownAfter(%d) with %v..%v = %v, want %v", test.attempts, test.challenge.Cooldown, test.challenge.MaxCooldown, got, test.want)
+		}
+	}
+}
