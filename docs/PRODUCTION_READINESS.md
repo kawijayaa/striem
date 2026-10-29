@@ -1,6 +1,6 @@
 # Production readiness
 
-Status as verified on 2026-10-29. Each item names the check that verifies it.
+Status as verified on 2026-10-30. Each item names the check that verifies it.
 
 ## Build and deployment
 
@@ -23,7 +23,12 @@ Status as verified on 2026-10-29. Each item names the check that verifies it.
 | Concurrent guesses cannot bypass the submission cooldown. | `TestSolvedQuestionsAndConcurrentGuesses` (30 parallel guesses record 1 attempt) |
 | Request bodies, queries, answers and results are bounded: 64 KiB, 32 KiB, 512 characters, and 1,000 rows or 64 MB. Queries stop after 5 s. | API tests; `internal/api/server.go` limits |
 | A query that outlives its 5-second deadline is interrupted repeatedly until it stops, so runaway queries cannot hold connections. The API stays responsive meanwhile, and limit errors explain themselves. | `TestRunawayQueriesStopAtTheirDeadline`, `TestQueryLimitErrorsAreExplained`, container test (6 runaway queries all stop at 5 s) |
-| Hostile queries keep server memory bounded (318 MB peak across range, make_list, cross join and strrep attacks). | Local load test |
+| Hostile queries keep server memory bounded (318 MB peak across range, make_list, cross join and strrep attacks). SQLite may allocate at most 1 GiB (`STRIEM_SQLITE_MEMORY_LIMIT`), so a GROUP BY over many large distinct values, which once reached 7 GB in 5 s, fails with an explanation. | Local load test, `TestQueriesStopAtTheMemoryLimit` |
+| One 5-second deadline covers compilation and execution. Pivot and bag_unpack key discovery share it, so one request cannot chain discovery queries for minutes (previously 37 s per request). | `TestDiscoveryQueriesShareTheQueryDeadline` |
+| Each client runs at most two queries at once, and its further queries queue behind them, so a few clients cannot hold every query connection while teammates sharing an address still get answers. Behind a reverse proxy, `STRIEM_CLIENT_IP_HEADER` identifies clients. | `TestClientKeys`, `TestClientLimiterQueuesEachClient`, `TestRunawayQueriesStopAtTheirDeadline` |
+| Failures a query causes itself (limits, `assert`) are logged at debug level, and unexpected query errors at most 30 times a minute, so clients cannot flood the logs. | `TestQueryCausedFailuresAreNotLoggedAsErrors`, `TestLogLimiterBoundsErrorsPerMinute` |
+| A dataset cannot ingest the manifest, which holds the flag and answers. | `TestLoadRejectsManifestAsDataset` |
+| Queries cannot reach progress tables, SQLite internals, files or the network: hostile table names, `externaldata`, `load_extension`, `readfile`, plugins, cross-database references, and identifiers or pivot/bag_unpack keys built from quotes and SQL are rejected or quoted. | Probe battery against a running server (2026-10-30) |
 | The compiler does not panic or hang on hostile input. UDF panics are recovered. Regexes are RE2. | `FuzzCompileNeverPanics` (5-minute runs seeded with every operator added since), `FuzzForensicUDFs` (including `parse_user_agent`), `TestCompileTerminatesSafely` |
 | `reduce`, `parse_user_agent`, `range`, `strrep` and sketches have input caps. | `TestReduceTermCap`, `TestParseUserAgent` |
 | `has` with a per-row term escapes it with `regex_quote`, so data cannot inject regex syntax. | `TestStringOperatorSemantics` |

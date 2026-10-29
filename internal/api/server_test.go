@@ -1593,6 +1593,7 @@ func TestQueryLimitErrorsAreExplained(t *testing.T) {
 
 // Concurrent runaway queries all stop at their deadline, so none holds a
 // connection forever, and the rest of the API stays responsive meanwhile.
+// One client's queries beyond its concurrency limit wait or are refused.
 // go-sqlite3 interrupts only once and SQLite can drop that interrupt.
 func TestRunawayQueriesStopAtTheirDeadline(t *testing.T) {
 	server := serveStore(t, testStore(t))
@@ -1628,9 +1629,15 @@ func TestRunawayQueriesStopAtTheirDeadline(t *testing.T) {
 		t.Fatalf("runaway queries still running after %v", time.Since(started))
 	}
 	close(statuses)
+	counts := map[int]int{}
 	for status := range statuses {
-		if status != http.StatusBadRequest {
-			t.Errorf("runaway query status = %d, want 400", status)
-		}
+		counts[status]++
+	}
+	// One client runs maxClientQueries at once. Queries beyond the waiting
+	// limit are refused, and waiters either run to their own deadline or
+	// give up waiting.
+	if counts[http.StatusBadRequest]+counts[http.StatusTooManyRequests] != 12 ||
+		counts[http.StatusBadRequest] < maxClientQueries || counts[http.StatusTooManyRequests] < 12-maxClientQueries-maxClientWaiting {
+		t.Errorf("runaway query statuses = %v", counts)
 	}
 }

@@ -40,6 +40,11 @@ type Server struct {
 	challengeName string
 	prepareQuery  func(context.Context, string) (*sql.Stmt, error)
 	nativeKusto   NativeKustoConfig
+	// queryLimiter caps each client's concurrent queries; clientIPHeader
+	// names the trusted proxy header that identifies clients, if any.
+	queryLimiter   clientLimiter
+	clientIPHeader string
+	errorLogs      logLimiter
 }
 
 func New(store *database.Store, logger *slog.Logger) *Server {
@@ -176,11 +181,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/fields", s.whenReady(s.fields))
 	mux.HandleFunc("GET /api/questions", s.whenReady(s.questions))
 	mux.HandleFunc("POST /api/questions/{id}/answer", s.whenReady(requireSameOrigin(s.submitAnswer)))
-	mux.HandleFunc("POST /api/query", s.whenReady(requireSameOrigin(s.query)))
-	mux.HandleFunc("POST /api/query/validate", s.whenReady(requireSameOrigin(s.validateQuery)))
-	mux.HandleFunc("POST /api/kusto/query", s.whenReady(requireSameOrigin(s.nativeQuery)))
+	mux.HandleFunc("POST /api/query", s.whenReady(requireSameOrigin(s.limitClientQueries(s.query))))
+	mux.HandleFunc("POST /api/query/validate", s.whenReady(requireSameOrigin(s.limitClientQueries(s.validateQuery))))
+	mux.HandleFunc("POST /api/kusto/query", s.whenReady(requireSameOrigin(s.limitClientQueries(s.nativeQuery))))
 	mux.HandleFunc("GET /api/kusto/capabilities", s.whenReady(s.nativeCapabilities))
-	mux.HandleFunc("POST /api/kusto/management", s.whenReady(requireSameOrigin(s.nativeManagement)))
+	mux.HandleFunc("POST /api/kusto/management", s.whenReady(requireSameOrigin(s.limitClientQueries(s.nativeManagement))))
 
 	static, err := fs.Sub(webassets.Files, "dist")
 	if err != nil {
@@ -387,7 +392,9 @@ func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("Could not submit investigation answer", "question", r.PathValue("id"), "error", err)
+		if s.errorLogs.allow(time.Now()) {
+			s.logger.Error("Could not submit investigation answer", "question", r.PathValue("id"), "error", err)
+		}
 		writeError(w, http.StatusInternalServerError, "could not submit answer", nil)
 		return
 	}
@@ -403,14 +410,16 @@ func (s *Server) submitAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) query(w http.ResponseWriter, r *http.Request) {
-	compiled, ok := s.compileQuery(w, r, false)
+	// One deadline covers compilation, whose pivot and bag_unpack key
+	// discovery runs queries, and execution.
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeLimit)
+	defer cancel()
+	started := time.Now()
+	compiled, ok := s.compileQuery(ctx, w, r, false)
 	if !ok {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	started := time.Now()
 	var columns []string
 	var results []map[string]any
 	opened := false
@@ -420,33 +429,8 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 		columns, results, err = scanRows(rows, compiled.DynamicColumns, compiled.BooleanColumns, compiled.TimespanColumns)
 		return err
 	})
-	if err != nil && !opened {
-		s.logger.Error("Query execution failed", "error", err)
-		if errors.Is(err, context.DeadlineExceeded) {
-			writeQueryError(w, errQueryTimeout)
-			return
-		}
-		writeQueryError(w, invalidSQLExpressionError())
-		return
-	}
 	if err != nil {
-		s.logger.Error("Could not read query result", "error", err)
-		if errors.Is(err, errResultTooLarge) {
-			writeQueryError(w, err)
-			return
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			writeQueryError(w, errQueryTimeout)
-			return
-		}
-		// SQL errors during execution carry Striem's own runtime messages,
-		// such as a function's size limit or a failed assert().
-		var executionError sqlite3.Error
-		if errors.As(err, &executionError) && executionError.Code == sqlite3.ErrError {
-			writeQueryError(w, &kql.Error{Message: executionError.Error(), Line: 1, Column: 1})
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "could not read query result", nil)
+		s.writeExecutionError(w, err, opened)
 		return
 	}
 	response := map[string]any{
@@ -461,15 +445,54 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// writeExecutionError explains why a query failed. Failures the query
+// causes itself, such as its limits or a failed assert(), are logged only at
+// debug level, so a client repeating them cannot flood the server logs.
+// Unexpected failures are logged as errors, at a bounded rate.
+func (s *Server) writeExecutionError(w http.ResponseWriter, err error, opened bool) {
+	var queryError *kql.Error
+	var executionError sqlite3.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		queryError = errQueryTimeout
+	case isOutOfMemory(err):
+		queryError = errQueryMemory
+	case errors.Is(err, errResultTooLarge):
+		queryError = errResultTooLarge
+	case opened && errors.As(err, &executionError) && executionError.Code == sqlite3.ErrError:
+		// SQL errors during execution carry Striem's own runtime messages,
+		// such as a function's size limit or a failed assert().
+		queryError = &kql.Error{Message: executionError.Error(), Line: 1, Column: 1}
+	}
+	if queryError != nil {
+		s.logger.Debug("Query stopped", "error", err)
+		writeQueryError(w, queryError)
+		return
+	}
+	if !opened {
+		if s.errorLogs.allow(time.Now()) {
+			s.logger.Error("Query execution failed", "error", err)
+		}
+		writeQueryError(w, invalidSQLExpressionError())
+		return
+	}
+	if s.errorLogs.allow(time.Now()) {
+		s.logger.Error("Could not read query result", "error", err)
+	}
+	writeError(w, http.StatusInternalServerError, "could not read query result", nil)
+}
+
 func (s *Server) validateQuery(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.compileQuery(w, r, true); !ok {
+	ctx, cancel := context.WithTimeout(r.Context(), queryTimeLimit)
+	defer cancel()
+	if _, ok := s.compileQuery(ctx, w, r, true); !ok {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bool) (kql.CompiledQuery, bool) {
+func (s *Server) compileQuery(ctx context.Context, w http.ResponseWriter, r *http.Request, prepare bool) (kql.CompiledQuery, bool) {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", nil)
 		return kql.CompiledQuery{}, false
@@ -503,9 +526,13 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 		Parameters:    localQueryParameters(request.Parameters),
 		Tables:        tableCatalog,
 		FullTextIndex: s.store.FullTextIndexEnabled(),
-		BagKeys:       s.bagKeys(r.Context()),
-		Values:        s.discoveredValues(r.Context()),
+		BagKeys:       s.bagKeys(ctx),
+		Values:        s.discoveredValues(ctx),
 	})
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		writeQueryError(w, errQueryTimeout)
+		return kql.CompiledQuery{}, false
+	}
 	if err != nil {
 		writeQueryError(w, err)
 		return kql.CompiledQuery{}, false
@@ -513,7 +540,7 @@ func (s *Server) compileQuery(w http.ResponseWriter, r *http.Request, prepare bo
 	if !prepare {
 		return compiled, true
 	}
-	statement, err := s.prepareQuery(r.Context(), compiled.SQL)
+	statement, err := s.prepareQuery(ctx, compiled.SQL)
 	if err != nil {
 		writeQueryError(w, invalidSQLExpressionError())
 		return kql.CompiledQuery{}, false
@@ -550,7 +577,18 @@ const (
 	maxResultBytes = 64 << 20
 )
 
+// queryTimeLimit bounds a query's compilation and execution together.
+const queryTimeLimit = 5 * time.Second
+
 var errQueryTimeout = &kql.Error{Message: "query exceeded the 5-second time limit; filter earlier, or add take or summarize", Line: 1, Column: 1}
+
+// errQueryMemory reports a query stopped by the SQLite memory limit.
+var errQueryMemory = &kql.Error{Message: "query needed more memory than the server allows; filter earlier, or add take or summarize", Line: 1, Column: 1}
+
+func isOutOfMemory(err error) bool {
+	var sqliteError sqlite3.Error
+	return errors.As(err, &sqliteError) && sqliteError.Code == sqlite3.ErrNomem
+}
 
 // maxSafeInteger is JavaScript's Number.MAX_SAFE_INTEGER.
 const maxSafeInteger = 1<<53 - 1

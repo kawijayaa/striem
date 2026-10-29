@@ -58,6 +58,10 @@ Read-only management commands use the logical database namespace `striem`: `.sho
 
 The local query API parses and compiles queries into parameterized SQLite SQL. `POST /api/query/validate` stops after compilation, while `POST /api/query` executes the same compiled representation with a five-second deadline and a 1,000-row result bound.
 
+Each client may run two queries at a time. Up to eight more wait as long as five seconds for one of the client's slots; beyond that, queries get HTTP 429. Clients are identified by their connection address, with IPv6 addresses grouped by /64. Behind a reverse proxy every request comes from the proxy, so set `STRIEM_CLIENT_IP_HEADER` to the header the proxy writes the client address into, such as `CF-Connecting-IP` for Cloudflare Tunnel, `X-Real-IP`, or `X-Forwarded-For` (Striem uses its last entry). Set it only when Striem is reachable solely through that proxy: clients that reach Striem directly can forge the header.
+
+Striem has no user accounts. Anyone who can reach a deployment can query it, submit answers and, once every question is solved, read the flag. For team CTFs, give each team its own deployment behind an unguessable URL or an authenticating proxy.
+
 [Query parameters](docs/QUERY_PARAMETERS.md) can supply typed JSON values through
 the local API or scalar literal defaults through `declare query_parameters(...)`.
 
@@ -74,6 +78,8 @@ Configuration:
 | `STRIEM_DATA_DIR` | `./data` | Persistent data directory |
 | `STRIEM_CONFIG` | unset | Deployment YAML manifest |
 | `STRIEM_MAX_INPUT_BYTES` | `2147483648` | Maximum expanded input size in bytes |
+| `STRIEM_SQLITE_MEMORY_LIMIT` | `1073741824` | Memory SQLite may allocate, in bytes; a query beyond it fails |
+| `STRIEM_CLIENT_IP_HEADER` | unset | Header a trusted reverse proxy sets to the client address, such as `CF-Connecting-IP` |
 | `STRIEM_KUSTO_ENDPOINT` | unset | Optional native Kusto cluster HTTPS URL |
 | `STRIEM_KUSTO_DATABASE` | unset | Native service database |
 | `STRIEM_KUSTO_TOKEN_FILE` | unset | Server-side bearer token file |

@@ -62,6 +62,10 @@ func Open(path string) (*Store, error) {
 	db.SetMaxIdleConns(readerConnections)
 
 	store := &Store{db: db, queryDB: db}
+	if err := store.LimitMemory(context.Background(), DefaultMemoryLimit); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.initialize(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -80,6 +84,24 @@ func Open(path string) (*Store, error) {
 		store.queryDB = queryDB
 	}
 	return store, nil
+}
+
+// DefaultMemoryLimit is the heap SQLite may use across all connections.
+const DefaultMemoryLimit = 1 << 30
+
+// LimitMemory caps the memory SQLite allocates in this process. Temporary
+// b-trees live in memory, so without a cap one GROUP BY over many large
+// distinct values could take gigabytes within the query deadline and get the
+// server killed. A query past the cap fails with SQLITE_NOMEM. Page caches
+// shrink from half the cap, so they do not crowd queries out.
+func (s *Store) LimitMemory(ctx context.Context, limit int64) error {
+	if limit <= 0 {
+		return fmt.Errorf("SQLite memory limit must be positive")
+	}
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA soft_heap_limit = %d; PRAGMA hard_heap_limit = %d", limit/2, limit)); err != nil {
+		return fmt.Errorf("limit SQLite memory: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) initialize(ctx context.Context) error {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -29,9 +30,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+	if value := os.Getenv("STRIEM_SQLITE_MEMORY_LIMIT"); value != "" {
+		limit, err := strconv.ParseInt(value, 10, 64)
+		if err == nil {
+			err = store.LimitMemory(context.Background(), limit)
+		}
+		if err != nil {
+			logger.Error("STRIEM_SQLITE_MEMORY_LIMIT must be a positive number of bytes", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	manifestPath := os.Getenv("STRIEM_CONFIG")
 	apiServer := api.New(store, logger)
+	apiServer.SetClientIPHeader(os.Getenv("STRIEM_CLIENT_IP_HEADER"))
 	nativeKusto, err := nativeKustoFromEnv()
 	if err == nil {
 		err = apiServer.SetNativeKusto(nativeKusto)
