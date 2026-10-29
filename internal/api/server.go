@@ -45,6 +45,7 @@ type Server struct {
 	queryLimiter   clientLimiter
 	clientIPHeader string
 	errorLogs      logLimiter
+	accessKeyHash  []byte
 }
 
 func New(store *database.Store, logger *slog.Logger) *Server {
@@ -192,7 +193,7 @@ func (s *Server) Handler() http.Handler {
 		panic(err)
 	}
 	mux.Handle("/", http.FileServerFS(static))
-	return s.logRequests(securityHeaders(mux))
+	return s.logRequests(securityHeaders(s.requireAccessKey(mux)))
 }
 
 // contentSecurityPolicy allows only the bundled scripts, fonts and API.

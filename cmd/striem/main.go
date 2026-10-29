@@ -44,6 +44,10 @@ func main() {
 	manifestPath := os.Getenv("STRIEM_CONFIG")
 	apiServer := api.New(store, logger)
 	apiServer.SetClientIPHeader(os.Getenv("STRIEM_CLIENT_IP_HEADER"))
+	if err := apiServer.SetAccessKey(os.Getenv("STRIEM_ACCESS_KEY")); err != nil {
+		logger.Error("Invalid STRIEM_ACCESS_KEY", "error", err)
+		os.Exit(1)
+	}
 	nativeKusto, err := nativeKustoFromEnv()
 	if err == nil {
 		err = apiServer.SetNativeKusto(nativeKusto)
